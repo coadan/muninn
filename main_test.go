@@ -646,11 +646,64 @@ func TestOwnedOperationFailureReasonsSeparateExpectedFailures(t *testing.T) {
 	if got := record.OwnedOperationFailureReasons["bwb/test"]["test failure"]; got != 1 {
 		t.Fatalf("test failure reasons=%d want 1", got)
 	}
+	if got := record.Activity[sessionActivityKey("owned-operation-friction", "bwb/test")]; !got.IsZero() {
+		t.Fatalf("expected product failure refreshed friction activity: %s", got)
+	}
 	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)
 	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
 	actionable, expected := ownedOperationFailureCounts("bwb/test", report.Summary.OwnedOperationFailureReasons["bwb/test"])
 	if actionable != 0 || expected != 1 {
 		t.Fatalf("failure split=(%d,%d) want (0,1)", actionable, expected)
+	}
+}
+
+func TestOwnedOperationFrictionActivityIgnoresLaterSuccessfulCalls(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	frictionAt := generatedAt.Add(-10 * time.Minute)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      workspaceRoot,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt:      frictionAt.Add(-time.Second),
+				Kind:            sessionEventToolCall,
+				ToolName:        "exec_command",
+				OwnedOperations: []string{"bwb/test"},
+			},
+			{
+				OccurredAt:      frictionAt,
+				CallOccurredAt:  frictionAt.Add(-time.Second),
+				Kind:            sessionEventToolOutput,
+				ToolName:        "exec_command",
+				Failed:          true,
+				FailureReason:   "test harness protocol",
+				OwnedOperations: []string{"bwb/test"},
+			},
+			{
+				OccurredAt:      generatedAt.Add(-time.Second),
+				Kind:            sessionEventToolCall,
+				ToolName:        "exec_command",
+				OwnedOperations: []string{"bwb/test"},
+			},
+			{
+				OccurredAt:      generatedAt,
+				CallOccurredAt:  generatedAt.Add(-time.Second),
+				Kind:            sessionEventToolOutput,
+				ToolName:        "exec_command",
+				OwnedOperations: []string{"bwb/test"},
+			},
+		},
+	}
+	record, err := sessionRecordFromNormalized(session, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt, ownershipCatalog{})
+	if err != nil {
+		t.Fatalf("normalize session: %v", err)
+	}
+	if got := record.Activity[sessionActivityKey("owned-operation", "bwb/test")]; !got.Equal(generatedAt) {
+		t.Fatalf("operation activity=%s want %s", got, generatedAt)
+	}
+	if got := record.Activity[sessionActivityKey("owned-operation-friction", "bwb/test")]; !got.Equal(frictionAt) {
+		t.Fatalf("friction activity=%s want %s", got, frictionAt)
 	}
 }
 

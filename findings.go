@@ -99,7 +99,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Count:    metrics.Calls,
 			Sessions: metrics.Sessions,
 			Target:   operation,
-			LastSeen: sessionFindingLastSeen(report, "owned-operation", operation),
+			LastSeen: ownedOperationFindingLastSeen(report, operation, actionableFailures, metrics.TruncatedCalls),
 			score:    650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + int(metrics.EstimatedOutputTokens/5_000),
 		})
 	}
@@ -1198,6 +1198,20 @@ func ownedOperationExpectedFailure(operation, reason string) bool {
 	}
 	name := strings.ToLower(operation[strings.LastIndex(operation, "/")+1:])
 	return reason == "other non-zero exit" && downstreamCheckName(name)
+}
+
+func ownedOperationFindingLastSeen(
+	report codexSessionInsightsReport,
+	operation string,
+	actionableFailures,
+	truncatedCalls int,
+) string {
+	if actionableFailures >= 2 || truncatedCalls >= 3 {
+		if friction := sessionFindingActivity(report, "owned-operation-friction", operation); !friction.IsZero() {
+			return formatSessionFindingTime(friction)
+		}
+	}
+	return sessionFindingLastSeen(report, "owned-operation", operation)
 }
 
 func formatOwnedOperationActionableReasons(operation string, reasons map[string]codexOccurrenceMetrics) string {

@@ -69,6 +69,8 @@ func TestBuildSessionFindingsFlagsOneVeryLongInlineToolCall(t *testing.T) {
 
 func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	latestCall := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	latestFriction := latestCall.Add(-time.Hour)
 	report.Summary.OwnedOperations["bwb/run"] = codexOwnedOperationMetrics{
 		Calls:       30,
 		Sessions:    4,
@@ -82,6 +84,8 @@ func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing
 		"port collision":          {Count: 2, Sessions: 2},
 		"test failure":            {Count: 5, Sessions: 3},
 	}
+	report.Summary.Activity[sessionActivityKey("owned-operation", "bwb/run")] = latestCall
+	report.Summary.Activity[sessionActivityKey("owned-operation-friction", "bwb/run")] = latestFriction
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 || findings[0].Category != "owned-operation" {
 		t.Fatalf("owned-operation finding mismatch: %#v", findings)
@@ -98,6 +102,9 @@ func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing
 	}
 	if strings.Contains(evidence, "port collision") || strings.Contains(evidence, "test failure 5") {
 		t.Fatalf("evidence should contain only the top three actionable reasons: %q", evidence)
+	}
+	if findings[0].LastSeen != latestFriction.Format(time.RFC3339) {
+		t.Fatalf("last seen=%q want latest friction %s", findings[0].LastSeen, latestFriction)
 	}
 }
 
