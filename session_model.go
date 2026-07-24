@@ -78,6 +78,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			record.Completed = true
 		case sessionEventCompaction:
 			record.Compactions++
+			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
 		case sessionEventToken:
 			if event.Tokens.TotalTokens >= record.Tokens.TotalTokens {
 				record.Tokens = event.Tokens
@@ -93,6 +94,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				metrics.Bytes += event.InlineBytes
 				metrics.MaxBytes = max(metrics.MaxBytes, event.InlineBytes)
 				record.InlineOrchestrationByTool[event.ToolName] = metrics
+				touchSessionActivity(record.Activity, "inline", "", event.OccurredAt)
 			}
 			record.ToolCallsByName[event.ToolName]++
 			addCodexToolMetrics(record.ToolMetricsByName, event.ToolName, 1, false, false, 0)
@@ -101,9 +103,11 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			if event.Shape != "" {
 				addCodexToolMetrics(record.MixedShellShapes, event.Shape, 1, false, false, 0)
+				touchSessionActivity(record.Activity, "shape", event.Shape, event.OccurredAt)
 			}
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 1, false, false, 0)
+				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
 			ownedOperations := event.OwnedOperations
 			if len(ownedOperations) == 0 {
@@ -115,6 +119,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 					target = record.OwnedOperationAmbiguous
 				}
 				addCodexToolMetrics(target, operation, 1, false, false, 0)
+				touchSessionActivity(record.Activity, "owned-operation", operation, event.OccurredAt)
 			}
 			targets := event.Targets
 			if len(targets) == 0 {
@@ -127,10 +132,13 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 					metrics.SearchReadLoops++
 				}
 				record.ReadTargets[target] = metrics
+				touchSessionActivity(record.Activity, "read", target, event.OccurredAt)
 			}
 			if event.FirstFamily != "" {
 				if previousCommand.LastFamily != "" && previousCommandRound == event.ToolRound-1 {
-					record.CrossCallTransitions[previousCommand.LastFamily+" -> "+event.FirstFamily]++
+					transition := previousCommand.LastFamily + " -> " + event.FirstFamily
+					record.CrossCallTransitions[transition]++
+					touchSessionActivity(record.Activity, "transition", transition, event.OccurredAt)
 				}
 				previousCommand = event
 				previousCommandRound = event.ToolRound
@@ -149,6 +157,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				record.FailedToolCalls++
 				record.FailureReasons[event.FailureReason]++
 				addCodexFailureContext(record.FailureContexts, event.FailureReason, event.FailureContext)
+				touchSessionActivity(record.Activity, "failure", event.FailureReason+"\x00"+event.FailureContext, event.OccurredAt)
 			}
 			if event.ToolName != "" {
 				addCodexToolMetrics(record.ToolMetricsByName, event.ToolName, 0, event.Failed, event.Truncated, event.OutputBytes)
@@ -158,9 +167,11 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			if event.Shape != "" {
 				addCodexToolMetrics(record.MixedShellShapes, event.Shape, 0, event.Failed, event.Truncated, event.OutputBytes)
+				touchSessionActivity(record.Activity, "shape", event.Shape, event.OccurredAt)
 			}
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 0, event.Failed, event.Truncated, event.OutputBytes)
+				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
 			ownedOperations := event.OwnedOperations
 			if len(ownedOperations) == 0 {
@@ -174,6 +185,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 					target = record.OwnedOperationAmbiguous
 				}
 				addCodexToolMetrics(target, operation, 0, event.Failed, event.Truncated, event.OutputBytes)
+				touchSessionActivity(record.Activity, "owned-operation", operation, event.OccurredAt)
 				if !event.Failed {
 					continue
 				}
@@ -187,6 +199,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		return codexSessionRecord{}, nil
 	}
 	record.Task = codexTaskName(workspaceRoot, record.CWD)
+	touchSessionActivity(record.Activity, "task", record.Task, record.EndedAt)
 	return record, nil
 }
 
@@ -208,6 +221,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		ProgressStalls:               map[string]codexWaitMetrics{},
 		ExpectedWaits:                map[string]codexWaitMetrics{},
 		OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
+		Activity:                     map[string]time.Time{},
 	}
 }
 
@@ -226,6 +240,7 @@ func recordOversizedOutput(record codexSessionRecord, event normalizedSessionEve
 	metrics.OutputBytes += event.OutputBytes
 	metrics.MaxOutputBytes = max(metrics.MaxOutputBytes, event.OutputBytes)
 	record.OversizedOutputs[context] = metrics
+	touchSessionActivity(record.Activity, "oversized-output", context, event.OccurredAt)
 }
 
 func oversizedOutputContext(event normalizedSessionEvent, ownedOperations []string) string {
@@ -258,6 +273,11 @@ func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent,
 	metrics.Calls++
 	metrics.Seconds += int64(duration.Seconds())
 	target[context] = metrics
+	kind := "progress-stall"
+	if expectedProgressWait(event, ownedOperations) {
+		kind = "expected-wait"
+	}
+	touchSessionActivity(record.Activity, kind, context, event.OccurredAt)
 }
 
 func progressWaitContext(event normalizedSessionEvent, ownedOperations []string) string {

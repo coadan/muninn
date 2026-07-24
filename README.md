@@ -63,7 +63,9 @@ family totals and `--details` for command, transition, source-target, failure,
 and output rankings. Use `--focus` with `tooling`, `instructions`, `interface`,
 `structure`, `discovery`, `failures`, or `loops` to narrow the action queue
 without loading details. Use `output` to isolate individual oversized tool
-responses.
+responses. Findings are ordered by most recent supporting activity, show a
+privacy-safe relative `Last seen` age, and retain the exact timestamp in JSON.
+This keeps already-fixed historical friction from outranking current work.
 
 Muninn highlights:
 
