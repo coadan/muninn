@@ -24,6 +24,20 @@ type codexTaskEpisode struct {
 	Families        map[string]int
 	OwnedOperations map[string]int
 	TargetCohorts   map[string]int
+	Phases          map[string]taskPhaseCost
+	currentPhase    string
+	lastObservedAt  time.Time
+	delivered       bool
+	reworkActive    bool
+}
+
+type taskPhaseCost struct {
+	Tokens          codexTokenUsage
+	ToolCalls       int
+	FailedCalls     int
+	Compactions     int
+	ToolOutputBytes int64
+	DurationSeconds int64
 }
 
 type deliveryReworkMetrics struct {
@@ -561,6 +575,7 @@ func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncr
 	if episode.EndedAt.IsZero() || event.OccurredAt.After(episode.EndedAt) {
 		episode.EndedAt = event.OccurredAt
 	}
+	episode.observePhase(event, tokenIncrement, operations)
 	switch event.Kind {
 	case sessionEventToken:
 		addCodexTokenUsage(&episode.Tokens, tokenIncrement)
@@ -608,6 +623,128 @@ func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncr
 	}
 }
 
+func (episode *codexTaskEpisode) observePhase(
+	event normalizedSessionEvent,
+	tokenIncrement codexTokenUsage,
+	operations []string,
+) {
+	if episode.Phases == nil {
+		episode.Phases = map[string]taskPhaseCost{}
+	}
+	if episode.currentPhase == "" {
+		episode.currentPhase = "discovery"
+	}
+	if !episode.lastObservedAt.IsZero() && event.OccurredAt.After(episode.lastObservedAt) {
+		metrics := episode.Phases[episode.currentPhase]
+		metrics.DurationSeconds += int64(event.OccurredAt.Sub(episode.lastObservedAt).Seconds())
+		episode.Phases[episode.currentPhase] = metrics
+	}
+	episode.lastObservedAt = event.OccurredAt
+
+	phase := episode.currentPhase
+	if event.Kind == sessionEventToolCall {
+		phase = episode.phaseForToolCall(event, operations)
+		episode.currentPhase = phase
+	}
+	if event.Kind == sessionEventToolOutput {
+		phase = episode.phaseForToolOutput(event, operations)
+	}
+	metrics := episode.Phases[phase]
+	switch event.Kind {
+	case sessionEventToken:
+		addCodexTokenUsage(&metrics.Tokens, tokenIncrement)
+	case sessionEventToolCall:
+		metrics.ToolCalls++
+	case sessionEventToolOutput:
+		metrics.ToolOutputBytes += event.OutputBytes
+		if event.Failed && !event.OperationContinues {
+			metrics.FailedCalls++
+		}
+		if !event.Failed && !event.OperationContinues && deliveryOperation(event, operations) {
+			episode.delivered = true
+			episode.reworkActive = false
+		}
+	case sessionEventCompaction:
+		metrics.Compactions++
+	}
+	episode.Phases[phase] = metrics
+}
+
+func (episode *codexTaskEpisode) phaseForToolCall(
+	event normalizedSessionEvent,
+	operations []string,
+) string {
+	if deliveryOperation(event, operations) {
+		return "delivery"
+	}
+	if episode.delivered && reviewStart(event, operations) {
+		episode.reworkActive = true
+	}
+	if episode.reworkActive {
+		return "rework"
+	}
+	if event.ToolName == "apply_patch" {
+		return "editing"
+	}
+	if verificationOperation(event, operations) {
+		return "verification"
+	}
+	if discoveryOperation(event, operations) {
+		return "discovery"
+	}
+	return episode.currentPhase
+}
+
+func (episode codexTaskEpisode) phaseForToolOutput(
+	event normalizedSessionEvent,
+	operations []string,
+) string {
+	if deliveryOperation(event, operations) {
+		return "delivery"
+	}
+	if episode.reworkActive {
+		return "rework"
+	}
+	if verificationOperation(event, operations) {
+		return "verification"
+	}
+	if discoveryOperation(event, operations) {
+		return "discovery"
+	}
+	return episode.currentPhase
+}
+
+func verificationOperation(event normalizedSessionEvent, operations []string) bool {
+	switch event.Family {
+	case "tests", "build, lint, or install", "review":
+		return true
+	}
+	if reviewOperation(event, operations) {
+		return true
+	}
+	for _, operation := range operations {
+		name := operation[strings.LastIndex(operation, "/")+1:]
+		if name == "validate" || name == "ready" || name == "plan-check" {
+			return true
+		}
+	}
+	return false
+}
+
+func discoveryOperation(event normalizedSessionEvent, operations []string) bool {
+	switch event.Family {
+	case "search", "file reads", "git inspect", "bounded task inspect":
+		return true
+	}
+	for _, operation := range operations {
+		name := operation[strings.LastIndex(operation, "/")+1:]
+		if strings.HasPrefix(name, "inspect") || strings.HasPrefix(name, "status") {
+			return true
+		}
+	}
+	return false
+}
+
 type outcomeDistribution struct {
 	Count int   `json:"count"`
 	P50   int64 `json:"p50"`
@@ -617,20 +754,45 @@ type outcomeDistribution struct {
 }
 
 type completionEpisodeAnalysis struct {
-	Completed                int                 `json:"completed"`
-	FullyObservedCompleted   int                 `json:"fullyObservedCompleted"`
-	LeftCensoredCompleted    int                 `json:"leftCensoredCompleted"`
-	ToolUsingCompleted       int                 `json:"toolUsingCompleted"`
-	ResponseOnlyCompleted    int                 `json:"responseOnlyCompleted"`
-	Incomplete               int                 `json:"incomplete"`
-	FreshTokens              outcomeDistribution `json:"freshTokens"`
-	ToolCalls                outcomeDistribution `json:"toolCalls"`
-	VisibleOutputTokens      outcomeDistribution `json:"visibleOutputTokens"`
-	DurationSeconds          outcomeDistribution `json:"durationSeconds"`
-	FailedCalls              outcomeDistribution `json:"failedCalls"`
-	Compactions              outcomeDistribution `json:"compactions"`
-	TopDecileFreshTokenShare float64             `json:"topDecileFreshTokenShare"`
-	TailDrivers              taskCostTailDrivers `json:"tailDrivers"`
+	Completed                int                          `json:"completed"`
+	FullyObservedCompleted   int                          `json:"fullyObservedCompleted"`
+	LeftCensoredCompleted    int                          `json:"leftCensoredCompleted"`
+	ToolUsingCompleted       int                          `json:"toolUsingCompleted"`
+	ResponseOnlyCompleted    int                          `json:"responseOnlyCompleted"`
+	Incomplete               int                          `json:"incomplete"`
+	FreshTokens              outcomeDistribution          `json:"freshTokens"`
+	ToolCalls                outcomeDistribution          `json:"toolCalls"`
+	VisibleOutputTokens      outcomeDistribution          `json:"visibleOutputTokens"`
+	DurationSeconds          outcomeDistribution          `json:"durationSeconds"`
+	FailedCalls              outcomeDistribution          `json:"failedCalls"`
+	Compactions              outcomeDistribution          `json:"compactions"`
+	TopDecileFreshTokenShare float64                      `json:"topDecileFreshTokenShare"`
+	TailDrivers              taskCostTailDrivers          `json:"tailDrivers"`
+	Phases                   map[string]taskPhaseAnalysis `json:"phases,omitempty"`
+	TailPhases               []taskPhaseTailAssociation   `json:"tailPhases,omitempty"`
+}
+
+type taskPhaseAnalysis struct {
+	Episodes             int                 `json:"episodes"`
+	TotalFreshTokens     int64               `json:"totalFreshTokens"`
+	TotalToolCalls       int64               `json:"totalToolCalls"`
+	TotalOutputTokens    int64               `json:"totalOutputTokens"`
+	TotalDurationSeconds int64               `json:"totalDurationSeconds"`
+	FreshTokens          outcomeDistribution `json:"freshTokens"`
+	ToolCalls            outcomeDistribution `json:"toolCalls"`
+	VisibleOutputTokens  outcomeDistribution `json:"visibleOutputTokens"`
+	DurationSeconds      outcomeDistribution `json:"durationSeconds"`
+	FailedCalls          outcomeDistribution `json:"failedCalls"`
+	Compactions          outcomeDistribution `json:"compactions"`
+}
+
+type taskPhaseTailAssociation struct {
+	Phase               string  `json:"phase"`
+	TailFreshTokens     int64   `json:"tailFreshTokens"`
+	OrdinaryFreshTokens int64   `json:"ordinaryFreshTokens"`
+	TailShare           float64 `json:"tailShare"`
+	OrdinaryShare       float64 `json:"ordinaryShare"`
+	ShareDelta          float64 `json:"shareDelta"`
 }
 
 type taskCostTailDrivers struct {
@@ -687,7 +849,121 @@ func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAna
 	analysis.Compactions = summarizeOutcomeDistribution(compactions)
 	analysis.TopDecileFreshTokenShare = topOutcomeShare(freshTokens, 0.10)
 	analysis.TailDrivers = analyzeTaskCostTailDrivers(eligible)
+	analysis.Phases = analyzeTaskPhases(eligible)
+	analysis.TailPhases = analyzeTaskPhaseTailAssociations(eligible)
 	return analysis
+}
+
+func analyzeTaskPhases(episodes []codexTaskEpisode) map[string]taskPhaseAnalysis {
+	type phaseValues struct {
+		freshTokens, toolCalls, outputTokens, durations, failures, compactions []int64
+	}
+	values := map[string]*phaseValues{}
+	for _, episode := range episodes {
+		for phase, metrics := range episode.Phases {
+			current := values[phase]
+			if current == nil {
+				current = &phaseValues{}
+				values[phase] = current
+			}
+			current.freshTokens = append(current.freshTokens, phaseFreshTokens(metrics))
+			current.toolCalls = append(current.toolCalls, int64(metrics.ToolCalls))
+			current.outputTokens = append(current.outputTokens, estimatedTokens(metrics.ToolOutputBytes))
+			current.durations = append(current.durations, metrics.DurationSeconds)
+			current.failures = append(current.failures, int64(metrics.FailedCalls))
+			current.compactions = append(current.compactions, int64(metrics.Compactions))
+		}
+	}
+	analysis := make(map[string]taskPhaseAnalysis, len(values))
+	for phase, current := range values {
+		analysis[phase] = taskPhaseAnalysis{
+			Episodes:             len(current.freshTokens),
+			TotalFreshTokens:     sumInt64(current.freshTokens),
+			TotalToolCalls:       sumInt64(current.toolCalls),
+			TotalOutputTokens:    sumInt64(current.outputTokens),
+			TotalDurationSeconds: sumInt64(current.durations),
+			FreshTokens:          summarizeOutcomeDistribution(current.freshTokens),
+			ToolCalls:            summarizeOutcomeDistribution(current.toolCalls),
+			VisibleOutputTokens:  summarizeOutcomeDistribution(current.outputTokens),
+			DurationSeconds:      summarizeOutcomeDistribution(current.durations),
+			FailedCalls:          summarizeOutcomeDistribution(current.failures),
+			Compactions:          summarizeOutcomeDistribution(current.compactions),
+		}
+	}
+	return analysis
+}
+
+func analyzeTaskPhaseTailAssociations(episodes []codexTaskEpisode) []taskPhaseTailAssociation {
+	if len(episodes) < 10 {
+		return nil
+	}
+	ranked := append([]codexTaskEpisode(nil), episodes...)
+	sort.Slice(ranked, func(i, j int) bool {
+		return episodeFreshTokens(ranked[i]) > episodeFreshTokens(ranked[j])
+	})
+	tailCount := max(1, int(math.Ceil(0.10*float64(len(ranked)))))
+	tail := aggregatePhaseFreshTokens(ranked[:tailCount])
+	ordinary := aggregatePhaseFreshTokens(ranked[tailCount:])
+	var tailTotal, ordinaryTotal int64
+	for _, value := range tail {
+		tailTotal += value
+	}
+	for _, value := range ordinary {
+		ordinaryTotal += value
+	}
+	names := map[string]struct{}{}
+	for phase := range tail {
+		names[phase] = struct{}{}
+	}
+	for phase := range ordinary {
+		names[phase] = struct{}{}
+	}
+	associations := make([]taskPhaseTailAssociation, 0, len(names))
+	for phase := range names {
+		tailShare := ratio(float64(tail[phase]), float64(tailTotal))
+		ordinaryShare := ratio(float64(ordinary[phase]), float64(ordinaryTotal))
+		associations = append(associations, taskPhaseTailAssociation{
+			Phase:               phase,
+			TailFreshTokens:     tail[phase],
+			OrdinaryFreshTokens: ordinary[phase],
+			TailShare:           tailShare,
+			OrdinaryShare:       ordinaryShare,
+			ShareDelta:          tailShare - ordinaryShare,
+		})
+	}
+	sort.Slice(associations, func(i, j int) bool {
+		if associations[i].ShareDelta != associations[j].ShareDelta {
+			return associations[i].ShareDelta > associations[j].ShareDelta
+		}
+		return associations[i].Phase < associations[j].Phase
+	})
+	return associations
+}
+
+func aggregatePhaseFreshTokens(episodes []codexTaskEpisode) map[string]int64 {
+	totals := map[string]int64{}
+	for _, episode := range episodes {
+		for phase, metrics := range episode.Phases {
+			totals[phase] += phaseFreshTokens(metrics)
+		}
+	}
+	return totals
+}
+
+func phaseFreshTokens(metrics taskPhaseCost) int64 {
+	return metrics.Tokens.UncachedInputTokens + metrics.Tokens.OutputTokens
+}
+
+func episodeFreshTokens(episode codexTaskEpisode) int64 {
+	return episode.Tokens.UncachedInputTokens + episode.Tokens.OutputTokens
+}
+
+func sumInt64(values []int64) int64 {
+	var total int64
+	for _, value := range values {
+		total += value
+	}
+	return total
 }
 
 func analyzeTaskCostTailDrivers(episodes []codexTaskEpisode) taskCostTailDrivers {
@@ -872,9 +1148,56 @@ func printCompletionEpisodeAnalysis(analysis completionEpisodeAnalysis) {
 		formatDurationSeconds(analysis.DurationSeconds.P75),
 		formatDurationSeconds(analysis.DurationSeconds.P90),
 	)
+	if phases := formatTaskPhaseAnalysis(analysis.Phases); phases != "" {
+		fmt.Printf("Task phase outcomes: %s\n", phases)
+	}
+	if phases := formatTaskPhaseTailAssociations(analysis.TailPhases, 3); phases != "" {
+		fmt.Printf("High-tail phase mix: %s\n", phases)
+	}
 	if drivers := formatTaskCostTailDrivers(analysis.TailDrivers); drivers != "" {
 		fmt.Printf("Fresh-token tail associations: %s\n", drivers)
 	}
+}
+
+func formatTaskPhaseAnalysis(phases map[string]taskPhaseAnalysis) string {
+	order := []string{"discovery", "editing", "verification", "delivery", "rework"}
+	var parts []string
+	for _, phase := range order {
+		metrics, ok := phases[phase]
+		if !ok || metrics.Episodes == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%s %s episodes, fresh p50/p90 %s/%s, calls %s/%s",
+			phase,
+			formatCodexCount(int64(metrics.Episodes)),
+			formatCodexCount(metrics.FreshTokens.P50),
+			formatCodexCount(metrics.FreshTokens.P90),
+			formatCodexCount(metrics.ToolCalls.P50),
+			formatCodexCount(metrics.ToolCalls.P90),
+		))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func formatTaskPhaseTailAssociations(associations []taskPhaseTailAssociation, limit int) string {
+	var parts []string
+	for _, association := range associations {
+		if association.ShareDelta <= 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%s %.0f%% tail vs %.0f%% ordinary (+%.0fpp)",
+			association.Phase,
+			100*association.TailShare,
+			100*association.OrdinaryShare,
+			100*association.ShareDelta,
+		))
+		if limit > 0 && len(parts) >= limit {
+			break
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func formatTaskCostTailDrivers(drivers taskCostTailDrivers) string {
