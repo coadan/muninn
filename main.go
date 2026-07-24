@@ -611,6 +611,8 @@ func cmdCodexSessions(root string, args []string) error {
 		view = "overview"
 	} else if *detailsOutput {
 		view = "details"
+	} else if strings.TrimSpace(*focus) != "" {
+		view = "focused"
 	}
 	source, err := resolveSessionSource(*providerName)
 	if err != nil {
@@ -2012,6 +2014,16 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	fmt.Printf("Muninn session insights since %s\n", report.Since)
 	fmt.Printf("Provider: %s\n", report.Provider)
 	fmt.Printf("Repository: %s\n", filepath.Base(report.WorkspaceRoot))
+	if view == "focused" {
+		fmt.Printf(
+			"Scope: %s sessions, %s tool calls, %s failed\n",
+			formatCodexCount(int64(summary.Sessions)),
+			formatCodexCount(int64(summary.ToolCalls)),
+			formatCodexCount(int64(summary.FailedToolCalls)),
+		)
+		printSessionFindings(report.Findings, limit)
+		return
+	}
 	fmt.Printf("Sessions: %s (%s complete, %s incomplete)\n",
 		formatCodexCount(int64(summary.Sessions)),
 		formatCodexCount(int64(summary.CompletedSessions)),
