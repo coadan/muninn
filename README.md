@@ -105,6 +105,8 @@ different local store, or `--no-cache` for a direct scan.
 Named checkpoints support before/after measurement. Trend output compares
 normalized rates such as calls and compactions per session, output per call,
 completion ratio, and failures/truncations per 1,000 calls.
+Interactive `--refresh` runs emit one bounded start message and one completion
+summary so long reclassification passes do not look stalled; JSON stays clean.
 
 `muninn feedback` captures friction while it is fresh. It accepts only fixed
 categories plus bounded logical target/signal labels; it cannot store prose,
