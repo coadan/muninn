@@ -39,3 +39,12 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
   tool output.
 - Prefer SQLite for the incremental local index. Keep the normalized model
   exportable so DuckDB or other analytical consumers can be added later.
+
+## Code Mode Tool Batching
+
+In Code Mode, within each bounded stage, run independent, functions.exec-available tool calls concurrently in one functions.exec call. Use await Promise.allSettled([...]) when partial results are useful, and inspect every result; use await Promise.all([...]) only when any failure should abort the batch. Keep dependencies, waits/resumes, approvals, conflicting or interdependent mutations, and adaptive investigations where each result may change the next step sequential. Do not split otherwise batchable inspections across outer tool calls.
+
+Keep each nested call's output bounded. Prefer focused queries and per-call
+output limits; broad outputs that can truncate task evidence are not a valid
+efficiency gain. If a result is truncated, narrow or page only that result
+instead of rerunning the whole batch.
