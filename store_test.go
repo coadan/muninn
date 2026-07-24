@@ -13,7 +13,7 @@ import (
 func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T) {
 	sessionsDir := t.TempDir()
 	repositoryRoot := filepath.Join(t.TempDir(), "repository")
-	writeCodexSessionFixture(t, sessionsDir, "indexed", []any{
+	sessionPath := writeCodexSessionFixture(t, sessionsDir, "indexed", []any{
 		map[string]any{
 			"timestamp": "2026-07-23T08:00:00Z",
 			"type":      "event_msg",
@@ -123,11 +123,27 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 
 	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	since := generatedAt.Add(-24 * time.Hour)
-	indexed, err := store.analyze(ctx, "codex", []string{sessionsDir}, repositoryRoot, since, generatedAt, "", ownershipCatalog{}, second)
+	metadata := map[string]normalizedSessionMetadata{
+		filepath.Clean(sessionPath): {
+			Model:           "gpt-5.6-sol",
+			ReasoningEffort: "xhigh",
+			AgentKind:       "root",
+			LineageKey:      "privacy-safe-lineage",
+		},
+	}
+	indexed, err := store.analyze(ctx, "codex", []string{sessionsDir}, repositoryRoot, since, generatedAt, "", ownershipCatalog{}, second, metadata)
 	if err != nil {
 		t.Fatalf("indexed analysis: %v", err)
 	}
-	direct, err := analyzeCodexSessions([]string{sessionsDir}, repositoryRoot, since, generatedAt)
+	direct, err := analyzeCodexSessionsFilteredWithMetadata(
+		[]string{sessionsDir},
+		repositoryRoot,
+		since,
+		generatedAt,
+		"",
+		ownershipCatalog{},
+		metadata,
+	)
 	if err != nil {
 		t.Fatalf("direct analysis: %v", err)
 	}
@@ -140,6 +156,11 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	directOutcomesJSON, _ := json.Marshal(direct.Outcomes)
 	if string(indexedOutcomesJSON) != string(directOutcomesJSON) {
 		t.Fatalf("indexed and direct outcomes differ:\nindexed=%s\ndirect=%s", indexedOutcomesJSON, directOutcomesJSON)
+	}
+	indexedProfilesJSON, _ := json.Marshal(indexed.Profiles)
+	directProfilesJSON, _ := json.Marshal(direct.Profiles)
+	if string(indexedProfilesJSON) != string(directProfilesJSON) {
+		t.Fatalf("indexed and direct profiles differ:\nindexed=%s\ndirect=%s", indexedProfilesJSON, directProfilesJSON)
 	}
 	if got := indexed.Summary.DownstreamQuality; got.Deliveries != 1 ||
 		got.DeliveriesWithFailure != 1 || got.FailureRuns != 1 {

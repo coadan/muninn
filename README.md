@@ -18,6 +18,8 @@ Muninn is deliberately privacy-safe:
 - prompts and conversation messages are not analyzed
 - raw command arguments and tool output are not reported
 - absolute paths and provider session IDs are not reported
+- model/effort labels are bounded; lineage IDs are one-way digests used only
+  for aggregation
 - classifications use fixed command-family, output, and failure labels
 
 ## Install
@@ -75,6 +77,10 @@ Muninn highlights:
   marked as left-censored
 - p50/p75/p90 fresh-token, tool-call, output, duration, failure, and compaction
   outcomes for fully observed completed tool tasks
+- model, reasoning-effort, and root/subagent cohorts with cost per completed
+  tool task, task duration, and observed throughput
+- delegation share, coordination cost, parent/child edit and read overlap,
+  unattributed work, and observed child concurrency
 - discovery, editing, verification, delivery, and review-driven rework phase
   outcomes, including phase-mix differences in the completed-task cost tail
 - explicit finding attribution to tooling, instructions/docs, source code, or
@@ -253,6 +259,11 @@ Phase boundaries come from typed tool families, configured operations, edits,
 terminal delivery, and post-delivery review. Token deltas belong to the latest
 observable phase; they are useful comparative estimates, not exact attribution
 of model-internal work.
+
+Model and effort labels plus parent/child links come from the provider's local
+state index and are joined to normalized rollouts at analysis time. Reports do
+not expose the source paths or lineage keys. Speed and overlap are observational:
+compare similar task cohorts before changing model or delegation policy.
 
 ## Direction
 

@@ -688,6 +688,58 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	delegation := report.Delegation
+	totalFreshTokens := delegation.ParentFreshTokens + delegation.SubagentFreshTokens
+	if delegation.SubagentSessions >= 3 &&
+		delegation.CoordinationCalls >= delegation.SubagentSessions*3 &&
+		delegation.CoordinationFreshTokens >= 50_000 &&
+		delegation.CoordinationFreshTokens*10 >= totalFreshTokens {
+		findings = append(findings, sessionFinding{
+			Category: "delegation-cost",
+			Control:  "agent",
+			Title:    "delegation coordination consumes material task cost",
+			Evidence: fmt.Sprintf(
+				"%s coordination calls for %s subagent sessions used ~%s fresh tokens (%.1f%% of all fresh tokens); actions: %s",
+				formatCodexCount(int64(delegation.CoordinationCalls)),
+				formatCodexCount(int64(delegation.SubagentSessions)),
+				formatCodexCount(delegation.CoordinationFreshTokens),
+				100*ratio(float64(delegation.CoordinationFreshTokens), float64(totalFreshTokens)),
+				formatMetricDimensions(delegation.CoordinationCallsByAction),
+			),
+			Action:     "Give each subagent one bounded outcome and complete handoff contract; reduce polling and follow-up rounds, then compare coordination tokens per completed task.",
+			Count:      delegation.CoordinationCalls,
+			Sessions:   delegation.DelegatingParents,
+			LastSeen:   sessionFindingLastSeen(report, "delegation", ""),
+			Lever:      "instructions/docs",
+			Confidence: "high",
+			score: 680 + delegation.CoordinationCalls*3 +
+				int(delegation.CoordinationFreshTokens/5_000),
+		})
+	}
+	if delegation.ChildrenWithEditOverlap >= 2 &&
+		delegation.OverlappingChildFreshTokens >= 50_000 &&
+		delegation.OverlappingChildFreshTokens*4 >= delegation.SubagentFreshTokens {
+		findings = append(findings, sessionFinding{
+			Category: "delegation-cost",
+			Control:  "agent",
+			Title:    "delegated work repeatedly overlaps parent edits",
+			Evidence: fmt.Sprintf(
+				"%s linked children edited %s targets also edited by their parent; those children used ~%s fresh tokens (%.1f%% of subagent fresh tokens)",
+				formatCodexCount(int64(delegation.ChildrenWithEditOverlap)),
+				formatCodexCount(int64(delegation.EditOverlapTargets)),
+				formatCodexCount(delegation.OverlappingChildFreshTokens),
+				100*ratio(float64(delegation.OverlappingChildFreshTokens), float64(delegation.SubagentFreshTokens)),
+			),
+			Action:     "Delegate disjoint owned files or an evidence-only review; make the parent integrate instead of independently reworking the same targets.",
+			Count:      delegation.ChildrenWithEditOverlap,
+			Sessions:   delegation.DelegatingParents,
+			LastSeen:   sessionFindingLastSeen(report, "delegation", ""),
+			Lever:      "instructions/docs",
+			Confidence: "high",
+			score: 700 + delegation.ChildrenWithEditOverlap*30 +
+				int(delegation.OverlappingChildFreshTokens/5_000),
+		})
+	}
 	findings = assignAndSuppressSessionFindingSignals(findings, config.SuppressSignals)
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].LastSeen != findings[j].LastSeen {
@@ -927,6 +979,8 @@ func sessionFindingLever(finding sessionFinding) (string, string) {
 		return "unknown", "low"
 	case "delivery-quality":
 		return "unknown", "medium"
+	case "delegation-cost":
+		return "instructions/docs", "medium"
 	case "task-cost":
 		return "unknown", "low"
 	default:
@@ -1249,6 +1303,7 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 		"loops": {
 			"agent-interface": true,
 			"session-loop":    true,
+			"delegation-cost": true,
 		},
 		"output": {
 			"output-cost": true,
@@ -1256,6 +1311,7 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 		"quality": {
 			"delivery-quality": true,
 			"task-cost":        true,
+			"delegation-cost":  true,
 		},
 	}
 	categories, ok := allowed[focus]
@@ -1305,6 +1361,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"session-loop":          6,
 		"output-cost":           3,
 		"delivery-quality":      3,
+		"delegation-cost":       3,
 		"task-cost":             2,
 	}
 	counts := map[string]int{}

@@ -17,10 +17,16 @@ const (
 // storage/reporting. SourcePath and CWD are local index metadata only and must
 // never be emitted by reports.
 type normalizedSession struct {
-	Provider   string
-	SourcePath string
-	CWD        string
-	Events     []normalizedSessionEvent
+	Provider         string
+	SourcePath       string
+	CWD              string
+	Model            string
+	ReasoningEffort  string
+	AgentKind        string
+	LineageKey       string
+	ParentLineageKey string
+	SpawnStatus      string
+	Events           []normalizedSessionEvent
 }
 
 type normalizedSessionEvent struct {
@@ -52,7 +58,14 @@ type normalizedSessionEvent struct {
 
 func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string, since, generatedAt time.Time, ownership ownershipCatalog) (codexSessionRecord, error) {
 	record := newCodexSessionRecord()
+	record.SourcePath = session.SourcePath
 	record.CWD = session.CWD
+	record.Model = session.Model
+	record.ReasoningEffort = session.ReasoningEffort
+	record.AgentKind = session.AgentKind
+	record.LineageKey = session.LineageKey
+	record.ParentLineageKey = session.ParentLineageKey
+	record.SpawnStatus = session.SpawnStatus
 	if record.CWD == "" {
 		return codexSessionRecord{}, nil
 	}
@@ -143,6 +156,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
 		case sessionEventToolCall:
 			record.ToolCalls++
+			if delegationOperation(event) {
+				touchSessionActivity(record.Activity, "delegation", event.ToolName, event.OccurredAt)
+			}
 			if event.InlineBytes > 0 {
 				record.InlineOrchestrationCalls++
 				record.InlineOrchestrationBytes += event.InlineBytes
@@ -178,12 +194,18 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			for _, target := range event.Targets {
 				metrics := record.ReadTargets[target]
-				metrics.Reads++
+				if event.ToolName == "apply_patch" {
+					record.EditTargets[target]++
+				} else {
+					metrics.Reads++
+				}
 				if previousCommand.LastFamily == "search" && previousCommandRound == event.ToolRound-1 {
 					metrics.SearchReadLoops++
 				}
-				record.ReadTargets[target] = metrics
-				touchSessionActivity(record.Activity, "read", target, event.OccurredAt)
+				if event.ToolName != "apply_patch" {
+					record.ReadTargets[target] = metrics
+					touchSessionActivity(record.Activity, "read", target, event.OccurredAt)
+				}
 			}
 			if event.FirstFamily != "" {
 				if previousCommand.LastFamily != "" && previousCommandRound == event.ToolRound-1 {
@@ -293,6 +315,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		OwnedOperationAmbiguous:      map[string]codexToolMetrics{},
 		OwnedOperationFailureReasons: map[string]map[string]int{},
 		ReadTargets:                  map[string]codexTargetMetrics{},
+		EditTargets:                  map[string]int{},
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		FailureReasons:               map[string]int{},
 		FailureContexts:              map[string]map[string]int{},
