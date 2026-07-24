@@ -327,21 +327,27 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		target := ""
 		action := "Compare high-tail episodes with ordinary completed tasks by operation, rework, compaction, and target cohort before changing tooling, guidance, or source."
 		if driver.Name != "" {
-			driverEvidence = fmt.Sprintf("; strongest observed %s driver %s appeared in %s/%s tail episodes versus %s/%s ordinary episodes (%.1fx prevalence)",
+			driverEvidence = fmt.Sprintf("; strongest observed %s association %s appeared in %s/%s tail episodes versus %s/%s ordinary episodes (+%.0f percentage points, %.1fx prevalence; %s calls in tail episodes)",
 				driverKind,
 				driver.Name,
 				formatCodexCount(int64(driver.TailEpisodes)),
 				formatCodexCount(int64(outcomes.TailDrivers.TailEpisodes)),
 				formatCodexCount(int64(driver.OrdinaryEpisodes)),
 				formatCodexCount(int64(outcomes.TailDrivers.OrdinaryEpisodes)),
+				100*driver.PrevalenceDelta,
 				driver.PrevalenceLift,
+				formatCodexCount(int64(driver.TailCalls)),
 			)
 			target = driver.Name
 			switch driverKind {
 			case "cohort":
 				action = "Compare the calls and output inside this repository cohort between high-tail and ordinary completed tasks, then reduce its dominant navigation, validation, or source-boundary cost."
 			case "operation":
-				action = "Inspect why this owned operation is overrepresented in high-tail tasks, then reduce redundant calls, output, or prerequisite discovery at that operation boundary."
+				if driver.TailCalls <= driver.TailEpisodes {
+					action = "Treat this one-call operation as a task-class marker, then compare high-tail and ordinary tasks that both use it before attributing overhead to the operation."
+				} else {
+					action = "Inspect why this owned operation is repeatedly used in high-tail tasks, then reduce redundant calls, output, or prerequisite discovery at that operation boundary."
+				}
 			case "family":
 				action = "Inspect the repeated command shapes and output in this family inside high-tail tasks, then replace the dominant loop with a bounded repository interface."
 			}
