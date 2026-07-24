@@ -444,6 +444,19 @@ func TestOperationsOnlyRequiresExecutableOperations(t *testing.T) {
 	}
 }
 
+func TestFormatRefreshCompletionIsBoundedAndActionable(t *testing.T) {
+	got := formatRefreshCompletion(sessionRefreshStats{
+		FilesScanned:    600,
+		FilesIndexed:    24,
+		FilesReused:     576,
+		FilesUnreadable: 1,
+	})
+	want := "Refresh complete: 600 scanned, 24 indexed, 576 reused, 1 unreadable."
+	if got != want {
+		t.Fatalf("unexpected refresh completion: %q", got)
+	}
+}
+
 func TestCodexCommandInvocationsExposeBundledOperationAttribution(t *testing.T) {
 	single := `{"cmd":"eval \"$(bwb task example status --env-only --env-format shell)\""}`
 	if got := len(codexCommandInvocations("exec_command", single, "")); got != 1 {

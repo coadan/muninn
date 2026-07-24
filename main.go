@@ -631,9 +631,15 @@ func cmdCodexSessions(root string, args []string) error {
 			return fmt.Errorf("%w (use --no-cache to bypass the index)", err)
 		}
 		defer store.Close()
+		if *forceRefresh && !*jsonOutput {
+			fmt.Fprintf(os.Stderr, "Refreshing Muninn index for %s...\n", filepath.Base(resolvedRepoRoot))
+		}
 		stats, err := store.refresh(context.Background(), source.Name(), sessionDirs, resolvedRepoRoot, normalizer, ownership, *forceRefresh)
 		if err != nil {
 			return err
+		}
+		if *forceRefresh && !*jsonOutput {
+			fmt.Fprintln(os.Stderr, formatRefreshCompletion(stats))
 		}
 		report, err = store.analyze(
 			context.Background(),
@@ -692,6 +698,16 @@ func cmdCodexSessions(root string, args []string) error {
 		fmt.Printf("\nSaved checkpoint %q.\n", name)
 	}
 	return nil
+}
+
+func formatRefreshCompletion(stats sessionRefreshStats) string {
+	return fmt.Sprintf(
+		"Refresh complete: %s scanned, %s indexed, %s reused, %s unreadable.",
+		formatCodexCount(int64(stats.FilesScanned)),
+		formatCodexCount(int64(stats.FilesIndexed)),
+		formatCodexCount(int64(stats.FilesReused)),
+		formatCodexCount(int64(stats.FilesUnreadable)),
+	)
 }
 
 func resolveCodexSessionsDir(explicit string) (string, error) {
