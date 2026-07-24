@@ -218,11 +218,12 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Category: "agent-interface",
 			Control:  "repository",
 			Title:    title,
-			Evidence: fmt.Sprintf("%s large inline calls across %s sessions; %s total input bytes; largest call %s bytes",
+			Evidence: fmt.Sprintf("%s large inline calls across %s sessions; %s total input bytes; largest call %s bytes; tool sources: %s",
 				formatCodexCount(int64(summary.InlineOrchestrationCalls)),
 				formatCodexCount(int64(summary.InlineOrchestrationSessions)),
 				formatCodexCount(summary.InlineOrchestrationBytes),
 				formatCodexCount(summary.InlineOrchestrationMaxBytes),
+				inlineToolEvidence(summary.InlineOrchestrationByTool),
 			),
 			Action:   config.Actions.InlineOrchestration,
 			Count:    summary.InlineOrchestrationCalls,
@@ -274,6 +275,39 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		return findings[i].Title < findings[j].Title
 	})
 	return diversifySessionFindings(findings)
+}
+
+func inlineToolEvidence(metrics map[string]codexInlineMetrics) string {
+	type row struct {
+		tool  string
+		bytes int64
+		calls int
+	}
+	rows := make([]row, 0, len(metrics))
+	for tool, value := range metrics {
+		rows = append(rows, row{tool: tool, bytes: value.Bytes, calls: value.Calls})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].bytes != rows[j].bytes {
+			return rows[i].bytes > rows[j].bytes
+		}
+		return rows[i].tool < rows[j].tool
+	})
+	if len(rows) > 3 {
+		rows = rows[:3]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		parts = append(parts, fmt.Sprintf("%s %s calls/%s bytes",
+			row.tool,
+			formatCodexCount(int64(row.calls)),
+			formatCodexCount(row.bytes),
+		))
+	}
+	if len(parts) == 0 {
+		return "(unknown)"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func ownedOperationFailureCounts(reasons map[string]codexOccurrenceMetrics) (actionable int, expected int) {
