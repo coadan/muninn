@@ -134,6 +134,7 @@ their preferred tooling surface:
       "id": "repository-cli",
       "repository": "path-or-logical-repo-name",
       "executables": ["repo-cli"],
+      "operationsOnly": false,
       "operations": [
         {
           "id": "status",
@@ -161,6 +162,9 @@ Optional operation patterns use exact argument prefixes with `*` matching one
 privacy-safe variable segment. Reports retain only configured IDs such as
 `repository-cli/status`, never the matched arguments. Patterns may overlap to
 provide both broad and targeted views, so operation totals are not additive.
+Set `operationsOnly` for a CLI reached through a shared launcher such as `npm`;
+configured operations remain attributable without claiming every invocation of
+the launcher as owned tooling.
 When an outer tool call bundles several commands, output and failures are
 reported as ambiguous instead of being charged to every matched operation.
 Use `--refresh` after changing operation patterns so cached source events are

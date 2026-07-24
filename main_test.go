@@ -409,6 +409,41 @@ func TestCodexSelectorDigestsRecognizeOwnedCommandSubstitution(t *testing.T) {
 	}
 }
 
+func TestOperationsOnlyDoesNotClaimSharedLauncher(t *testing.T) {
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:             "void-cli",
+		Executables:    []string{"npm"},
+		OperationsOnly: true,
+		Operations: []ownedOperationConfig{{
+			ID:   "context",
+			Args: []string{"run", "--silent", "void", "--", "context"},
+		}},
+	}})
+	voidCommand := `{"cmd":"npm run --silent void -- context actor --path src"}`
+	if matches := catalog.match(codexSelectorDigests("exec_command", voidCommand, "")); len(matches) != 0 {
+		t.Fatalf("operations-only launcher should not be attributed as a whole tool: %#v", matches)
+	}
+	operations := catalog.classifyOperations(codexCommandInvocations("exec_command", voidCommand, ""))
+	if len(operations) != 1 || operations[0] != "void-cli/context" {
+		t.Fatalf("configured launcher operation was not recognized: %#v", operations)
+	}
+	unrelated := `{"cmd":"npm test"}`
+	if operations := catalog.classifyOperations(codexCommandInvocations("exec_command", unrelated, "")); len(operations) != 0 {
+		t.Fatalf("unrelated launcher use should remain unattributed: %#v", operations)
+	}
+}
+
+func TestOperationsOnlyRequiresExecutableOperations(t *testing.T) {
+	err := validateOwnedToolConfig([]ownedToolConfig{{
+		ID:             "invalid",
+		ToolCalls:      []string{"exec"},
+		OperationsOnly: true,
+	}})
+	if err == nil || !strings.Contains(err.Error(), "requires executables and operations") {
+		t.Fatalf("expected bounded operations-only validation error, got %v", err)
+	}
+}
+
 func TestCodexCommandInvocationsExposeBundledOperationAttribution(t *testing.T) {
 	single := `{"cmd":"eval \"$(bwb task example status --env-only --env-format shell)\""}`
 	if got := len(codexCommandInvocations("exec_command", single, "")); got != 1 {

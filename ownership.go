@@ -24,6 +24,7 @@ type ownedToolConfig struct {
 	Executables    []string               `json:"executables,omitempty"`
 	ToolCalls      []string               `json:"toolCalls,omitempty"`
 	Operations     []ownedOperationConfig `json:"operations,omitempty"`
+	OperationsOnly bool                   `json:"operationsOnly,omitempty"`
 	Recommendation string                 `json:"recommendation,omitempty"`
 }
 
@@ -61,6 +62,9 @@ func validateOwnedToolConfig(configs []ownedToolConfig) error {
 		if len(config.Executables) == 0 && len(config.ToolCalls) == 0 {
 			return errors.New("ownedTools entries require at least one executable or toolCalls selector")
 		}
+		if config.OperationsOnly && (len(config.Executables) == 0 || len(config.Operations) == 0) {
+			return errors.New("ownedTools operationsOnly requires executables and operations")
+		}
 		operationIDs := map[string]struct{}{}
 		for _, operation := range config.Operations {
 			operationID := strings.TrimSpace(operation.ID)
@@ -82,8 +86,10 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 		id := strings.TrimSpace(config.ID)
 		for _, executable := range config.Executables {
 			normalizedExecutable := strings.ToLower(filepath.Base(strings.TrimSpace(executable)))
-			digest := ownershipSelectorDigest("exec", normalizedExecutable)
-			catalog.byDigest[digest] = appendUniqueString(catalog.byDigest[digest], id)
+			if !config.OperationsOnly {
+				digest := ownershipSelectorDigest("exec", normalizedExecutable)
+				catalog.byDigest[digest] = appendUniqueString(catalog.byDigest[digest], id)
+			}
 			for _, operation := range config.Operations {
 				catalog.operations = append(catalog.operations, ownedOperationRule{
 					ToolID:      id,
