@@ -1,16 +1,20 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type sessionFinding struct {
 	Category string `json:"category"`
 	Control  string `json:"control"`
+	Signal   string `json:"signal"`
 	Title    string `json:"title"`
 	Evidence string `json:"evidence"`
 	Action   string `json:"action"`
@@ -87,6 +91,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Action:   action,
 			Count:    metrics.Calls,
 			Sessions: metrics.Sessions,
+			Target:   operation,
 			score:    650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + int(metrics.EstimatedOutputTokens/5_000),
 		})
 	}
@@ -113,6 +118,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			),
 			Action: action,
 			Count:  metrics.Calls,
+			Target: owned.ID,
 			score:  500 + metrics.FailedCalls*20 + metrics.TruncatedCalls*5 + int(outputTokens/10_000),
 		})
 	}
@@ -271,6 +277,63 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	inputTasks := append([]codexTaskInsights(nil), report.Tasks...)
+	sort.Slice(inputTasks, func(i, j int) bool {
+		if inputTasks[i].Tokens.UncachedInputTokens != inputTasks[j].Tokens.UncachedInputTokens {
+			return inputTasks[i].Tokens.UncachedInputTokens > inputTasks[j].Tokens.UncachedInputTokens
+		}
+		return inputTasks[i].Task < inputTasks[j].Task
+	})
+	if len(inputTasks) > 3 {
+		inputTasks = inputTasks[:3]
+	}
+	for _, task := range inputTasks {
+		uncachedPerSession := perSessionTokens(task.Tokens.UncachedInputTokens, task.Sessions)
+		if task.Sessions < 2 || task.Tokens.UncachedInputTokens < 500_000 || uncachedPerSession < 50_000 {
+			continue
+		}
+		findings = append(findings, sessionFinding{
+			Category: "session-loop",
+			Control:  "repository",
+			Title:    "input-token cost is concentrated in task: " + task.Task,
+			Evidence: fmt.Sprintf("%s total input tokens (%s uncached, %s cached), %s uncached input and %s fresh tokens per session across %s sessions; %s compactions",
+				formatCodexCount(task.Tokens.InputTokens),
+				formatCodexCount(task.Tokens.UncachedInputTokens),
+				formatCodexCount(task.Tokens.CachedInputTokens),
+				formatCodexCount(uncachedPerSession),
+				formatCodexCount(perSessionTokens(task.FreshTokens, task.Sessions)),
+				formatCodexCount(int64(task.Sessions)),
+				formatCodexCount(int64(task.Compactions)),
+			),
+			Action:   "Reduce injected guidance, repeated source reads, and rediscovery for this task family; compare the same per-session input metrics after the tooling or structure change.",
+			Count:    task.Sessions,
+			Sessions: task.Sessions,
+			Target:   task.Task,
+			score:    430 + task.Sessions*10 + task.Compactions*5 + int(uncachedPerSession/25_000),
+		})
+	}
+
+	for context, metrics := range summary.ProgressStalls {
+		if metrics.Calls < 2 || metrics.Seconds < 40 {
+			continue
+		}
+		findings = append(findings, sessionFinding{
+			Category: "session-loop",
+			Control:  "repository",
+			Title:    "progress stalls while waiting on: " + context,
+			Evidence: fmt.Sprintf("%s low-output waits consumed %s across %s sessions; waits for tests, builds, local reviews, and remote GitHub review were classified separately",
+				formatCodexCount(int64(metrics.Calls)),
+				formatDurationSeconds(metrics.Seconds),
+				formatCodexCount(int64(metrics.Sessions)),
+			),
+			Action:   "Remove redundant polling, emit useful bounded progress, or make this operation asynchronous/resumable when the wait is not intrinsically required.",
+			Count:    metrics.Calls,
+			Sessions: metrics.Sessions,
+			Target:   context,
+			score:    440 + metrics.Sessions*20 + metrics.Calls*5 + int(metrics.Seconds/10),
+		})
+	}
+
 	searchRead := codexMixedSearchReadMetrics(summary.MixedShellShapes)
 	if searchRead.Calls >= 10 && searchRead.EstimatedOutputTokens >= 50_000 {
 		findings = append(findings, sessionFinding{
@@ -287,6 +350,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	findings = assignAndSuppressSessionFindingSignals(findings, config.SuppressSignals)
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].score != findings[j].score {
 			return findings[i].score > findings[j].score
@@ -297,6 +361,64 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		return findings[i].Title < findings[j].Title
 	})
 	return diversifySessionFindings(findings)
+}
+
+var signalSlugSeparators = regexp.MustCompile(`[^a-z0-9._/-]+`)
+
+func assignAndSuppressSessionFindingSignals(findings []sessionFinding, suppressions []string) []sessionFinding {
+	suppressed := map[string]struct{}{}
+	for _, signal := range suppressions {
+		suppressed[signal] = struct{}{}
+	}
+	result := make([]sessionFinding, 0, len(findings))
+	for _, finding := range findings {
+		finding.Signal = sessionFindingSignal(finding)
+		if _, hidden := suppressed[finding.Signal]; hidden {
+			continue
+		}
+		result = append(result, finding)
+	}
+	return result
+}
+
+func sessionFindingSignal(finding sessionFinding) string {
+	target := strings.TrimSpace(finding.Target)
+	switch {
+	case strings.HasPrefix(finding.Title, "direct feedback: "):
+		feedbackSignal := strings.TrimPrefix(finding.Title, "direct feedback: ")
+		return signalID(finding.Category, "direct-feedback", target, feedbackSignal)
+	case strings.HasPrefix(finding.Title, "input-token cost is concentrated in task: "):
+		return signalID("session-loop", "input-cost", target)
+	case strings.HasPrefix(finding.Title, "progress stalls while waiting on: "):
+		return signalID("session-loop", "progress-stall", target)
+	case finding.Category == "owned-operation":
+		return signalID("owned-operation", target)
+	case finding.Category == "owned-tool":
+		return signalID("owned-tool", target)
+	case target != "":
+		return signalID(finding.Category, target)
+	default:
+		return signalID(finding.Category, finding.Title)
+	}
+}
+
+func signalID(parts ...string) string {
+	slugs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		slug := strings.Trim(signalSlugSeparators.ReplaceAllString(strings.ToLower(strings.TrimSpace(part)), "-"), "-/")
+		if slug != "" {
+			slugs = append(slugs, slug)
+		}
+	}
+	signal := strings.Join(slugs, "/")
+	const maximumSignalLength = 200
+	if len(signal) > maximumSignalLength {
+		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(signal)))
+		const digestLength = 16
+		prefixLength := maximumSignalLength - digestLength - 1
+		signal = strings.TrimRight(signal[:prefixLength], "-/") + "-" + digest[:digestLength]
+	}
+	return signal
 }
 
 func directFeedbackFindingCategory(category string) string {
@@ -420,6 +542,20 @@ func formatOwnedOperationActionableReasons(reasons map[string]codexOccurrenceMet
 	return strings.Join(parts, ", ")
 }
 
+func perSessionTokens(total int64, sessions int) int64 {
+	if sessions <= 0 {
+		return 0
+	}
+	return total / int64(sessions)
+}
+
+func formatDurationSeconds(seconds int64) string {
+	if seconds <= 0 {
+		return "0s"
+	}
+	return (time.Duration(seconds) * time.Second).String()
+}
+
 func repositoryManifestTarget(target string) bool {
 	switch strings.ToLower(filepath.Base(target)) {
 	case "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
@@ -508,6 +644,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"recurring-failure":     4,
 		"owned-tool":            4,
 		"owned-operation":       6,
+		"session-loop":          6,
 	}
 	counts := map[string]int{}
 	result := make([]sessionFinding, 0, len(findings))
@@ -537,6 +674,7 @@ func printSessionFindings(findings []sessionFinding, limit int) {
 			target = " · " + finding.Target
 		}
 		fmt.Printf("- [%s/%s] %s%s\n", finding.Category, finding.Control, finding.Title, target)
+		fmt.Printf("  Signal: %s\n", finding.Signal)
 		fmt.Printf("  Evidence: %s.\n", strings.TrimSuffix(finding.Evidence, "."))
 		fmt.Printf("  Next: %s\n", finding.Action)
 	}

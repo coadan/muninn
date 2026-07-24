@@ -65,7 +65,10 @@ without loading details.
 
 Muninn highlights:
 
+- total, cached, uncached, and per-session input-token cost
 - fresh-token and visible tool-output volume
+- long low-output tool waits, with tests, builds, and review waits reported
+  separately from candidate progress stalls
 - privacy-safe tool and command-family attribution
 - mixed commands bundled into one outer tool call
 - substantive command-family transitions across separate tool calls
@@ -113,6 +116,9 @@ their preferred tooling surface:
 ```json
 {
   "schemaVersion": 1,
+  "suppressSignals": [
+    "session-loop/progress-stall/repository-cli/status"
+  ],
   "actions": {
     "sourceContext": "Use the repository's bounded source-context command."
   },
@@ -133,10 +139,15 @@ their preferred tooling surface:
 }
 ```
 
-Configuration provides recommendations only. It does not weaken the privacy
-boundary or expose repository command text from sessions. Owned-tool selectors
-are stored as one-way digests in normalized events; reports use only the
-configured ID and logical repository name.
+Each finding prints a stable `Signal` ID. `suppressSignals` hides only exact
+matching derived findings, which keeps false positives out of the action queue
+without deleting their normalized metrics or checkpoint history. Prefer exact
+IDs over suppressing a whole finding family.
+
+Configuration does not weaken the privacy boundary or expose repository
+command text from sessions. Owned-tool selectors are stored as one-way digests
+in normalized events; reports use only the configured ID and logical
+repository name.
 
 Owned-tool attribution lets Muninn prioritize fixes with a short local path.
 Optional operation patterns use exact argument prefixes with `*` matching one
@@ -160,8 +171,8 @@ Muninn is intended to close a repository improvement loop:
 3. Improve owned tooling, instructions, an agent-facing interface, or source
    ownership.
 4. Re-run the same window and compare the checkpoint.
-5. Suppress findings whose current target is gone, bounded, or no longer
-   recurring.
+5. Add an exact printed signal ID to `.muninn.json` only when a finding is a
+   known false positive; the underlying trend data remains available.
 
 Useful evidence includes repeated privacy-safe failure contexts across
 sessions, recurring cross-call transitions, repeated context compactions,
