@@ -712,6 +712,69 @@ func TestAnalyzeCodexSessionsTracksOnlyCrossCallFamilyTransitions(t *testing.T) 
 	}
 }
 
+func TestAnalyzeCodexSessionsAttributesConfiguredOwnedToolsAndCompactions(t *testing.T) {
+	sessionsDir := t.TempDir()
+	repositoryRoot := filepath.Join(t.TempDir(), "repository")
+	writeCodexSessionFixture(t, sessionsDir, "owned-tooling", []any{
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:00Z",
+			"type":      "session_meta",
+			"payload":   map[string]any{"cwd": repositoryRoot},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:01Z",
+			"type":      "event_msg",
+			"payload":   map[string]any{"type": "context_compacted"},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:02Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"call_id":   "bwb",
+				"name":      "exec_command",
+				"arguments": `{"cmd":"bwb task example status"}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:03Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "function_call_output",
+				"call_id": "bwb",
+				"output":  "exit code: 1",
+			},
+		},
+	})
+	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	config := []ownedToolConfig{{
+		ID:          "bwb",
+		Repository:  "breyta-workbench",
+		Executables: []string{"bwb"},
+	}}
+	report, err := analyzeCodexSessionsFilteredWithOwnership(
+		[]string{sessionsDir},
+		repositoryRoot,
+		generatedAt.Add(-24*time.Hour),
+		generatedAt,
+		"",
+		newOwnershipCatalog(config),
+	)
+	if err != nil {
+		t.Fatalf("analyze with ownership: %v", err)
+	}
+	if report.Summary.Compactions != 1 {
+		t.Fatalf("compaction count missing: %#v", report.Summary)
+	}
+	owned := report.Summary.OwnedTooling["bwb"]
+	if owned.Calls != 1 || owned.FailedCalls != 1 {
+		t.Fatalf("owned tool attribution missing: %#v", report.Summary.OwnedTooling)
+	}
+	if got := report.Tasks[0].OwnedTooling["bwb"]; got.Calls != 1 || got.FailedCalls != 1 {
+		t.Fatalf("task-owned tool attribution missing: %#v", report.Tasks[0].OwnedTooling)
+	}
+}
+
 func TestAnalyzeCodexSessionsFiltersExactTaskAndRebuildsSummary(t *testing.T) {
 	sessionsDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "breyta-workbench")
@@ -801,7 +864,16 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	if config.SchemaVersion != 1 || !strings.Contains(config.Actions.SourceContext, "bounded repository source-context") {
 		t.Fatalf("unexpected default config: %#v", config)
 	}
-	override := `{"schemaVersion":1,"actions":{"sourceContext":"Use repo context."}}`
+	override := `{
+		"schemaVersion": 1,
+		"actions": {"sourceContext": "Use repo context."},
+		"ownedTools": [{
+			"id": "bwb",
+			"repository": "breyta-workbench",
+			"executables": ["bwb"],
+			"recommendation": "Improve the local CLI first."
+		}]
+	}`
 	if err := os.WriteFile(filepath.Join(root, ".muninn.json"), []byte(override), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -811,6 +883,9 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	}
 	if config.Actions.SourceContext != "Use repo context." {
 		t.Fatalf("repository action override missing: %#v", config)
+	}
+	if len(config.OwnedTools) != 1 || config.OwnedTools[0].ID != "bwb" {
+		t.Fatalf("owned tooling config missing: %#v", config)
 	}
 }
 

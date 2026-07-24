@@ -63,12 +63,27 @@ their preferred tooling surface:
   "schemaVersion": 1,
   "actions": {
     "sourceContext": "Use the repository's bounded source-context command."
-  }
+  },
+  "ownedTools": [
+    {
+      "id": "repository-cli",
+      "repository": "path-or-logical-repo-name",
+      "executables": ["repo-cli"],
+      "recommendation": "Prefer improving this locally controlled surface."
+    }
+  ]
 }
 ```
 
 Configuration provides recommendations only. It does not weaken the privacy
-boundary or expose repository command text from sessions.
+boundary or expose repository command text from sessions. Owned-tool selectors
+are stored as one-way digests in normalized events; reports use only the
+configured ID and logical repository name.
+
+Owned-tool attribution lets Muninn prioritize fixes with a short local path.
+Findings that do not map to an owned tool can instead recommend repository
+guidance, an agent-optimized façade for a fragmented workflow, or an upstream
+follow-up.
 
 ## Direction
 
