@@ -92,9 +92,6 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		if record.EndedAt.IsZero() || event.OccurredAt.After(record.EndedAt) {
 			record.EndedAt = event.OccurredAt
 		}
-		if event.Kind != sessionEventToolOutput {
-			episode.observe(event, tokenIncrement)
-		}
 		if event.Kind == sessionEventToolCall && len(event.Targets) == 0 {
 			if event.ToolName == "apply_patch" {
 				event.Targets = normalizeRepositoryEditTargets(event.TargetCandidates, session.CWD, workspaceRoot)
@@ -105,6 +102,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		eventOperations := event.OwnedOperations
 		if len(eventOperations) == 0 {
 			eventOperations = ownership.classifyOperations(event.CommandCandidates)
+		}
+		if event.Kind != sessionEventToolOutput {
+			episode.observe(event, tokenIncrement, eventOperations)
 		}
 		postDeliveryEdits := deliveryTracker.metrics.PostDeliveryEditCalls
 		postDeliveryReviews := deliveryTracker.metrics.PostDeliveryReviewChecks
@@ -185,7 +185,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			if event.CallOccurredAt.Before(since) || event.CallOccurredAt.After(generatedAt) {
 				continue
 			}
-			episode.observe(event, codexTokenUsage{})
+			episode.observe(event, codexTokenUsage{}, eventOperations)
 			record.ToolOutputBytes += event.OutputBytes
 			if event.Truncated {
 				record.TruncatedToolCalls++
