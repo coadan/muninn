@@ -665,6 +665,7 @@ func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
 	events := eventPair(generatedAt.Add(-4*time.Minute), "other shell", []string{"bwb/api-start"}, 0)
 	events = append(events, eventPair(generatedAt.Add(-3*time.Minute), "other shell", []string{"bwb/api-start"}, 10)...)
 	events = append(events, eventPair(generatedAt.Add(-2*time.Minute), "other shell", []string{"bwb/comments"}, 0)...)
+	events = append(events, eventPair(generatedAt.Add(-90*time.Second), "other shell", []string{"bwb/comments-resolve"}, 0)...)
 	events = append(events, eventPair(generatedAt.Add(-time.Minute), "tests", nil, 0)...)
 	events = append(events, eventPair(generatedAt.Add(-45*time.Second), "other shell", []string{"bwb/test-nses"}, 0)...)
 	session := normalizedSession{
@@ -681,6 +682,9 @@ func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
 	}
 	if got := record.ExpectedWaits["bwb/comments"]; got.Calls != 1 || got.Seconds != 30 {
 		t.Fatalf("review wait=%#v want one call and 30 seconds", got)
+	}
+	if got := record.ExpectedWaits["bwb/comments-resolve"]; got.Calls != 1 || got.Seconds != 30 {
+		t.Fatalf("review resolve wait=%#v want one call and 30 seconds", got)
 	}
 	if got := record.ExpectedWaits["tests"]; got.Calls != 1 || got.Seconds != 30 {
 		t.Fatalf("test wait=%#v want one call and 30 seconds", got)

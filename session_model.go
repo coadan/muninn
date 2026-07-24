@@ -362,7 +362,10 @@ func expectedProgressWait(event normalizedSessionEvent, ownedOperations []string
 		return true
 	}
 	for _, operation := range ownedOperations {
-		if operation == "bwb/comments" || operation == "bwb/test" || strings.HasPrefix(operation, "bwb/test-") {
+		if operation == "bwb/comments" ||
+			strings.HasPrefix(operation, "bwb/comments-") ||
+			operation == "bwb/test" ||
+			strings.HasPrefix(operation, "bwb/test-") {
 			return true
 		}
 	}
