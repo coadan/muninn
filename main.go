@@ -1,0 +1,1869 @@
+package main
+
+// Muninn analyzes local Codex rollout metadata without exposing
+// prompts, raw tool inputs, raw tool output, paths, or session identifiers.
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const codexSessionInsightsSchemaVersion = 7
+
+var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
+var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
+var nonZeroProcessExitCodePattern = regexp.MustCompile(`(?i)process exited with code\s+[1-9][0-9]*`)
+var searchMissExitCodePattern = regexp.MustCompile(`(?im)(?:"exit_code"\s*:\s*1(?:[^0-9]|$)|^exit code:\s*1(?:[^0-9]|$)|process exited with code\s+1(?:[^0-9]|$))`)
+var codexNestedCommandStartPattern = regexp.MustCompile(`(?:^|[,{]\s*)(?:"cmd"|'cmd'|cmd)\s*:\s*`)
+var codexNestedContinuationPattern = regexp.MustCompile(`(?s)tools\.(?:write_stdin|wait)\s*\(\s*\{[^}]*?"?(session_id|cell_id)"?\s*:\s*(?:"([^"]+)"|'([^']+)'|([0-9]+))`)
+var codexContinuationStatusPattern = regexp.MustCompile(`(?im)^(?:script|process) running with (session|cell) id\s+([^\s]+)\s*$`)
+
+type codexTokenUsage struct {
+	InputTokens         int64 `json:"inputTokens"`
+	CachedInputTokens   int64 `json:"cachedInputTokens"`
+	UncachedInputTokens int64 `json:"uncachedInputTokens"`
+	OutputTokens        int64 `json:"outputTokens"`
+	ReasoningTokens     int64 `json:"reasoningTokens"`
+	TotalTokens         int64 `json:"totalTokens"`
+}
+
+type codexTaskInsights struct {
+	Task                  string                            `json:"task"`
+	Sessions              int                               `json:"sessions"`
+	CompletedSessions     int                               `json:"completedSessions"`
+	IncompleteSessions    int                               `json:"incompleteSessions"`
+	DurationSeconds       int64                             `json:"durationSeconds"`
+	Tokens                codexTokenUsage                   `json:"tokens"`
+	FreshTokens           int64                             `json:"freshTokens"`
+	ToolCalls             int                               `json:"toolCalls"`
+	FailedToolCalls       int                               `json:"failedToolCalls"`
+	TruncatedToolCalls    int                               `json:"truncatedToolCalls"`
+	ToolOutputBytes       int64                             `json:"toolOutputBytes"`
+	ToolOutputTokens      int64                             `json:"toolOutputTokens"`
+	ShellCommandsByFamily map[string]codexToolMetrics       `json:"shellCommandsByFamily"`
+	MixedShellShapes      map[string]codexToolMetrics       `json:"mixedShellShapes"`
+	CrossCallTransitions  map[string]codexTransitionMetrics `json:"crossCallTransitions"`
+	FailureReasons        map[string]int                    `json:"failureReasons"`
+	FailureContexts       map[string]map[string]int         `json:"failureContexts"`
+}
+
+type codexToolMetrics struct {
+	Calls                 int   `json:"calls"`
+	FailedCalls           int   `json:"failedCalls"`
+	TruncatedCalls        int   `json:"truncatedCalls"`
+	OutputBytes           int64 `json:"outputBytes"`
+	EstimatedOutputTokens int64 `json:"estimatedOutputTokens"`
+}
+
+type codexTransitionMetrics struct {
+	Count    int `json:"count"`
+	Sessions int `json:"sessions"`
+}
+
+type codexSessionInsightsSummary struct {
+	FilesScanned          int                               `json:"filesScanned"`
+	FilesUnreadable       int                               `json:"filesUnreadable"`
+	Sessions              int                               `json:"sessions"`
+	CompletedSessions     int                               `json:"completedSessions"`
+	IncompleteSessions    int                               `json:"incompleteSessions"`
+	DurationSeconds       int64                             `json:"durationSeconds"`
+	Tokens                codexTokenUsage                   `json:"tokens"`
+	FreshTokens           int64                             `json:"freshTokens"`
+	ToolCalls             int                               `json:"toolCalls"`
+	FailedToolCalls       int                               `json:"failedToolCalls"`
+	TruncatedToolCalls    int                               `json:"truncatedToolCalls"`
+	ToolOutputBytes       int64                             `json:"toolOutputBytes"`
+	ToolOutputTokens      int64                             `json:"toolOutputTokens"`
+	ToolCallsByName       map[string]int                    `json:"toolCallsByName"`
+	ToolMetricsByName     map[string]codexToolMetrics       `json:"toolMetricsByName"`
+	ShellCommandsByFamily map[string]codexToolMetrics       `json:"shellCommandsByFamily"`
+	MixedShellShapes      map[string]codexToolMetrics       `json:"mixedShellShapes"`
+	CrossCallTransitions  map[string]codexTransitionMetrics `json:"crossCallTransitions"`
+	FailureReasons        map[string]int                    `json:"failureReasons"`
+	FailureContexts       map[string]map[string]int         `json:"failureContexts"`
+}
+
+type codexSessionInsightsReport struct {
+	SchemaVersion int                         `json:"schemaVersion"`
+	Provider      string                      `json:"provider"`
+	GeneratedAt   string                      `json:"generatedAt"`
+	Since         string                      `json:"since"`
+	WorkspaceRoot string                      `json:"workspaceRoot"`
+	SessionDirs   []string                    `json:"sessionDirs"`
+	Summary       codexSessionInsightsSummary `json:"summary"`
+	Tasks         []codexTaskInsights         `json:"tasks"`
+}
+
+type codexSessionRecord struct {
+	CWD                   string
+	Task                  string
+	StartedAt             time.Time
+	EndedAt               time.Time
+	Completed             bool
+	Tokens                codexTokenUsage
+	ToolCalls             int
+	FailedToolCalls       int
+	TruncatedToolCalls    int
+	ToolOutputBytes       int64
+	ToolCallsByName       map[string]int
+	ToolMetricsByName     map[string]codexToolMetrics
+	ShellCommandsByFamily map[string]codexToolMetrics
+	MixedShellShapes      map[string]codexToolMetrics
+	CrossCallTransitions  map[string]int
+	FailureReasons        map[string]int
+	FailureContexts       map[string]map[string]int
+}
+
+type codexToolCallDescriptor struct {
+	Name   string
+	Family string
+	Shape  string
+	Active bool
+	First  string
+	Last   string
+}
+
+type codexRolloutEnvelope struct {
+	Timestamp string          `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+type codexRolloutPayload struct {
+	Type      string `json:"type"`
+	CWD       string `json:"cwd"`
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	Input     string `json:"input"`
+	Info      struct {
+		TotalTokenUsage struct {
+			InputTokens       int64 `json:"input_tokens"`
+			CachedInputTokens int64 `json:"cached_input_tokens"`
+			OutputTokens      int64 `json:"output_tokens"`
+			ReasoningTokens   int64 `json:"reasoning_output_tokens"`
+			TotalTokens       int64 `json:"total_tokens"`
+		} `json:"total_token_usage"`
+	} `json:"info"`
+	Output json.RawMessage `json:"output"`
+}
+
+type repositoryConfig struct {
+	SchemaVersion int `json:"schemaVersion"`
+	Actions       struct {
+		SourceContext string `json:"sourceContext"`
+	} `json:"actions"`
+}
+
+func defaultRepositoryConfig() repositoryConfig {
+	config := repositoryConfig{SchemaVersion: 1}
+	config.Actions.SourceContext = "Use or add one bounded repository source-context command that combines ranked search pointers with small excerpts."
+	return config
+}
+
+func loadRepositoryConfig(repoRoot, explicit string) (repositoryConfig, error) {
+	config := defaultRepositoryConfig()
+	path := strings.TrimSpace(explicit)
+	required := path != ""
+	if path == "" {
+		path = filepath.Join(repoRoot, ".muninn.json")
+	} else if !filepath.IsAbs(path) {
+		path = filepath.Join(repoRoot, path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) && !required {
+			return config, nil
+		}
+		return repositoryConfig{}, fmt.Errorf("read Muninn config %s: %w", path, err)
+	}
+	var decoded repositoryConfig
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return repositoryConfig{}, fmt.Errorf("parse Muninn config %s: %w", path, err)
+	}
+	if decoded.SchemaVersion != 1 {
+		return repositoryConfig{}, fmt.Errorf("unsupported Muninn config schemaVersion %d in %s", decoded.SchemaVersion, path)
+	}
+	if strings.TrimSpace(decoded.Actions.SourceContext) != "" {
+		config.Actions.SourceContext = strings.TrimSpace(decoded.Actions.SourceContext)
+	}
+	return config, nil
+}
+
+type sessionSource interface {
+	Name() string
+	SessionDirs(explicit string, includeArchived bool) ([]string, error)
+	Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string) (codexSessionInsightsReport, error)
+}
+
+type codexSessionSource struct{}
+
+func (codexSessionSource) Name() string {
+	return "codex"
+}
+
+func (codexSessionSource) SessionDirs(explicit string, includeArchived bool) ([]string, error) {
+	resolved, err := resolveCodexSessionsDir(explicit)
+	if err != nil {
+		return nil, err
+	}
+	dirs := []string{resolved}
+	if includeArchived {
+		archivedDir := filepath.Join(filepath.Dir(resolved), "archived_sessions")
+		if dirExists(archivedDir) {
+			dirs = append(dirs, archivedDir)
+		}
+	}
+	return dirs, nil
+}
+
+func (codexSessionSource) Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string) (codexSessionInsightsReport, error) {
+	return analyzeCodexSessionsFiltered(sessionDirs, repoRoot, since, generatedAt, taskFilter)
+}
+
+func resolveSessionSource(name string) (sessionSource, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "codex":
+		return codexSessionSource{}, nil
+	default:
+		return nil, fmt.Errorf("unsupported session provider %q (available: codex)", name)
+	}
+}
+
+func main() {
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	args := os.Args[1:]
+	if len(args) == 0 {
+		args = []string{"sessions"}
+	}
+	if strings.EqualFold(args[0], "analyze") {
+		args[0] = "sessions"
+	}
+	if err := cmdCodex(root, args); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}
+
+func isHelpToken(arg string) bool {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "help", "-h", "--help":
+		return true
+	default:
+		return false
+	}
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func setFlagSetUsage(fs *flag.FlagSet, usageLine, summary string, examples []string) {
+	fs.Usage = func() {
+		if strings.TrimSpace(summary) != "" {
+			fmt.Println(summary)
+			fmt.Println()
+		}
+		fmt.Println("Usage:")
+		fmt.Printf("  %s\n", usageLine)
+		fmt.Println()
+		fmt.Println("Flags:")
+		fs.PrintDefaults()
+		if len(examples) == 0 {
+			return
+		}
+		fmt.Println()
+		fmt.Println("Examples:")
+		for _, example := range examples {
+			if strings.TrimSpace(example) != "" {
+				fmt.Printf("  %s\n", strings.TrimSpace(example))
+			}
+		}
+	}
+}
+
+func cmdCodex(root string, args []string) error {
+	if len(args) == 0 || isHelpToken(args[0]) {
+		printCodexHelp()
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "sessions":
+		return cmdCodexSessions(root, args[1:])
+	default:
+		return fmt.Errorf("unknown Muninn command: %s", args[0])
+	}
+}
+
+func printCodexHelp() {
+	fmt.Print(`Muninn agent-session friction analysis
+
+Usage:
+  muninn analyze [flags]
+  muninn sessions [flags]
+
+Available Commands:
+  analyze   Analyze agent-session cost and friction for a repository
+  sessions  Compatibility alias for analyze
+
+Codex is the first session provider. The provider boundary is explicit so
+Claude Code and OpenCode adapters can be added later without changing the
+analysis/reporting core.
+
+Muninn skips prompts and messages. It scans tool calls locally for fixed,
+privacy-safe labels and output volume/status markers. It never prints prompts,
+tool inputs, tool output, command text, absolute paths, or session identifiers.
+
+Examples:
+  muninn
+  muninn analyze --repo .
+  muninn analyze --repo /path/to/repository --since 24h
+  muninn analyze --repo . --task my-worktree
+  muninn analyze --repo . --since 14d --include-archived
+  muninn analyze --repo . --json
+`)
+}
+
+func cmdCodexSessions(root string, args []string) error {
+	fs := flag.NewFlagSet("muninn analyze", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	sinceRaw := fs.String("since", "7d", "lookback duration (for example 24h, 7d, or 2w)")
+	providerName := fs.String("provider", "codex", "session provider (available: codex)")
+	sessionsDir := fs.String("sessions-dir", "", "provider session directory (Codex default: $CODEX_HOME/sessions or ~/.codex/sessions)")
+	repoRoot := root
+	fs.StringVar(&repoRoot, "repo", root, "only include sessions whose cwd is inside this repository")
+	fs.StringVar(&repoRoot, "workspace-root", root, "compatibility alias for --repo")
+	taskFilter := fs.String("task", "", "only include sessions attributed to this exact worktree/task ID")
+	configPath := fs.String("config", "", "repository config path (default: <repo>/.muninn.json when present)")
+	includeArchived := fs.Bool("include-archived", false, "also scan the sibling archived_sessions directory")
+	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
+	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
+	setFlagSetUsage(
+		fs,
+		"muninn analyze [--provider codex] [--repo <path>] [--since <duration>] [--sessions-dir <path>] [--task <task-id>] [--include-archived] [--json] [--limit <n>]",
+		"Summarize token usage and tool-output attribution without exposing session content or command text.",
+		[]string{
+			"muninn analyze --repo .",
+			"muninn analyze --repo . --since 24h",
+			"muninn analyze --repo . --task my-worktree",
+			"muninn analyze --repo . --since 14d --include-archived --limit 20",
+			"muninn analyze --repo . --json",
+		},
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: muninn analyze [flags]")
+	}
+	if *limit < 0 {
+		return errors.New("--limit must be 0 or greater")
+	}
+	lookback, err := parseCodexLookback(*sinceRaw)
+	if err != nil {
+		return fmt.Errorf("invalid --since value %q: %w", *sinceRaw, err)
+	}
+	source, err := resolveSessionSource(*providerName)
+	if err != nil {
+		return err
+	}
+	sessionDirs, err := source.SessionDirs(*sessionsDir, *includeArchived)
+	if err != nil {
+		return err
+	}
+	resolvedRepoRoot, err := filepath.Abs(strings.TrimSpace(repoRoot))
+	if err != nil {
+		return fmt.Errorf("resolve --repo: %w", err)
+	}
+	config, err := loadRepositoryConfig(resolvedRepoRoot, *configPath)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	report, err := source.Analyze(sessionDirs, resolvedRepoRoot, now.Add(-lookback), now, strings.TrimSpace(*taskFilter))
+	if err != nil {
+		return err
+	}
+	report.Provider = source.Name()
+	if *jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(report)
+	}
+	printCodexSessionInsights(report, config, *limit)
+	return nil
+}
+
+func resolveCodexSessionsDir(explicit string) (string, error) {
+	if strings.TrimSpace(explicit) != "" {
+		path, err := filepath.Abs(strings.TrimSpace(explicit))
+		if err != nil {
+			return "", err
+		}
+		if !dirExists(path) {
+			return "", fmt.Errorf("Codex sessions directory does not exist: %s", path)
+		}
+		return path, nil
+	}
+	codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	if codexHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	path := filepath.Join(codexHome, "sessions")
+	if !dirExists(path) {
+		return "", fmt.Errorf("Codex sessions directory does not exist: %s (use --sessions-dir)", path)
+	}
+	return path, nil
+}
+
+func parseCodexLookback(raw string) (time.Duration, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return 0, errors.New("duration cannot be empty")
+	}
+	multiplier := time.Duration(1)
+	switch {
+	case strings.HasSuffix(value, "d"):
+		multiplier = 24 * time.Hour
+		value = strings.TrimSuffix(value, "d")
+	case strings.HasSuffix(value, "w"):
+		multiplier = 7 * 24 * time.Hour
+		value = strings.TrimSuffix(value, "w")
+	default:
+		duration, err := time.ParseDuration(value)
+		if err != nil {
+			return 0, err
+		}
+		if duration <= 0 {
+			return 0, errors.New("duration must be positive")
+		}
+		return duration, nil
+	}
+	number, err := strconv.ParseFloat(value, 64)
+	if err != nil || number <= 0 {
+		return 0, errors.New("duration must be positive")
+	}
+	return time.Duration(number * float64(multiplier)), nil
+}
+
+func analyzeCodexSessions(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time) (codexSessionInsightsReport, error) {
+	return analyzeCodexSessionsFiltered(sessionDirs, workspaceRoot, since, generatedAt, "")
+}
+
+func analyzeCodexSessionsFiltered(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string) (codexSessionInsightsReport, error) {
+	report := codexSessionInsightsReport{
+		SchemaVersion: codexSessionInsightsSchemaVersion,
+		GeneratedAt:   generatedAt.Format(time.RFC3339),
+		Since:         since.Format(time.RFC3339),
+		WorkspaceRoot: workspaceRoot,
+		SessionDirs:   append([]string(nil), sessionDirs...),
+		Summary: codexSessionInsightsSummary{
+			ToolCallsByName:       map[string]int{},
+			ToolMetricsByName:     map[string]codexToolMetrics{},
+			ShellCommandsByFamily: map[string]codexToolMetrics{},
+			MixedShellShapes:      map[string]codexToolMetrics{},
+			CrossCallTransitions:  map[string]codexTransitionMetrics{},
+			FailureReasons:        map[string]int{},
+			FailureContexts:       map[string]map[string]int{},
+		},
+	}
+	taskMap := map[string]*codexTaskInsights{}
+	for _, sessionDir := range sessionDirs {
+		err := filepath.WalkDir(sessionDir, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				report.Summary.FilesUnreadable++
+				return nil
+			}
+			if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".jsonl") {
+				return nil
+			}
+			report.Summary.FilesScanned++
+			record, err := parseCodexSession(path, workspaceRoot, since, generatedAt)
+			if err != nil {
+				report.Summary.FilesUnreadable++
+				return nil
+			}
+			if record.CWD == "" || record.StartedAt.IsZero() {
+				return nil
+			}
+			if taskFilter != "" && record.Task != taskFilter {
+				return nil
+			}
+			addCodexSessionToReport(&report, taskMap, record)
+			return nil
+		})
+		if err != nil {
+			return report, fmt.Errorf("scan Codex sessions in %s: %w", sessionDir, err)
+		}
+	}
+	report.Tasks = make([]codexTaskInsights, 0, len(taskMap))
+	for _, task := range taskMap {
+		report.Tasks = append(report.Tasks, *task)
+	}
+	sort.Slice(report.Tasks, func(i, j int) bool {
+		if report.Tasks[i].FreshTokens != report.Tasks[j].FreshTokens {
+			return report.Tasks[i].FreshTokens > report.Tasks[j].FreshTokens
+		}
+		if report.Tasks[i].Sessions != report.Tasks[j].Sessions {
+			return report.Tasks[i].Sessions > report.Tasks[j].Sessions
+		}
+		return report.Tasks[i].Task < report.Tasks[j].Task
+	})
+	return report, nil
+}
+
+func parseCodexSession(path, workspaceRoot string, since, generatedAt time.Time) (codexSessionRecord, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return codexSessionRecord{}, err
+	}
+	defer file.Close()
+
+	record := codexSessionRecord{
+		ToolCallsByName:       map[string]int{},
+		ToolMetricsByName:     map[string]codexToolMetrics{},
+		ShellCommandsByFamily: map[string]codexToolMetrics{},
+		MixedShellShapes:      map[string]codexToolMetrics{},
+		CrossCallTransitions:  map[string]int{},
+		FailureReasons:        map[string]int{},
+		FailureContexts:       map[string]map[string]int{},
+	}
+	callDescriptors := map[string]codexToolCallDescriptor{}
+	execSessions := map[string]codexToolCallDescriptor{}
+	execCells := map[string]codexToolCallDescriptor{}
+	toolRound := 0
+	previousCommandRound := 0
+	previousCommand := codexToolCallDescriptor{}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !codexRolloutLineNeeded(line) {
+			continue
+		}
+		var envelope codexRolloutEnvelope
+		if err := json.Unmarshal(line, &envelope); err != nil {
+			continue
+		}
+		timestamp, err := time.Parse(time.RFC3339Nano, envelope.Timestamp)
+		active := err == nil && !timestamp.Before(since) && !timestamp.After(generatedAt)
+		if active && envelope.Type != "session_meta" {
+			if record.StartedAt.IsZero() || timestamp.Before(record.StartedAt) {
+				record.StartedAt = timestamp
+			}
+			if record.EndedAt.IsZero() || timestamp.After(record.EndedAt) {
+				record.EndedAt = timestamp
+			}
+		}
+		var payload codexRolloutPayload
+		if len(envelope.Payload) > 0 {
+			_ = json.Unmarshal(envelope.Payload, &payload)
+		}
+		switch envelope.Type {
+		case "session_meta":
+			if payload.CWD != "" {
+				record.CWD = payload.CWD
+			}
+			if record.CWD != "" && !record.StartedAt.IsZero() {
+				inside, pathErr := pathInsideRoot(workspaceRoot, record.CWD)
+				if pathErr != nil || !inside {
+					return codexSessionRecord{}, nil
+				}
+			}
+		case "event_msg":
+			if !active {
+				continue
+			}
+			switch payload.Type {
+			case "task_complete", "task_completed":
+				record.Completed = true
+			case "token_count":
+				usage := codexTokenUsage{
+					InputTokens:       payload.Info.TotalTokenUsage.InputTokens,
+					CachedInputTokens: payload.Info.TotalTokenUsage.CachedInputTokens,
+					OutputTokens:      payload.Info.TotalTokenUsage.OutputTokens,
+					ReasoningTokens:   payload.Info.TotalTokenUsage.ReasoningTokens,
+					TotalTokens:       payload.Info.TotalTokenUsage.TotalTokens,
+				}
+				usage.UncachedInputTokens = usage.InputTokens - usage.CachedInputTokens
+				if usage.UncachedInputTokens < 0 {
+					usage.UncachedInputTokens = 0
+				}
+				if usage.TotalTokens >= record.Tokens.TotalTokens {
+					record.Tokens = usage
+				}
+			}
+		case "response_item":
+			switch payload.Type {
+			case "function_call", "custom_tool_call":
+				toolRound++
+				name := strings.TrimSpace(payload.Name)
+				if name == "" {
+					name = "(unknown)"
+				}
+				descriptor := codexToolCallDescriptor{Name: name, Active: active}
+				continuation := false
+				if reference, ok := codexNestedContinuationReference(name, payload.Input); ok {
+					continuation = true
+					if reference.Type == "session" {
+						descriptor = execSessions[reference.ID]
+					} else {
+						descriptor = execCells[strings.ToLower(reference.ID)]
+					}
+					descriptor.Name = name
+					descriptor.Active = active
+					descriptor.First = ""
+					descriptor.Last = ""
+				}
+				if descriptor.Family == "" {
+					descriptor.Family, descriptor.Shape, descriptor.First, descriptor.Last = codexShellCommandDetails(name, payload.Arguments, payload.Input)
+				}
+				if descriptor.Family == "" {
+					if continuationType, continuationID := codexContinuationID(name, payload.Arguments); continuationID != "" {
+						continuation = true
+						if continuationType == "session" {
+							descriptor = execSessions[continuationID]
+						} else {
+							descriptor = execCells[continuationID]
+						}
+						descriptor.Name = name
+						descriptor.Active = active
+						descriptor.First = ""
+						descriptor.Last = ""
+					}
+				}
+				if active {
+					record.ToolCalls++
+					record.ToolCallsByName[name]++
+					addCodexToolMetrics(record.ToolMetricsByName, name, 1, false, false, 0)
+					if descriptor.Family != "" {
+						addCodexToolMetrics(record.ShellCommandsByFamily, descriptor.Family, 1, false, false, 0)
+					}
+					if descriptor.Shape != "" {
+						addCodexToolMetrics(record.MixedShellShapes, descriptor.Shape, 1, false, false, 0)
+					}
+					if !continuation && descriptor.First != "" {
+						if previousCommand.Active && previousCommandRound == toolRound-1 && previousCommand.Last != "" {
+							record.CrossCallTransitions[previousCommand.Last+" -> "+descriptor.First]++
+						}
+						previousCommand = descriptor
+						previousCommandRound = toolRound
+					}
+				}
+				if payload.CallID != "" {
+					callDescriptors[payload.CallID] = descriptor
+				}
+			case "function_call_output", "custom_tool_call_output":
+				text, statusText, byteCount := codexToolOutputText(payload.Output)
+				truncated := codexToolOutputTruncated(text)
+				descriptor := callDescriptors[payload.CallID]
+				failed := codexToolOutputFailed(statusText, descriptor.Name)
+				if descriptor.Active && active {
+					record.ToolOutputBytes += byteCount
+					if truncated {
+						record.TruncatedToolCalls++
+					}
+					if failed {
+						record.FailedToolCalls++
+						reason := codexToolFailureReasonForDescriptor(statusText, descriptor)
+						record.FailureReasons[reason]++
+						addCodexFailureContext(record.FailureContexts, reason, codexFailureContextLabel(descriptor))
+					}
+					if descriptor.Name != "" {
+						addCodexToolMetrics(record.ToolMetricsByName, descriptor.Name, 0, failed, truncated, byteCount)
+					}
+					if descriptor.Family != "" {
+						addCodexToolMetrics(record.ShellCommandsByFamily, descriptor.Family, 0, failed, truncated, byteCount)
+					}
+					if descriptor.Shape != "" {
+						addCodexToolMetrics(record.MixedShellShapes, descriptor.Shape, 0, failed, truncated, byteCount)
+					}
+				}
+				if descriptor.Family != "" {
+					for _, reference := range codexToolContinuationReferences(payload.Output) {
+						if reference.Type == "session" {
+							execSessions[reference.ID] = descriptor
+						} else {
+							execCells[strings.ToLower(reference.ID)] = descriptor
+						}
+					}
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return codexSessionRecord{}, err
+	}
+	if record.CWD == "" {
+		return codexSessionRecord{}, nil
+	}
+	inside, err := pathInsideRoot(workspaceRoot, record.CWD)
+	if err != nil || !inside {
+		return codexSessionRecord{}, nil
+	}
+	record.Task = codexTaskName(workspaceRoot, record.CWD)
+	return record, nil
+}
+
+func codexRolloutLineNeeded(line []byte) bool {
+	return bytes.Contains(line, []byte(`"type":"session_meta"`)) ||
+		bytes.Contains(line, []byte(`"type":"token_count"`)) ||
+		bytes.Contains(line, []byte(`"type":"task_complete"`)) ||
+		bytes.Contains(line, []byte(`"type":"task_completed"`)) ||
+		bytes.Contains(line, []byte(`"type":"function_call"`)) ||
+		bytes.Contains(line, []byte(`"type":"function_call_output"`)) ||
+		bytes.Contains(line, []byte(`"type":"custom_tool_call"`)) ||
+		bytes.Contains(line, []byte(`"type":"custom_tool_call_output"`))
+}
+
+func codexShellCommandFamily(toolName, arguments, input string) string {
+	family, _ := codexShellCommandAnalysis(toolName, arguments, input)
+	return family
+}
+
+func codexShellCommandAnalysis(toolName, arguments, input string) (string, string) {
+	family, shape, _, _ := codexShellCommandDetails(toolName, arguments, input)
+	return family, shape
+}
+
+func codexShellCommandDetails(toolName, arguments, input string) (string, string, string, string) {
+	commands := codexShellCommands(toolName, arguments, input)
+	if len(commands) == 0 {
+		return "", "", "", ""
+	}
+	var sequence []string
+	families := make(map[string]struct{})
+	for _, command := range commands {
+		for _, segment := range codexShellCommandSegments(command) {
+			for _, family := range codexShellSegmentFamilySequence(segment) {
+				families[family] = struct{}{}
+				if len(sequence) == 0 || sequence[len(sequence)-1] != family {
+					sequence = append(sequence, family)
+				}
+			}
+		}
+	}
+	family := codexCombinedShellFamily(families)
+	first := ""
+	last := ""
+	if len(sequence) > 0 {
+		first = sequence[0]
+		last = sequence[len(sequence)-1]
+	}
+	if family != "mixed shell" {
+		return family, "", first, last
+	}
+	const maxShapeFamilies = 5
+	if len(sequence) > maxShapeFamilies {
+		sequence = append(append([]string(nil), sequence[:maxShapeFamilies]...), "additional families")
+	}
+	return family, strings.Join(sequence, " -> "), first, last
+}
+
+func codexShellCommands(toolName, arguments, input string) []string {
+	normalizedName := strings.ToLower(strings.TrimSpace(toolName))
+	if normalizedName != "exec" && normalizedName != "exec_command" {
+		return nil
+	}
+	var commands []string
+	if normalizedName == "exec_command" {
+		var decoded struct {
+			Command string `json:"cmd"`
+		}
+		if json.Unmarshal([]byte(arguments), &decoded) == nil && decoded.Command != "" {
+			commands = append(commands, decoded.Command)
+		} else {
+			commands = append(commands, arguments)
+		}
+	} else {
+		commands = codexNestedCommands(input)
+		if len(commands) == 0 {
+			if strings.Contains(input, "tools.") {
+				return nil
+			}
+			commands = append(commands, input)
+		}
+	}
+	return commands
+}
+
+func codexNestedCommands(input string) []string {
+	var commands []string
+	for _, location := range codexNestedCommandStartPattern.FindAllStringIndex(input, -1) {
+		if command, _, ok := codexJavaScriptString(input, location[1]); ok {
+			commands = append(commands, command)
+		}
+	}
+	return commands
+}
+
+func codexJavaScriptString(input string, start int) (string, int, bool) {
+	if start >= len(input) || (input[start] != '"' && input[start] != '\'' && input[start] != '`') {
+		return "", start, false
+	}
+	quote := input[start]
+	var decoded strings.Builder
+	for index := start + 1; index < len(input); index++ {
+		current := input[index]
+		if current == quote {
+			return decoded.String(), index + 1, true
+		}
+		if current != '\\' {
+			decoded.WriteByte(current)
+			continue
+		}
+		index++
+		if index >= len(input) {
+			return "", start, false
+		}
+		escaped := input[index]
+		switch escaped {
+		case '\n':
+			continue
+		case 'n':
+			decoded.WriteByte('\n')
+		case 'r':
+			decoded.WriteByte('\r')
+		case 't':
+			decoded.WriteByte('\t')
+		case 'b':
+			decoded.WriteByte('\b')
+		case 'f':
+			decoded.WriteByte('\f')
+		case 'v':
+			decoded.WriteByte('\v')
+		case 'x', 'u':
+			digits := 2
+			if escaped == 'u' {
+				digits = 4
+			}
+			if index+digits >= len(input) {
+				return "", start, false
+			}
+			value, err := strconv.ParseUint(input[index+1:index+1+digits], 16, 32)
+			if err != nil {
+				return "", start, false
+			}
+			decoded.WriteRune(rune(value))
+			index += digits
+		default:
+			decoded.WriteByte(escaped)
+		}
+	}
+	return "", start, false
+}
+
+func codexShellSegmentsFamily(segments [][]string) string {
+	families := make(map[string]struct{})
+	for _, segment := range segments {
+		if family := codexShellSegmentFamily(segment); family != "" {
+			families[family] = struct{}{}
+		}
+	}
+	return codexCombinedShellFamily(families)
+}
+
+func codexShellSegmentFamilySequence(tokens []string) []string {
+	for len(tokens) > 0 && codexShellAssignment(tokens[0]) {
+		tokens = tokens[1:]
+	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	executable := strings.ToLower(filepath.Base(tokens[0]))
+	if executable == "env" || executable == "command" || executable == "time" || executable == "sudo" {
+		return codexShellSegmentFamilySequence(tokens[1:])
+	}
+	if executable == "bash" || executable == "zsh" || executable == "sh" {
+		for index := 1; index < len(tokens); index++ {
+			token := tokens[index]
+			if token == "--" || token == "-" || !strings.HasPrefix(token, "-") {
+				break
+			}
+			if !strings.HasPrefix(token, "--") && strings.Contains(strings.TrimPrefix(token, "-"), "c") && index+1 < len(tokens) {
+				var sequence []string
+				for _, segment := range codexShellCommandSegments(tokens[index+1]) {
+					sequence = append(sequence, codexShellSegmentFamilySequence(segment)...)
+				}
+				return sequence
+			}
+		}
+		return []string{"other shell"}
+	}
+	if family := codexShellSegmentFamily(tokens); family != "" {
+		return []string{family}
+	}
+	return nil
+}
+
+func codexCombinedShellFamily(families map[string]struct{}) string {
+	if len(families) == 0 {
+		return "other shell"
+	}
+	if len(families) > 1 {
+		return "mixed shell"
+	}
+	for family := range families {
+		return family
+	}
+	return "other shell"
+}
+
+func codexShellCommandSegments(command string) [][]string {
+	var segments [][]string
+	var tokens []string
+	var token strings.Builder
+	var quote rune
+	escaped := false
+	flushToken := func() {
+		if token.Len() > 0 {
+			tokens = append(tokens, token.String())
+			token.Reset()
+		}
+	}
+	flushSegment := func() {
+		flushToken()
+		if len(tokens) > 0 {
+			segments = append(segments, tokens)
+			tokens = nil
+		}
+	}
+	for _, current := range command {
+		if escaped {
+			token.WriteRune(current)
+			escaped = false
+			continue
+		}
+		if current == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if current == quote {
+				quote = 0
+			} else {
+				token.WriteRune(current)
+			}
+			continue
+		}
+		switch current {
+		case '\'', '"', '`':
+			quote = current
+		case ' ', '\t', '\r':
+			flushToken()
+		case '\n', ';', '|', '&':
+			flushSegment()
+		default:
+			token.WriteRune(current)
+		}
+	}
+	if escaped {
+		token.WriteByte('\\')
+	}
+	flushSegment()
+	return segments
+}
+
+func codexShellSegmentFamily(tokens []string) string {
+	for len(tokens) > 0 && codexShellAssignment(tokens[0]) {
+		tokens = tokens[1:]
+	}
+	if len(tokens) == 0 {
+		return ""
+	}
+	executable := strings.ToLower(filepath.Base(tokens[0]))
+	if executable == "env" || executable == "command" || executable == "time" || executable == "sudo" {
+		return codexShellSegmentFamily(tokens[1:])
+	}
+	if executable == "bash" || executable == "zsh" || executable == "sh" {
+		for index := 1; index < len(tokens); index++ {
+			token := tokens[index]
+			if token == "--" || token == "-" || !strings.HasPrefix(token, "-") {
+				break
+			}
+			if !strings.HasPrefix(token, "--") && strings.Contains(strings.TrimPrefix(token, "-"), "c") && index+1 < len(tokens) {
+				return codexShellSegmentsFamily(codexShellCommandSegments(tokens[index+1]))
+			}
+		}
+		return "other shell"
+	}
+	lowerTokens := make([]string, len(tokens))
+	for index, token := range tokens {
+		lowerTokens[index] = strings.ToLower(token)
+	}
+	switch executable {
+	case "rg", "grep", "egrep", "fgrep":
+		if executable == "rg" && len(lowerTokens) > 1 && lowerTokens[1] == "--files" {
+			return "file reads"
+		}
+		return "search"
+	case "sed", "head", "tail", "cat", "find", "tree", "wc", "ls":
+		return "file reads"
+	case "git":
+		subcommand := codexGitSubcommand(lowerTokens[1:])
+		switch subcommand {
+		case "diff", "status", "log", "show", "branch", "rev-parse", "rev-list", "merge-base", "ls-files", "grep":
+			return "git inspect"
+		}
+	case "go":
+		if len(lowerTokens) > 1 {
+			if lowerTokens[1] == "test" {
+				return "tests"
+			}
+			if lowerTokens[1] == "vet" || lowerTokens[1] == "build" {
+				return "build, lint, or install"
+			}
+		}
+	case "clj", "clojure", "lein", "bb":
+		for _, token := range lowerTokens[1:] {
+			if strings.Contains(token, "test") {
+				return "tests"
+			}
+		}
+	case "pytest":
+		return "tests"
+	case "cargo":
+		if len(lowerTokens) > 1 && lowerTokens[1] == "test" {
+			return "tests"
+		}
+		if len(lowerTokens) > 1 && (lowerTokens[1] == "build" || lowerTokens[1] == "clippy") {
+			return "build, lint, or install"
+		}
+	case "npm":
+		if len(lowerTokens) > 1 && lowerTokens[1] == "test" {
+			return "tests"
+		}
+		if len(lowerTokens) > 2 && lowerTokens[1] == "run" && (lowerTokens[2] == "build" || lowerTokens[2] == "lint") {
+			return "build, lint, or install"
+		}
+	case "make":
+		if len(lowerTokens) > 1 && (lowerTokens[1] == "install" || lowerTokens[1] == "build") {
+			return "build, lint, or install"
+		}
+	case "clj-kondo", "golangci-lint":
+		return "build, lint, or install"
+	case "heimdal", "playwright", "playwright-cli":
+		if len(lowerTokens) > 1 && executable == "heimdal" && lowerTokens[1] == "run" {
+			return "tests"
+		}
+		return "browser QA"
+	case "bwb":
+		for index, token := range lowerTokens {
+			if token == "inspect" && index > 0 {
+				return "bounded task inspect"
+			}
+			if token == "test" || token == "integration" {
+				return "tests"
+			}
+		}
+		return "other bwb task"
+	}
+	return "other shell"
+}
+
+func codexShellAssignment(token string) bool {
+	name, _, found := strings.Cut(token, "=")
+	if !found || name == "" {
+		return false
+	}
+	for index, current := range name {
+		if !(current == '_' || current >= 'a' && current <= 'z' || current >= 'A' && current <= 'Z' || index > 0 && current >= '0' && current <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func codexGitSubcommand(tokens []string) string {
+	for index := 0; index < len(tokens); index++ {
+		token := tokens[index]
+		if token == "-c" || token == "-C" {
+			index++
+			continue
+		}
+		if strings.HasPrefix(token, "-") {
+			continue
+		}
+		return token
+	}
+	return ""
+}
+
+func codexContinuationID(toolName, arguments string) (string, string) {
+	normalizedName := strings.ToLower(strings.TrimSpace(toolName))
+	if normalizedName != "write_stdin" && normalizedName != "wait" {
+		return "", ""
+	}
+	var decoded map[string]any
+	if json.Unmarshal([]byte(arguments), &decoded) != nil {
+		return "", ""
+	}
+	if value, ok := decoded["session_id"]; ok {
+		return "session", codexJSONScalarString(value)
+	}
+	if value, ok := decoded["cell_id"]; ok {
+		return "cell", strings.ToLower(codexJSONScalarString(value))
+	}
+	return "", ""
+}
+
+func codexNestedContinuationReference(toolName, input string) (codexContinuationReference, bool) {
+	if !strings.EqualFold(strings.TrimSpace(toolName), "exec") {
+		return codexContinuationReference{}, false
+	}
+	match := codexNestedContinuationPattern.FindStringSubmatch(input)
+	if len(match) == 0 {
+		return codexContinuationReference{}, false
+	}
+	id := ""
+	for _, candidate := range match[2:] {
+		if candidate != "" {
+			id = candidate
+			break
+		}
+	}
+	if id == "" {
+		return codexContinuationReference{}, false
+	}
+	referenceType := "cell"
+	if strings.EqualFold(match[1], "session_id") {
+		referenceType = "session"
+	}
+	return codexContinuationReference{Type: referenceType, ID: id}, true
+}
+
+func codexJSONScalarString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strconv.FormatInt(int64(typed), 10)
+	default:
+		return ""
+	}
+}
+
+type codexContinuationReference struct {
+	Type string
+	ID   string
+}
+
+func codexToolContinuationReferences(raw json.RawMessage) []codexContinuationReference {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return nil
+	}
+	var references []codexContinuationReference
+	switch typed := value.(type) {
+	case string:
+		references = append(references, codexContinuationReferencesFromStructuredText(typed)...)
+		references = append(references, codexContinuationReferencesFromWrapperStatus(typed)...)
+	case []any:
+		for index, item := range typed {
+			text := codexOutputItemText(item)
+			if text == "" {
+				continue
+			}
+			references = append(references, codexContinuationReferencesFromStructuredText(text)...)
+			if index == 0 {
+				references = append(references, codexContinuationReferencesFromWrapperStatus(text)...)
+			}
+		}
+	case map[string]any:
+		references = append(references, codexContinuationReferencesFromMap(typed, false)...)
+	}
+	return references
+}
+
+func codexOutputItemText(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case map[string]any:
+		if text, ok := typed["text"].(string); ok {
+			return text
+		}
+	}
+	return ""
+}
+
+func codexContinuationReferencesFromStructuredText(text string) []codexContinuationReference {
+	var value map[string]any
+	if json.Unmarshal([]byte(strings.TrimSpace(text)), &value) != nil {
+		return nil
+	}
+	return codexContinuationReferencesFromMap(value, true)
+}
+
+func codexContinuationReferencesFromMap(value map[string]any, requireWrapperShape bool) []codexContinuationReference {
+	if requireWrapperShape && !codexStructuredToolResultShape(value) {
+		return nil
+	}
+	var references []codexContinuationReference
+	for _, field := range []struct {
+		Key  string
+		Type string
+	}{
+		{Key: "session_id", Type: "session"},
+		{Key: "cell_id", Type: "cell"},
+	} {
+		if id := codexJSONScalarString(value[field.Key]); id != "" {
+			references = append(references, codexContinuationReference{Type: field.Type, ID: id})
+		}
+	}
+	return references
+}
+
+func codexStructuredToolResultShape(value map[string]any) bool {
+	if _, ok := value["output"]; !ok {
+		return false
+	}
+	for _, key := range []string{"chunk_id", "wall_time_seconds", "status", "exit_code", "original_token_count"} {
+		if _, ok := value[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func codexContinuationReferencesFromWrapperStatus(text string) []codexContinuationReference {
+	status := text
+	if index := strings.Index(status, "\nOutput:\n"); index >= 0 {
+		status = status[:index]
+	}
+	if len(status) > 4096 {
+		status = status[:4096]
+	}
+	var references []codexContinuationReference
+	for _, match := range codexContinuationStatusPattern.FindAllStringSubmatch(status, -1) {
+		references = append(references, codexContinuationReference{
+			Type: strings.ToLower(match[1]),
+			ID:   strings.TrimSpace(match[2]),
+		})
+	}
+	return references
+}
+
+func addCodexToolMetrics(metrics map[string]codexToolMetrics, key string, calls int, failed, truncated bool, outputBytes int64) {
+	if key == "" {
+		return
+	}
+	value := metrics[key]
+	value.Calls += calls
+	if failed {
+		value.FailedCalls++
+	}
+	if truncated {
+		value.TruncatedCalls++
+	}
+	value.OutputBytes += outputBytes
+	value.EstimatedOutputTokens = estimatedTokens(value.OutputBytes)
+	metrics[key] = value
+}
+
+func pathInsideRoot(root, path string) (bool, error) {
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return false, err
+	}
+	relative, err := filepath.Rel(root, absolutePath)
+	if err != nil {
+		return false, err
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))), nil
+}
+
+func codexTaskName(workspaceRoot, cwd string) string {
+	relative, err := filepath.Rel(workspaceRoot, cwd)
+	if err != nil || relative == "." {
+		return "(root)"
+	}
+	parts := strings.Split(filepath.Clean(relative), string(filepath.Separator))
+	if len(parts) >= 2 && parts[0] == ".worktrees" {
+		return parts[1]
+	}
+	if len(parts) >= 3 && parts[0] == ".workbench" && parts[1] == "worktrees" {
+		return parts[2]
+	}
+	if len(parts) >= 3 && parts[0] == ".workbench" && parts[1] == "repos" {
+		return "(cached)/" + parts[2]
+	}
+	return "(root)"
+}
+
+func codexToolOutputText(raw json.RawMessage) (string, string, int64) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", "", 0
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", "", int64(len(raw))
+	}
+	var texts []string
+	var collect func(any)
+	collect = func(item any) {
+		switch typed := item.(type) {
+		case string:
+			texts = append(texts, typed)
+		case []any:
+			for _, child := range typed {
+				collect(child)
+			}
+		case map[string]any:
+			if text, ok := typed["text"].(string); ok {
+				texts = append(texts, text)
+				return
+			}
+			if output, ok := typed["output"]; ok {
+				collect(output)
+			}
+		}
+	}
+	collect(value)
+	text := strings.Join(texts, "\n")
+	statusText := ""
+	if len(texts) > 0 {
+		statusText = texts[0]
+	}
+	return text, statusText, int64(len([]byte(text)))
+}
+
+func codexToolOutputTruncated(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "warning: truncated output") ||
+		strings.Contains(lower, "output truncated") ||
+		strings.Contains(lower, "…truncated")
+}
+
+func codexToolOutputFailed(statusText, toolName string) bool {
+	preview := statusText
+	if len(preview) > 8192 {
+		preview = preview[:8192]
+	}
+	lower := strings.ToLower(preview)
+	if strings.HasPrefix(strings.TrimSpace(lower), "error:") ||
+		strings.HasPrefix(strings.TrimSpace(lower), "failed:") ||
+		nonZeroDisplayExitCodePattern.MatchString(preview) {
+		return true
+	}
+	execLike := strings.Contains(strings.ToLower(toolName), "exec") ||
+		strings.EqualFold(toolName, "write_stdin") ||
+		strings.EqualFold(toolName, "wait")
+	if !execLike {
+		return false
+	}
+	if strings.Contains(lower, "script failed") ||
+		nonZeroProcessExitCodePattern.MatchString(preview) ||
+		strings.Contains(lower, "command timed out") ||
+		strings.Contains(lower, "timed out after") {
+		return true
+	}
+	if nonZeroExitCodePattern.MatchString(preview) {
+		return true
+	}
+	return false
+}
+
+func codexToolFailureReason(statusText string) string {
+	preview := strings.ToLower(statusText)
+	if len(preview) > 32768 {
+		preview = preview[:32768]
+	}
+	switch {
+	case strings.Contains(preview, "--api override is disabled"):
+		return "local CLI targeting"
+	case strings.Contains(preview, "head sha can't be blank") ||
+		strings.Contains(preview, "base sha can't be blank") ||
+		strings.Contains(preview, "no commits between"):
+		return "PR branch state"
+	case strings.Contains(preview, "unknown option") ||
+		strings.Contains(preview, "unknown flag") ||
+		strings.Contains(preview, "unrecognized option"):
+		return "unsupported command option"
+	case strings.Contains(preview, "address already in use") ||
+		strings.Contains(preview, "port already in use") ||
+		strings.Contains(preview, "bind: address in use"):
+		return "port collision"
+	case strings.Contains(preview, "connection refused") ||
+		strings.Contains(preview, "service unavailable") ||
+		strings.Contains(preview, "emulator unavailable"):
+		return "local service unavailable"
+	case strings.Contains(preview, "command not found") ||
+		strings.Contains(preview, "executable file not found"):
+		return "missing executable"
+	case strings.Contains(preview, "no such file or directory") ||
+		strings.Contains(preview, "file not found") ||
+		strings.Contains(preview, "missing fixture"):
+		return "missing path or fixture"
+	case strings.Contains(preview, "command timed out") ||
+		strings.Contains(preview, "timed out after"):
+		return "timeout"
+	case strings.Contains(preview, "process exited with code 130") ||
+		strings.Contains(preview, "process exited with code 137") ||
+		strings.Contains(preview, "terminated by signal"):
+		return "interrupted process"
+	case strings.Contains(preview, "fail in (") ||
+		strings.Contains(preview, "tests failed") ||
+		strings.Contains(preview, "test failed"):
+		return "test failure"
+	default:
+		return "other non-zero exit"
+	}
+}
+
+func codexToolFailureReasonForDescriptor(statusText string, descriptor codexToolCallDescriptor) string {
+	reason := codexToolFailureReason(statusText)
+	if reason != "other non-zero exit" || !searchMissExitCodePattern.MatchString(statusText) {
+		return reason
+	}
+	if descriptor.Family == "search" || strings.Contains(descriptor.Shape, "search") {
+		return "search no match"
+	}
+	return reason
+}
+
+func codexFailureContextLabel(descriptor codexToolCallDescriptor) string {
+	if descriptor.Shape != "" {
+		return descriptor.Shape
+	}
+	if descriptor.Family != "" {
+		return descriptor.Family
+	}
+	if descriptor.Name != "" {
+		return "tool " + descriptor.Name
+	}
+	return "(unknown)"
+}
+
+func addCodexFailureContext(contexts map[string]map[string]int, reason, context string) {
+	if reason == "" {
+		return
+	}
+	if context == "" {
+		context = "(unknown)"
+	}
+	if contexts[reason] == nil {
+		contexts[reason] = map[string]int{}
+	}
+	contexts[reason][context]++
+}
+
+func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[string]*codexTaskInsights, record codexSessionRecord) {
+	summary := &report.Summary
+	summary.Sessions++
+	if record.Completed {
+		summary.CompletedSessions++
+	} else {
+		summary.IncompleteSessions++
+	}
+	duration := codexSessionDuration(record)
+	summary.DurationSeconds += duration
+	addCodexTokenUsage(&summary.Tokens, record.Tokens)
+	summary.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
+	summary.ToolCalls += record.ToolCalls
+	summary.FailedToolCalls += record.FailedToolCalls
+	summary.TruncatedToolCalls += record.TruncatedToolCalls
+	summary.ToolOutputBytes += record.ToolOutputBytes
+	summary.ToolOutputTokens += estimatedTokens(record.ToolOutputBytes)
+	for name, count := range record.ToolCallsByName {
+		summary.ToolCallsByName[name] += count
+	}
+	for name, metrics := range record.ToolMetricsByName {
+		addCodexToolMetricsValue(summary.ToolMetricsByName, name, metrics)
+	}
+	for family, metrics := range record.ShellCommandsByFamily {
+		addCodexToolMetricsValue(summary.ShellCommandsByFamily, family, metrics)
+	}
+	for shape, metrics := range record.MixedShellShapes {
+		addCodexToolMetricsValue(summary.MixedShellShapes, shape, metrics)
+	}
+	addCodexTransitionMetrics(summary.CrossCallTransitions, record.CrossCallTransitions)
+	for reason, count := range record.FailureReasons {
+		summary.FailureReasons[reason] += count
+	}
+	addCodexFailureContexts(summary.FailureContexts, record.FailureContexts)
+
+	task := taskMap[record.Task]
+	if task == nil {
+		task = &codexTaskInsights{
+			Task:                  record.Task,
+			ShellCommandsByFamily: map[string]codexToolMetrics{},
+			MixedShellShapes:      map[string]codexToolMetrics{},
+			CrossCallTransitions:  map[string]codexTransitionMetrics{},
+			FailureReasons:        map[string]int{},
+			FailureContexts:       map[string]map[string]int{},
+		}
+		taskMap[record.Task] = task
+	}
+	task.Sessions++
+	if record.Completed {
+		task.CompletedSessions++
+	} else {
+		task.IncompleteSessions++
+	}
+	task.DurationSeconds += duration
+	addCodexTokenUsage(&task.Tokens, record.Tokens)
+	task.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
+	task.ToolCalls += record.ToolCalls
+	task.FailedToolCalls += record.FailedToolCalls
+	task.TruncatedToolCalls += record.TruncatedToolCalls
+	task.ToolOutputBytes += record.ToolOutputBytes
+	task.ToolOutputTokens += estimatedTokens(record.ToolOutputBytes)
+	for family, metrics := range record.ShellCommandsByFamily {
+		addCodexToolMetricsValue(task.ShellCommandsByFamily, family, metrics)
+	}
+	for shape, metrics := range record.MixedShellShapes {
+		addCodexToolMetricsValue(task.MixedShellShapes, shape, metrics)
+	}
+	addCodexTransitionMetrics(task.CrossCallTransitions, record.CrossCallTransitions)
+	for reason, count := range record.FailureReasons {
+		task.FailureReasons[reason] += count
+	}
+	addCodexFailureContexts(task.FailureContexts, record.FailureContexts)
+}
+
+func addCodexTransitionMetrics(target map[string]codexTransitionMetrics, additions map[string]int) {
+	for transition, count := range additions {
+		value := target[transition]
+		value.Count += count
+		value.Sessions++
+		target[transition] = value
+	}
+}
+
+func addCodexFailureContexts(target, additions map[string]map[string]int) {
+	for reason, contexts := range additions {
+		for context, count := range contexts {
+			if target[reason] == nil {
+				target[reason] = map[string]int{}
+			}
+			target[reason][context] += count
+		}
+	}
+}
+
+func addCodexToolMetricsValue(target map[string]codexToolMetrics, key string, addition codexToolMetrics) {
+	value := target[key]
+	value.Calls += addition.Calls
+	value.FailedCalls += addition.FailedCalls
+	value.TruncatedCalls += addition.TruncatedCalls
+	value.OutputBytes += addition.OutputBytes
+	value.EstimatedOutputTokens = estimatedTokens(value.OutputBytes)
+	target[key] = value
+}
+
+func codexSessionDuration(record codexSessionRecord) int64 {
+	if record.StartedAt.IsZero() || record.EndedAt.IsZero() || record.EndedAt.Before(record.StartedAt) {
+		return 0
+	}
+	return int64(record.EndedAt.Sub(record.StartedAt).Seconds())
+}
+
+func addCodexTokenUsage(total *codexTokenUsage, usage codexTokenUsage) {
+	total.InputTokens += usage.InputTokens
+	total.CachedInputTokens += usage.CachedInputTokens
+	total.UncachedInputTokens += usage.UncachedInputTokens
+	total.OutputTokens += usage.OutputTokens
+	total.ReasoningTokens += usage.ReasoningTokens
+	total.TotalTokens += usage.TotalTokens
+}
+
+func estimatedTokens(bytes int64) int64 {
+	if bytes <= 0 {
+		return 0
+	}
+	return (bytes + 3) / 4
+}
+
+func printCodexSessionInsights(report codexSessionInsightsReport, config repositoryConfig, limit int) {
+	summary := report.Summary
+	fmt.Printf("Muninn session insights since %s\n", report.Since)
+	fmt.Printf("Provider: %s\n", report.Provider)
+	fmt.Printf("Repository: %s\n", report.WorkspaceRoot)
+	fmt.Printf("Sessions: %s (%s complete, %s incomplete)\n",
+		formatCodexCount(int64(summary.Sessions)),
+		formatCodexCount(int64(summary.CompletedSessions)),
+		formatCodexCount(int64(summary.IncompleteSessions)),
+	)
+	fmt.Printf("Model tokens: %s input (%s cached, %s uncached), %s output, %s total\n",
+		formatCodexCount(summary.Tokens.InputTokens),
+		formatCodexCount(summary.Tokens.CachedInputTokens),
+		formatCodexCount(summary.Tokens.UncachedInputTokens),
+		formatCodexCount(summary.Tokens.OutputTokens),
+		formatCodexCount(summary.Tokens.TotalTokens),
+	)
+	fmt.Printf("Fresh-token proxy: %s (uncached input + output)\n", formatCodexCount(summary.FreshTokens))
+	fmt.Printf("Tool calls: %s (%s failed, %s truncated); visible output: ~%s tokens\n",
+		formatCodexCount(int64(summary.ToolCalls)),
+		formatCodexCount(int64(summary.FailedToolCalls)),
+		formatCodexCount(int64(summary.TruncatedToolCalls)),
+		formatCodexCount(summary.ToolOutputTokens),
+	)
+	if summary.FilesUnreadable > 0 {
+		fmt.Printf("Files: %s scanned, %s unreadable\n", formatCodexCount(int64(summary.FilesScanned)), formatCodexCount(int64(summary.FilesUnreadable)))
+	}
+	if len(report.Tasks) == 0 {
+		fmt.Println("\nNo matching sessions.")
+		return
+	}
+
+	rows := report.Tasks
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println("\nTop tasks by fresh-token proxy:")
+	fmt.Printf("%-48s %8s %13s %13s %10s %9s %8s\n", "TASK", "SESSIONS", "FRESH", "TOOL OUTPUT", "CALLS", "TRUNC", "FAILED")
+	for _, task := range rows {
+		fmt.Printf("%-48s %8s %13s %13s %10s %9s %8s\n",
+			truncateCodexLabel(task.Task, 48),
+			formatCodexCount(int64(task.Sessions)),
+			formatCodexCount(task.FreshTokens),
+			"~"+formatCodexCount(task.ToolOutputTokens),
+			formatCodexCount(int64(task.ToolCalls)),
+			formatCodexCount(int64(task.TruncatedToolCalls)),
+			formatCodexCount(int64(task.FailedToolCalls)),
+		)
+	}
+	if len(rows) < len(report.Tasks) {
+		fmt.Printf("... %d more tasks; use --limit 0 to show all.\n", len(report.Tasks)-len(rows))
+	}
+
+	printCodexToolMetrics("\nTool output by name:", "TOOL", summary.ToolMetricsByName, 8, 32)
+	printCodexToolMetrics("\nShell output by command family:", "FAMILY", summary.ShellCommandsByFamily, 12, 32)
+	printCodexToolMetrics("\nMixed-shell output by family sequence:", "SEQUENCE", summary.MixedShellShapes, 12, 56)
+	printCodexTransitions(summary.CrossCallTransitions, 12)
+	printCodexFailureReasons(summary.FailureReasons)
+	printCodexFailureContexts(summary.FailureContexts, 12)
+
+	fmt.Println("\nSignals:")
+	if summary.TruncatedToolCalls > 0 {
+		fmt.Printf("- %s tool calls returned truncated output. Narrow file/diff reads or lower command output before retrying.\n", formatCodexCount(int64(summary.TruncatedToolCalls)))
+	} else {
+		fmt.Println("- No truncated tool output was detected.")
+	}
+	searchReadMetrics := codexMixedSearchReadMetrics(summary.MixedShellShapes)
+	if searchReadMetrics.Calls > 0 {
+		fmt.Printf("- Bundled search/read calls returned ~%s visible tokens across %s calls. %s\n",
+			formatCodexCount(searchReadMetrics.EstimatedOutputTokens),
+			formatCodexCount(int64(searchReadMetrics.Calls)),
+			config.Actions.SourceContext,
+		)
+	}
+	multiSessionTasks := 0
+	for _, task := range report.Tasks {
+		if task.Sessions > 1 {
+			multiSessionTasks++
+		}
+	}
+	if multiSessionTasks > 0 {
+		fmt.Printf("- %s tasks span multiple sessions; preserve focused findings and validation state in task progress to avoid rediscovery.\n", formatCodexCount(int64(multiSessionTasks)))
+	}
+	searchMisses := summary.FailureReasons["search no match"]
+	if searchMisses > 0 {
+		fmt.Printf("- %s non-zero calls were search misses. Prefer a bounded source-context command that returns no matches cleanly.\n", formatCodexCount(int64(searchMisses)))
+	}
+	remainingFailures := summary.FailedToolCalls - searchMisses
+	if remainingFailures > 0 {
+		fmt.Printf("- %s remaining tool calls failed or timed out; inspect the reason/context rows before changing shared tooling.\n", formatCodexCount(int64(remainingFailures)))
+	}
+	fmt.Println("- Token counts are rollout totals, not billing amounts. Fresh-token proxy excludes cached input but does not apply model prices.")
+}
+
+func codexMixedSearchReadMetrics(shapes map[string]codexToolMetrics) codexToolMetrics {
+	var result codexToolMetrics
+	for shape, metrics := range shapes {
+		if !strings.Contains(shape, "search") || !strings.Contains(shape, "file reads") {
+			continue
+		}
+		result.Calls += metrics.Calls
+		result.FailedCalls += metrics.FailedCalls
+		result.TruncatedCalls += metrics.TruncatedCalls
+		result.OutputBytes += metrics.OutputBytes
+	}
+	result.EstimatedOutputTokens = estimatedTokens(result.OutputBytes)
+	return result
+}
+
+func printCodexFailureReasons(reasons map[string]int) {
+	type row struct {
+		Name  string
+		Count int
+	}
+	rows := make([]row, 0, len(reasons))
+	for name, count := range reasons {
+		rows = append(rows, row{Name: name, Count: count})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Println("\nFailed tool calls by fixed reason:")
+	for _, row := range rows {
+		fmt.Printf("- %-30s %s\n", row.Name, formatCodexCount(int64(row.Count)))
+	}
+}
+
+func printCodexTransitions(transitions map[string]codexTransitionMetrics, limit int) {
+	type row struct {
+		Name    string
+		Metrics codexTransitionMetrics
+	}
+	rows := make([]row, 0, len(transitions))
+	for name, metrics := range transitions {
+		rows = append(rows, row{Name: name, Metrics: metrics})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.Count != rows[j].Metrics.Count {
+			return rows[i].Metrics.Count > rows[j].Metrics.Count
+		}
+		if rows[i].Metrics.Sessions != rows[j].Metrics.Sessions {
+			return rows[i].Metrics.Sessions > rows[j].Metrics.Sessions
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	if len(rows) == 0 {
+		return
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println("\nCross-call command-family transitions:")
+	fmt.Printf("%-52s %10s %10s\n", "TRANSITION", "COUNT", "SESSIONS")
+	for _, row := range rows {
+		fmt.Printf("%-52s %10s %10s\n",
+			truncateCodexLabel(row.Name, 52),
+			formatCodexCount(int64(row.Metrics.Count)),
+			formatCodexCount(int64(row.Metrics.Sessions)),
+		)
+	}
+}
+
+func printCodexFailureContexts(contexts map[string]map[string]int, limit int) {
+	type row struct {
+		Reason  string
+		Context string
+		Count   int
+	}
+	var rows []row
+	for reason, values := range contexts {
+		for context, count := range values {
+			rows = append(rows, row{Reason: reason, Context: context, Count: count})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		if rows[i].Reason != rows[j].Reason {
+			return rows[i].Reason < rows[j].Reason
+		}
+		return rows[i].Context < rows[j].Context
+	})
+	if len(rows) == 0 {
+		return
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println("\nFailed calls by reason and privacy-safe context:")
+	fmt.Printf("%-28s %-52s %8s\n", "REASON", "CONTEXT", "CALLS")
+	for _, row := range rows {
+		fmt.Printf("%-28s %-52s %8s\n",
+			truncateCodexLabel(row.Reason, 28),
+			truncateCodexLabel(row.Context, 52),
+			formatCodexCount(int64(row.Count)),
+		)
+	}
+}
+
+func printCodexToolMetrics(title, label string, metrics map[string]codexToolMetrics, limit, labelWidth int) {
+	type row struct {
+		Name    string
+		Metrics codexToolMetrics
+	}
+	rows := make([]row, 0, len(metrics))
+	for name, value := range metrics {
+		rows = append(rows, row{Name: name, Metrics: value})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.OutputBytes != rows[j].Metrics.OutputBytes {
+			return rows[i].Metrics.OutputBytes > rows[j].Metrics.OutputBytes
+		}
+		if rows[i].Metrics.Calls != rows[j].Metrics.Calls {
+			return rows[i].Metrics.Calls > rows[j].Metrics.Calls
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	if len(rows) == 0 {
+		return
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println(title)
+	fmt.Printf("%-*s %10s %14s %10s %9s\n", labelWidth, label, "CALLS", "OUTPUT", "TRUNC", "FAILED")
+	for _, row := range rows {
+		fmt.Printf("%-*s %10s %14s %10s %9s\n",
+			labelWidth,
+			truncateCodexLabel(row.Name, labelWidth),
+			formatCodexCount(int64(row.Metrics.Calls)),
+			"~"+formatCodexCount(row.Metrics.EstimatedOutputTokens),
+			formatCodexCount(int64(row.Metrics.TruncatedCalls)),
+			formatCodexCount(int64(row.Metrics.FailedCalls)),
+		)
+	}
+}
+
+func formatCodexCount(value int64) string {
+	negative := value < 0
+	if negative {
+		value = -value
+	}
+	raw := strconv.FormatInt(value, 10)
+	for i := len(raw) - 3; i > 0; i -= 3 {
+		raw = raw[:i] + "," + raw[i:]
+	}
+	if negative {
+		return "-" + raw
+	}
+	return raw
+}
+
+func truncateCodexLabel(value string, max int) string {
+	if len(value) <= max {
+		return value
+	}
+	if max <= 1 {
+		return value[:max]
+	}
+	return value[:max-1] + "…"
+}
