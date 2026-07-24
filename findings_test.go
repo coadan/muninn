@@ -47,6 +47,24 @@ func TestCodexInlineOrchestrationExcludesEdits(t *testing.T) {
 	}
 }
 
+func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
+	findings := []sessionFinding{
+		{Category: "owned-tool", Title: "tool"},
+		{Category: "code-structure", Title: "source"},
+		{Category: "session-loop", Title: "loop"},
+	}
+	filtered, err := filterSessionFindings(findings, "structure")
+	if err != nil {
+		t.Fatalf("filter findings: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Title != "source" {
+		t.Fatalf("unexpected focused findings: %#v", filtered)
+	}
+	if _, err := filterSessionFindings(findings, "unknown"); err == nil {
+		t.Fatal("unsupported focus did not fail")
+	}
+}
+
 func zeroTime() time.Time {
 	return time.Time{}
 }

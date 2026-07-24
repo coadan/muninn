@@ -34,12 +34,14 @@ This tests Muninn and atomically installs the binary into
 ```bash
 muninn analyze --repo .
 muninn analyze --repo . --since 24h
+muninn analyze --repo . --since-commit HEAD~3
 muninn analyze --repo . --task my-task
 muninn analyze --repo . --since 14d --include-archived
 muninn analyze --repo . --json
 muninn analyze --repo . --checkpoint before-tooling-change
 muninn analyze --repo . --compare before-tooling-change
 muninn analyze --repo . --overview
+muninn analyze --repo . --focus structure
 muninn analyze --repo . --details
 ```
 
@@ -47,7 +49,9 @@ muninn analyze --repo . --details
 
 The default human report is findings-first. Use `--overview` for compact
 family totals and `--details` for command, transition, source-target, failure,
-and output rankings.
+and output rankings. Use `--focus` with `tooling`, `instructions`, `interface`,
+`structure`, `discovery`, `failures`, or `loops` to narrow the action queue
+without loading details.
 
 Muninn highlights:
 

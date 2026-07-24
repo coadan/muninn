@@ -396,11 +396,13 @@ Examples:
   muninn
   muninn analyze --repo .
   muninn analyze --repo /path/to/repository --since 24h
+  muninn analyze --repo . --since-commit HEAD~3
   muninn analyze --repo . --task my-worktree
   muninn analyze --repo . --since 14d --include-archived
   muninn analyze --repo . --checkpoint before-tooling-change
   muninn analyze --repo . --compare before-tooling-change
   muninn analyze --repo . --overview
+  muninn analyze --repo . --focus structure
   muninn analyze --repo . --details
   muninn analyze --repo . --json
 `)
@@ -410,6 +412,7 @@ func cmdCodexSessions(root string, args []string) error {
 	fs := flag.NewFlagSet("muninn analyze", flag.ContinueOnError)
 	fs.SetOutput(os.Stdout)
 	sinceRaw := fs.String("since", "7d", "lookback duration (for example 24h, 7d, or 2w)")
+	sinceCommit := fs.String("since-commit", "", "analyze activity after a Git commit timestamp")
 	providerName := fs.String("provider", "codex", "session provider (available: codex)")
 	sessionsDir := fs.String("sessions-dir", "", "provider session directory (Codex default: $CODEX_HOME/sessions or ~/.codex/sessions)")
 	repoRoot := root
@@ -430,6 +433,7 @@ func cmdCodexSessions(root string, args []string) error {
 	overviewOutput := fs.Bool("overview", false, "show aggregate family totals only")
 	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
 	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals")
+	focus := fs.String("focus", "", "filter findings: tooling, instructions, interface, structure, discovery, failures, or loops")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(
@@ -453,6 +457,15 @@ func cmdCodexSessions(root string, args []string) error {
 	if *limit < 0 {
 		return errors.New("--limit must be 0 or greater")
 	}
+	sinceWasSet := false
+	fs.Visit(func(visited *flag.Flag) {
+		if visited.Name == "since" {
+			sinceWasSet = true
+		}
+	})
+	if strings.TrimSpace(*sinceCommit) != "" && sinceWasSet {
+		return errors.New("--since and --since-commit are mutually exclusive")
+	}
 	if *noCache && (*forceRefresh || strings.TrimSpace(*checkpointName) != "" || strings.TrimSpace(*compareName) != "") {
 		return errors.New("--no-cache cannot be combined with --refresh, --checkpoint, or --compare")
 	}
@@ -468,15 +481,14 @@ func cmdCodexSessions(root string, args []string) error {
 	if viewCount > 1 {
 		return errors.New("--overview, --findings, and --details are mutually exclusive")
 	}
+	if strings.TrimSpace(*focus) != "" && (*overviewOutput || *detailsOutput) {
+		return errors.New("--focus applies to findings output and cannot be combined with --overview or --details")
+	}
 	view := "findings"
 	if *overviewOutput {
 		view = "overview"
 	} else if *detailsOutput {
 		view = "details"
-	}
-	lookback, err := parseCodexLookback(*sinceRaw)
-	if err != nil {
-		return fmt.Errorf("invalid --since value %q: %w", *sinceRaw, err)
 	}
 	source, err := resolveSessionSource(*providerName)
 	if err != nil {
@@ -490,16 +502,29 @@ func cmdCodexSessions(root string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve --repo: %w", err)
 	}
+	now := time.Now().UTC()
+	since := time.Time{}
+	if reference := strings.TrimSpace(*sinceCommit); reference != "" {
+		since, err = resolveSinceCommit(resolvedRepoRoot, reference)
+		if err != nil {
+			return err
+		}
+	} else {
+		lookback, err := parseCodexLookback(*sinceRaw)
+		if err != nil {
+			return fmt.Errorf("invalid --since value %q: %w", *sinceRaw, err)
+		}
+		since = now.Add(-lookback)
+	}
 	config, err := loadRepositoryConfig(resolvedRepoRoot, *configPath)
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
 	ownership := newOwnershipCatalog(config.OwnedTools)
 	var report codexSessionInsightsReport
 	var store *sessionStore
 	if *noCache {
-		report, err = source.Analyze(sessionDirs, resolvedRepoRoot, now.Add(-lookback), now, strings.TrimSpace(*taskFilter), ownership)
+		report, err = source.Analyze(sessionDirs, resolvedRepoRoot, since, now, strings.TrimSpace(*taskFilter), ownership)
 		if err != nil {
 			return err
 		}
@@ -522,7 +547,7 @@ func cmdCodexSessions(root string, args []string) error {
 			source.Name(),
 			sessionDirs,
 			resolvedRepoRoot,
-			now.Add(-lookback),
+			since,
 			now,
 			strings.TrimSpace(*taskFilter),
 			ownership,
@@ -534,6 +559,10 @@ func cmdCodexSessions(root string, args []string) error {
 	}
 	report.Provider = source.Name()
 	report.Findings = buildSessionFindings(report, config)
+	report.Findings, err = filterSessionFindings(report.Findings, *focus)
+	if err != nil {
+		return err
+	}
 	repositoryKey := ownershipSelectorDigest("repo", resolvedRepoRoot)
 	var baseline *codexSessionInsightsReport
 	if name := strings.TrimSpace(*compareName); name != "" {
