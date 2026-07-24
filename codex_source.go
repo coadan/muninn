@@ -11,10 +11,11 @@ import (
 
 type indexedCodexDescriptor struct {
 	codexToolCallDescriptor
-	OccurredAt        time.Time
-	SelectorDigests   []string
-	CommandCandidates []ownedCommandInvocation
-	OwnedOperations   []string
+	OccurredAt                    time.Time
+	SelectorDigests               []string
+	CommandCandidates             []ownedCommandInvocation
+	OwnedOperations               []string
+	OperationAttributionAmbiguous bool
 }
 
 func parseCodexNormalizedSession(path string) (normalizedSession, error) {
@@ -102,6 +103,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					SelectorDigests:         codexSelectorDigests(name, payload.Arguments, payload.Input),
 					CommandCandidates:       codexCommandInvocations(name, payload.Arguments, payload.Input),
 				}
+				descriptor.OperationAttributionAmbiguous = len(descriptor.CommandCandidates) > 1
 				continuation := false
 				if reference, ok := codexNestedContinuationReference(name, payload.Input); ok {
 					continuation = true
@@ -134,20 +136,21 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				}
 				sequence++
 				event := normalizedSessionEvent{
-					Sequence:          sequence,
-					OccurredAt:        timestamp,
-					Kind:              sessionEventToolCall,
-					ToolName:          name,
-					Family:            descriptor.Family,
-					Shape:             descriptor.Shape,
-					FirstFamily:       descriptor.First,
-					LastFamily:        descriptor.Last,
-					ToolRound:         toolRound,
-					SelectorDigests:   descriptor.SelectorDigests,
-					CommandCandidates: descriptor.CommandCandidates,
-					OwnedOperations:   descriptor.OwnedOperations,
-					TargetCandidates:  codexReadTargetCandidates(name, payload.Arguments, payload.Input),
-					InlineBytes:       codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
+					Sequence:                      sequence,
+					OccurredAt:                    timestamp,
+					Kind:                          sessionEventToolCall,
+					ToolName:                      name,
+					Family:                        descriptor.Family,
+					Shape:                         descriptor.Shape,
+					FirstFamily:                   descriptor.First,
+					LastFamily:                    descriptor.Last,
+					ToolRound:                     toolRound,
+					SelectorDigests:               descriptor.SelectorDigests,
+					CommandCandidates:             descriptor.CommandCandidates,
+					OwnedOperations:               descriptor.OwnedOperations,
+					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
+					TargetCandidates:              codexReadTargetCandidates(name, payload.Arguments, payload.Input),
+					InlineBytes:                   codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
 				}
 				if continuation {
 					event.FirstFamily = ""
@@ -169,21 +172,22 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				}
 				sequence++
 				session.Events = append(session.Events, normalizedSessionEvent{
-					Sequence:          sequence,
-					OccurredAt:        timestamp,
-					Kind:              sessionEventToolOutput,
-					ToolName:          descriptor.Name,
-					Family:            descriptor.Family,
-					Shape:             descriptor.Shape,
-					CallOccurredAt:    descriptor.OccurredAt,
-					Failed:            failed,
-					Truncated:         codexToolOutputTruncated(text),
-					OutputBytes:       byteCount,
-					FailureReason:     reason,
-					FailureContext:    context,
-					SelectorDigests:   descriptor.SelectorDigests,
-					CommandCandidates: descriptor.CommandCandidates,
-					OwnedOperations:   descriptor.OwnedOperations,
+					Sequence:                      sequence,
+					OccurredAt:                    timestamp,
+					Kind:                          sessionEventToolOutput,
+					ToolName:                      descriptor.Name,
+					Family:                        descriptor.Family,
+					Shape:                         descriptor.Shape,
+					CallOccurredAt:                descriptor.OccurredAt,
+					Failed:                        failed,
+					Truncated:                     codexToolOutputTruncated(text),
+					OutputBytes:                   byteCount,
+					FailureReason:                 reason,
+					FailureContext:                context,
+					SelectorDigests:               descriptor.SelectorDigests,
+					CommandCandidates:             descriptor.CommandCandidates,
+					OwnedOperations:               descriptor.OwnedOperations,
+					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
 				})
 				if descriptor.Family != "" {
 					for _, reference := range codexToolContinuationReferences(payload.Output) {

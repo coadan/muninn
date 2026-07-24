@@ -396,6 +396,20 @@ func TestCodexSelectorDigestsRecognizeOwnedCommandSubstitution(t *testing.T) {
 	if len(operations) != 1 || operations[0] != "bwb/status" {
 		t.Fatalf("owned operation in command substitution was not classified: %#v", operations)
 	}
+	if got := len(codexCommandInvocations("exec_command", arguments, "")); got != 2 {
+		t.Fatalf("eval wrapper should not add a duplicate invocation; got %d invocations", got)
+	}
+}
+
+func TestCodexCommandInvocationsExposeBundledOperationAttribution(t *testing.T) {
+	single := `{"cmd":"eval \"$(bwb task example status --env-only --env-format shell)\""}`
+	if got := len(codexCommandInvocations("exec_command", single, "")); got != 1 {
+		t.Fatalf("single wrapped operation produced %d invocations", got)
+	}
+	bundled := `{"cmd":"sed -n '1,20p' AGENTS.md; bwb task example status"}`
+	if got := len(codexCommandInvocations("exec_command", bundled, "")); got != 2 {
+		t.Fatalf("bundled command produced %d invocations", got)
+	}
 }
 
 func TestOwnedOperationFailuresAreDefiniteOnlyForOneMatchedOperation(t *testing.T) {
@@ -406,20 +420,22 @@ func TestOwnedOperationFailuresAreDefiniteOnlyForOneMatchedOperation(t *testing.
 		CWD:      workspaceRoot,
 		Events: []normalizedSessionEvent{
 			{
-				OccurredAt:      generatedAt.Add(-time.Minute),
-				Kind:            sessionEventToolCall,
-				ToolName:        "exec_command",
-				OwnedOperations: []string{"bwb/git", "bwb/test"},
+				OccurredAt:                    generatedAt.Add(-time.Minute),
+				Kind:                          sessionEventToolCall,
+				ToolName:                      "exec_command",
+				OwnedOperations:               []string{"bwb/git", "bwb/test"},
+				OperationAttributionAmbiguous: true,
 			},
 			{
-				OccurredAt:      generatedAt,
-				CallOccurredAt:  generatedAt.Add(-time.Minute),
-				Kind:            sessionEventToolOutput,
-				ToolName:        "exec_command",
-				Failed:          true,
-				FailureReason:   "test failure",
-				OutputBytes:     100,
-				OwnedOperations: []string{"bwb/git", "bwb/test"},
+				OccurredAt:                    generatedAt,
+				CallOccurredAt:                generatedAt.Add(-time.Minute),
+				Kind:                          sessionEventToolOutput,
+				ToolName:                      "exec_command",
+				Failed:                        true,
+				FailureReason:                 "test failure",
+				OutputBytes:                   100,
+				OwnedOperations:               []string{"bwb/git", "bwb/test"},
+				OperationAttributionAmbiguous: true,
 			},
 		},
 	}
@@ -431,8 +447,8 @@ func TestOwnedOperationFailuresAreDefiniteOnlyForOneMatchedOperation(t *testing.
 		if got := record.OwnedOperations[operation].FailedCalls; got != 0 {
 			t.Fatalf("%s received ambiguous failure as definite: %d", operation, got)
 		}
-		if got := record.OwnedOperationAmbiguousFailures[operation]; got != 1 {
-			t.Fatalf("%s ambiguous failures=%d want 1", operation, got)
+		if got := record.OwnedOperationAmbiguous[operation]; got.FailedCalls != 1 || got.OutputBytes != 100 {
+			t.Fatalf("%s ambiguous metrics=%#v want one failure and 100 bytes", operation, got)
 		}
 	}
 }
