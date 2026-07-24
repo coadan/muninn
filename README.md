@@ -160,10 +160,12 @@ in normalized events; reports use only the configured ID and logical
 repository name.
 
 Owned-tool attribution lets Muninn prioritize fixes with a short local path.
-Optional operation patterns use exact argument prefixes with `*` matching one
-privacy-safe variable segment. Reports retain only configured IDs such as
-`repository-cli/status`, never the matched arguments. Patterns may overlap to
-provide both broad and targeted views, so operation totals are not additive.
+Optional operation patterns use anchored argument prefixes with `*` matching
+one privacy-safe variable segment and `**` matching zero or more segments.
+When patterns overlap, Muninn attributes an invocation only to the most
+specific match; equally specific matches are retained when one command
+deliberately carries multiple classified flags. Reports retain only configured
+IDs such as `repository-cli/status`, never the matched arguments.
 Set `operationsOnly` for a CLI reached through a shared launcher such as `npm`;
 configured operations remain attributable without claiming every invocation of
 the launcher as owned tooling.
