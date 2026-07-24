@@ -219,8 +219,10 @@ distributions. Delivery rework similarly measures sequence evidence; when it
 cannot distinguish tooling, guidance, and source ownership, it reports
 `unknown` instead of guessing from review text.
 
-Delivery cohorts use bounded repository-relative directory prefixes. They work
-for ordinary repositories and monorepos; nested repository managers are only
+Delivery cohorts use bounded repository-relative directory prefixes. Exact
+rework hotspots are shown only for files that both belonged to the preceding
+delivery and were edited after a review check. They work for ordinary
+repositories and monorepos; nested repository managers are only
 path-normalization inputs. Test/review comparisons are observational and do not
 claim that the executed check covered the edited subsystem.
 

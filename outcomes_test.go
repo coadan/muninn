@@ -95,6 +95,9 @@ func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T
 	if got.ReworkLevers["source code"] != 2 || got.ReworkScopes["engine"] != 2 {
 		t.Fatalf("delivery rework attribution mismatch: %#v", got)
 	}
+	if got.ReworkTargets["engine/packages/runtime/src/runtime.go"] != 2 {
+		t.Fatalf("delivery rework target mismatch: %#v", got.ReworkTargets)
+	}
 	cohort := got.Cohorts["engine/packages/runtime"]
 	if cohort.Deliveries != 1 || cohort.DeliveriesWithRework != 1 ||
 		cohort.ReviewToEditCycles != 2 || cohort.DeliveriesWithPreTests != 1 ||
@@ -187,6 +190,20 @@ func TestDeliveryTargetCohortIsRepositoryAgnostic(t *testing.T) {
 	for target, want := range tests {
 		if got := deliveryTargetCohort(target); got != want {
 			t.Fatalf("deliveryTargetCohort(%q)=%q want %q", target, got, want)
+		}
+	}
+}
+
+func TestDeliveryTargetLabelRemovesTaskInfrastructure(t *testing.T) {
+	tests := map[string]string{
+		"src/parser/token.go":                                  "src/parser/token.go",
+		".workbench/repos/engine/src/parser/token.go":          "engine/src/parser/token.go",
+		".worktrees/task/engine/src/parser/token.go":           "engine/src/parser/token.go",
+		".workbench/worktrees/task/engine/src/parser/token.go": "engine/src/parser/token.go",
+	}
+	for target, want := range tests {
+		if got := deliveryTargetLabel(target); got != want {
+			t.Fatalf("deliveryTargetLabel(%q)=%q want %q", target, got, want)
 		}
 	}
 }

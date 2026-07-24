@@ -452,11 +452,28 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				}
 			}
 		}
+		targetEvidence := ""
+		dominantTarget, dominantTargetCount, targetTotal := dominantMetricDimension(delivery.ReworkTargets)
+		if dominantTargetCount >= 2 {
+			targetEvidence = fmt.Sprintf("; top exact rework target %s: %s cycles",
+				dominantTarget,
+				formatCodexCount(int64(dominantTargetCount)),
+			)
+			dominatesCohort := cohortName != "" &&
+				strings.HasPrefix(dominantTarget, cohortName+"/") &&
+				dominantTargetCount*2 > cohort.ReviewToEditCycles
+			if dominantTargetCount*2 > targetTotal || dominatesCohort {
+				target = dominantTarget
+				if lever == "source code" {
+					action = "Inspect this repeated exact target for an oversized source boundary or missing focused contract, strengthen the smallest justified boundary, then compare its rework."
+				}
+			}
+		}
 		findings = append(findings, sessionFinding{
 			Category: "delivery-quality",
 			Control:  "repository",
 			Title:    "review after delivery is causing repeated rework",
-			Evidence: fmt.Sprintf("%s deliveries, %s with post-delivery edits, %s review-to-edit cycles, review after the latest edit on %s deliveries, and %s post-delivery review checks across %s sessions; edit levers %s; edit scopes %s%s",
+			Evidence: fmt.Sprintf("%s deliveries, %s with post-delivery edits, %s review-to-edit cycles, review after the latest edit on %s deliveries, and %s post-delivery review checks across %s sessions; edit levers %s; edit scopes %s%s%s",
 				formatCodexCount(int64(delivery.Deliveries)),
 				formatCodexCount(int64(delivery.DeliveriesWithRework)),
 				formatCodexCount(int64(delivery.ReviewToEditCycles)),
@@ -466,6 +483,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				formatMetricDimensions(delivery.ReworkLevers),
 				formatMetricDimensions(delivery.ReworkScopes),
 				cohortEvidence,
+				targetEvidence,
 			),
 			Action:     action,
 			Count:      delivery.ReviewToEditCycles,

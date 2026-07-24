@@ -37,6 +37,7 @@ type deliveryReworkMetrics struct {
 	Sessions                        int                              `json:"sessions"`
 	ReworkLevers                    map[string]int                   `json:"reworkLevers,omitempty"`
 	ReworkScopes                    map[string]int                   `json:"reworkScopes,omitempty"`
+	ReworkTargets                   map[string]int                   `json:"reworkTargets,omitempty"`
 	Cohorts                         map[string]deliveryCohortMetrics `json:"cohorts,omitempty"`
 }
 
@@ -169,11 +170,15 @@ func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSe
 	if tracker.metrics.ReworkScopes == nil {
 		tracker.metrics.ReworkScopes = map[string]int{}
 	}
+	if tracker.metrics.ReworkTargets == nil {
+		tracker.metrics.ReworkTargets = map[string]int{}
+	}
 	levers := map[string]struct{}{}
 	scopes := map[string]struct{}{}
 	for _, target := range matchedTargets {
 		levers[reworkTargetLever(target)] = struct{}{}
 		scopes[reworkTargetScope(target)] = struct{}{}
+		tracker.metrics.ReworkTargets[deliveryTargetLabel(target)]++
 	}
 	if len(levers) == 0 {
 		levers["unknown"] = struct{}{}
@@ -266,6 +271,19 @@ func deliveryTargetCohort(target string) string {
 		depth = 2
 	}
 	return strings.Join(append(prefix, parts[:depth]...), "/")
+}
+
+func deliveryTargetLabel(target string) string {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(target)), "/")
+	switch {
+	case len(parts) >= 4 && parts[0] == ".workbench" && parts[1] == "repos":
+		parts = parts[2:]
+	case len(parts) >= 4 && parts[0] == ".worktrees":
+		parts = parts[2:]
+	case len(parts) >= 5 && parts[0] == ".workbench" && parts[1] == "worktrees":
+		parts = parts[3:]
+	}
+	return strings.Join(parts, "/")
 }
 
 func testOperation(event normalizedSessionEvent, operations []string) bool {
@@ -363,6 +381,12 @@ func addDeliveryReworkMetrics(target *deliveryReworkMetrics, addition deliveryRe
 	}
 	for scope, count := range addition.ReworkScopes {
 		target.ReworkScopes[scope] += count
+	}
+	if target.ReworkTargets == nil {
+		target.ReworkTargets = map[string]int{}
+	}
+	for name, count := range addition.ReworkTargets {
+		target.ReworkTargets[name] += count
 	}
 	if target.Cohorts == nil {
 		target.Cohorts = map[string]deliveryCohortMetrics{}
@@ -574,6 +598,9 @@ func printDeliveryReworkAnalysis(metrics deliveryReworkMetrics) {
 		)
 		if cohorts := formatDeliveryReworkCohorts(metrics.Cohorts, 3); cohorts != "" {
 			fmt.Printf("Top delivery cohorts: %s\n", cohorts)
+		}
+		if len(metrics.ReworkTargets) > 0 {
+			fmt.Printf("Top rework targets: %s\n", formatMetricDimensions(metrics.ReworkTargets))
 		}
 	}
 }
