@@ -457,6 +457,26 @@ func TestFormatRefreshCompletionIsBoundedAndActionable(t *testing.T) {
 	}
 }
 
+func TestCodexTokenUsageIncrementHandlesCounterReset(t *testing.T) {
+	previous := codexTokenUsage{
+		InputTokens:         1_000,
+		CachedInputTokens:   800,
+		UncachedInputTokens: 200,
+		OutputTokens:        100,
+		TotalTokens:         1_100,
+	}
+	reset := codexTokenUsage{
+		InputTokens:         80,
+		CachedInputTokens:   50,
+		UncachedInputTokens: 30,
+		OutputTokens:        10,
+		TotalTokens:         90,
+	}
+	if got := codexTokenUsageIncrement(reset, previous, true); got != reset {
+		t.Fatalf("counter reset should start a new token epoch: %#v", got)
+	}
+}
+
 func TestCodexCommandInvocationsExposeBundledOperationAttribution(t *testing.T) {
 	single := `{"cmd":"eval \"$(bwb task example status --env-only --env-format shell)\""}`
 	if got := len(codexCommandInvocations("exec_command", single, "")); got != 1 {
