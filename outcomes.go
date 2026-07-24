@@ -24,39 +24,67 @@ type codexTaskEpisode struct {
 }
 
 type deliveryReworkMetrics struct {
-	Deliveries               int            `json:"deliveries"`
-	PreDeliveryReviews       int            `json:"preDeliveryReviews"`
-	PostDeliveryReviewChecks int            `json:"postDeliveryReviewChecks"`
-	ReviewToEditCycles       int            `json:"reviewToEditCycles"`
-	DeliveriesWithRework     int            `json:"deliveriesWithRework"`
-	PostDeliveryEditCalls    int            `json:"postDeliveryEditCalls"`
-	ReviewOutputBytes        int64          `json:"reviewOutputBytes"`
-	Sessions                 int            `json:"sessions"`
-	ReworkLevers             map[string]int `json:"reworkLevers,omitempty"`
-	ReworkScopes             map[string]int `json:"reworkScopes,omitempty"`
+	Deliveries                      int                              `json:"deliveries"`
+	DeliveriesWithPreTests          int                              `json:"deliveriesWithPreTests"`
+	DeliveriesWithPreReview         int                              `json:"deliveriesWithPreReview"`
+	PostDeliveryReviewChecks        int                              `json:"postDeliveryReviewChecks"`
+	ReviewToEditCycles              int                              `json:"reviewToEditCycles"`
+	DeliveriesWithRework            int                              `json:"deliveriesWithRework"`
+	ReworkedDeliveriesWithPreTests  int                              `json:"reworkedDeliveriesWithPreTests"`
+	ReworkedDeliveriesWithPreReview int                              `json:"reworkedDeliveriesWithPreReview"`
+	PostDeliveryEditCalls           int                              `json:"postDeliveryEditCalls"`
+	ReviewOutputBytes               int64                            `json:"reviewOutputBytes"`
+	Sessions                        int                              `json:"sessions"`
+	ReworkLevers                    map[string]int                   `json:"reworkLevers,omitempty"`
+	ReworkScopes                    map[string]int                   `json:"reworkScopes,omitempty"`
+	Cohorts                         map[string]deliveryCohortMetrics `json:"cohorts,omitempty"`
+}
+
+type deliveryCohortMetrics struct {
+	Deliveries                      int `json:"deliveries"`
+	DeliveriesWithPreTests          int `json:"deliveriesWithPreTests"`
+	DeliveriesWithPreReview         int `json:"deliveriesWithPreReview"`
+	DeliveriesWithRework            int `json:"deliveriesWithRework"`
+	ReworkedDeliveriesWithPreTests  int `json:"reworkedDeliveriesWithPreTests"`
+	ReworkedDeliveriesWithPreReview int `json:"reworkedDeliveriesWithPreReview"`
+	ReviewToEditCycles              int `json:"reviewToEditCycles"`
 }
 
 type deliveryReworkTracker struct {
-	metrics            deliveryReworkMetrics
-	delivered          bool
-	deliveryHadRework  bool
-	reviewAwaitingEdit bool
+	metrics                  deliveryReworkMetrics
+	delivered                bool
+	deliveryHadRework        bool
+	reviewAwaitingEdit       bool
+	pendingEditCohorts       map[string]struct{}
+	testsAfterLatestEdit     bool
+	reviewAfterLatestEdit    bool
+	currentDeliveryPreTests  bool
+	currentDeliveryPreReview bool
+	currentDeliveryCohorts   map[string]struct{}
+	reworkedDeliveryCohorts  map[string]struct{}
 }
 
 func (tracker *deliveryReworkTracker) observe(event normalizedSessionEvent, operations []string) {
+	if event.Kind == sessionEventToolCall && event.ToolName == "apply_patch" {
+		tracker.observeEdit(event)
+		return
+	}
+	if event.Kind == sessionEventToolOutput && !event.Failed && len(tracker.pendingEditCohorts) > 0 {
+		if testOperation(event, operations) {
+			tracker.testsAfterLatestEdit = true
+		}
+		if reviewOperation(event, operations) {
+			tracker.reviewAfterLatestEdit = true
+		}
+	}
 	if event.Kind == sessionEventToolOutput && !event.Failed && deliveryOperation(event, operations) {
-		tracker.metrics.Deliveries++
-		tracker.delivered = true
-		tracker.deliveryHadRework = false
-		tracker.reviewAwaitingEdit = false
+		tracker.observeDelivery()
 		return
 	}
 	if reviewStart(event, operations) {
 		if tracker.delivered {
 			tracker.metrics.PostDeliveryReviewChecks++
 			tracker.reviewAwaitingEdit = true
-		} else {
-			tracker.metrics.PreDeliveryReviews++
 		}
 		return
 	}
@@ -64,10 +92,55 @@ func (tracker *deliveryReworkTracker) observe(event normalizedSessionEvent, oper
 		tracker.metrics.ReviewOutputBytes += event.OutputBytes
 		return
 	}
-	if event.Kind != sessionEventToolCall || event.ToolName != "apply_patch" ||
-		!tracker.delivered || !tracker.reviewAwaitingEdit {
-		return
+}
+
+func (tracker *deliveryReworkTracker) observeEdit(event normalizedSessionEvent) {
+	cohorts := eventTargetCohorts(event.Targets)
+	if tracker.delivered && tracker.reviewAwaitingEdit {
+		tracker.observeReviewDrivenEdit(event, cohorts)
 	}
+	if tracker.pendingEditCohorts == nil {
+		tracker.pendingEditCohorts = map[string]struct{}{}
+	}
+	for cohort := range cohorts {
+		tracker.pendingEditCohorts[cohort] = struct{}{}
+	}
+	tracker.testsAfterLatestEdit = false
+	tracker.reviewAfterLatestEdit = false
+}
+
+func (tracker *deliveryReworkTracker) observeDelivery() {
+	tracker.metrics.Deliveries++
+	if tracker.testsAfterLatestEdit {
+		tracker.metrics.DeliveriesWithPreTests++
+	}
+	if tracker.reviewAfterLatestEdit {
+		tracker.metrics.DeliveriesWithPreReview++
+	}
+	for cohort := range tracker.pendingEditCohorts {
+		metrics := tracker.cohort(cohort)
+		metrics.Deliveries++
+		if tracker.testsAfterLatestEdit {
+			metrics.DeliveriesWithPreTests++
+		}
+		if tracker.reviewAfterLatestEdit {
+			metrics.DeliveriesWithPreReview++
+		}
+		tracker.metrics.Cohorts[cohort] = metrics
+	}
+	tracker.delivered = true
+	tracker.deliveryHadRework = false
+	tracker.reviewAwaitingEdit = false
+	tracker.currentDeliveryPreTests = tracker.testsAfterLatestEdit
+	tracker.currentDeliveryPreReview = tracker.reviewAfterLatestEdit
+	tracker.currentDeliveryCohorts = cloneStringSet(tracker.pendingEditCohorts)
+	tracker.reworkedDeliveryCohorts = map[string]struct{}{}
+	tracker.pendingEditCohorts = nil
+	tracker.testsAfterLatestEdit = false
+	tracker.reviewAfterLatestEdit = false
+}
+
+func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSessionEvent, cohorts map[string]struct{}) {
 	tracker.metrics.PostDeliveryEditCalls++
 	if tracker.metrics.ReworkLevers == nil {
 		tracker.metrics.ReworkLevers = map[string]int{}
@@ -95,10 +168,97 @@ func (tracker *deliveryReworkTracker) observe(event normalizedSessionEvent, oper
 	}
 	if !tracker.deliveryHadRework {
 		tracker.metrics.DeliveriesWithRework++
+		if tracker.currentDeliveryPreTests {
+			tracker.metrics.ReworkedDeliveriesWithPreTests++
+		}
+		if tracker.currentDeliveryPreReview {
+			tracker.metrics.ReworkedDeliveriesWithPreReview++
+		}
 		tracker.deliveryHadRework = true
+	}
+	for cohort := range cohorts {
+		metrics := tracker.cohort(cohort)
+		metrics.ReviewToEditCycles++
+		_, belongedToDelivery := tracker.currentDeliveryCohorts[cohort]
+		if _, seen := tracker.reworkedDeliveryCohorts[cohort]; belongedToDelivery && !seen {
+			metrics.DeliveriesWithRework++
+			if tracker.currentDeliveryPreTests {
+				metrics.ReworkedDeliveriesWithPreTests++
+			}
+			if tracker.currentDeliveryPreReview {
+				metrics.ReworkedDeliveriesWithPreReview++
+			}
+			tracker.reworkedDeliveryCohorts[cohort] = struct{}{}
+		}
+		tracker.metrics.Cohorts[cohort] = metrics
 	}
 	tracker.metrics.ReviewToEditCycles++
 	tracker.reviewAwaitingEdit = false
+}
+
+func cloneStringSet(values map[string]struct{}) map[string]struct{} {
+	cloned := make(map[string]struct{}, len(values))
+	for value := range values {
+		cloned[value] = struct{}{}
+	}
+	return cloned
+}
+
+func (tracker *deliveryReworkTracker) cohort(name string) deliveryCohortMetrics {
+	if tracker.metrics.Cohorts == nil {
+		tracker.metrics.Cohorts = map[string]deliveryCohortMetrics{}
+	}
+	return tracker.metrics.Cohorts[name]
+}
+
+func eventTargetCohorts(targets []string) map[string]struct{} {
+	cohorts := map[string]struct{}{}
+	for _, target := range targets {
+		cohorts[deliveryTargetCohort(target)] = struct{}{}
+	}
+	if len(cohorts) == 0 {
+		cohorts["(unknown)"] = struct{}{}
+	}
+	return cohorts
+}
+
+func deliveryTargetCohort(target string) string {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(target)), "/")
+	prefix := []string{}
+	switch {
+	case len(parts) >= 4 && parts[0] == ".workbench" && parts[1] == "repos":
+		prefix = append(prefix, parts[2])
+		parts = parts[3:]
+	case len(parts) >= 3 && parts[0] == ".worktrees":
+		parts = parts[2:]
+	case len(parts) >= 5 && parts[0] == ".workbench" && parts[1] == "worktrees":
+		prefix = append(prefix, parts[3])
+		parts = parts[4:]
+	}
+	if len(parts) == 0 || parts[0] == "." {
+		return strings.Join(append(prefix, "(root)"), "/")
+	}
+	if len(parts) == 1 {
+		return strings.Join(append(prefix, "(root)"), "/")
+	}
+	depth := 1
+	if len(parts) >= 3 {
+		depth = 2
+	}
+	return strings.Join(append(prefix, parts[:depth]...), "/")
+}
+
+func testOperation(event normalizedSessionEvent, operations []string) bool {
+	if event.Family == "tests" {
+		return true
+	}
+	for _, operation := range operations {
+		name := operation[strings.LastIndex(operation, "/")+1:]
+		if name == "test" || strings.HasPrefix(name, "test-") {
+			return true
+		}
+	}
+	return false
 }
 
 func reworkTargetLever(target string) string {
@@ -162,10 +322,13 @@ func reviewOperation(event normalizedSessionEvent, operations []string) bool {
 
 func addDeliveryReworkMetrics(target *deliveryReworkMetrics, addition deliveryReworkMetrics) {
 	target.Deliveries += addition.Deliveries
-	target.PreDeliveryReviews += addition.PreDeliveryReviews
+	target.DeliveriesWithPreTests += addition.DeliveriesWithPreTests
+	target.DeliveriesWithPreReview += addition.DeliveriesWithPreReview
 	target.PostDeliveryReviewChecks += addition.PostDeliveryReviewChecks
 	target.ReviewToEditCycles += addition.ReviewToEditCycles
 	target.DeliveriesWithRework += addition.DeliveriesWithRework
+	target.ReworkedDeliveriesWithPreTests += addition.ReworkedDeliveriesWithPreTests
+	target.ReworkedDeliveriesWithPreReview += addition.ReworkedDeliveriesWithPreReview
 	target.PostDeliveryEditCalls += addition.PostDeliveryEditCalls
 	target.ReviewOutputBytes += addition.ReviewOutputBytes
 	target.Sessions += addition.Sessions
@@ -181,6 +344,24 @@ func addDeliveryReworkMetrics(target *deliveryReworkMetrics, addition deliveryRe
 	for scope, count := range addition.ReworkScopes {
 		target.ReworkScopes[scope] += count
 	}
+	if target.Cohorts == nil {
+		target.Cohorts = map[string]deliveryCohortMetrics{}
+	}
+	for cohort, metrics := range addition.Cohorts {
+		current := target.Cohorts[cohort]
+		addDeliveryCohortMetrics(&current, metrics)
+		target.Cohorts[cohort] = current
+	}
+}
+
+func addDeliveryCohortMetrics(target *deliveryCohortMetrics, addition deliveryCohortMetrics) {
+	target.Deliveries += addition.Deliveries
+	target.DeliveriesWithPreTests += addition.DeliveriesWithPreTests
+	target.DeliveriesWithPreReview += addition.DeliveriesWithPreReview
+	target.DeliveriesWithRework += addition.DeliveriesWithRework
+	target.ReworkedDeliveriesWithPreTests += addition.ReworkedDeliveriesWithPreTests
+	target.ReworkedDeliveriesWithPreReview += addition.ReworkedDeliveriesWithPreReview
+	target.ReviewToEditCycles += addition.ReviewToEditCycles
 }
 
 func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncrement codexTokenUsage) {
@@ -349,19 +530,73 @@ func printDeliveryReworkAnalysis(metrics deliveryReworkMetrics) {
 	}
 	reworkRate := 100 * ratio(float64(metrics.DeliveriesWithRework), float64(metrics.Deliveries))
 	fmt.Printf(
-		"Delivery quality: %s deliveries, %s with post-delivery edits (%.0f%%), %s review→edit cycles, %s pre-delivery reviews, %s post-delivery review checks\n",
+		"Delivery quality: %s deliveries, %s with post-delivery edits (%.0f%%), %s review→edit cycles, %s post-delivery review checks\n",
 		formatCodexCount(int64(metrics.Deliveries)),
 		formatCodexCount(int64(metrics.DeliveriesWithRework)),
 		reworkRate,
 		formatCodexCount(int64(metrics.ReviewToEditCycles)),
-		formatCodexCount(int64(metrics.PreDeliveryReviews)),
 		formatCodexCount(int64(metrics.PostDeliveryReviewChecks)),
 	)
+	if metrics.Deliveries > 0 {
+		fmt.Printf(
+			"Pre-delivery evidence after latest edit: tests %s/%s deliveries; review %s/%s deliveries\n",
+			formatCodexCount(int64(metrics.DeliveriesWithPreTests)),
+			formatCodexCount(int64(metrics.Deliveries)),
+			formatCodexCount(int64(metrics.DeliveriesWithPreReview)),
+			formatCodexCount(int64(metrics.Deliveries)),
+		)
+	}
 	if metrics.PostDeliveryEditCalls > 0 {
 		fmt.Printf(
 			"Post-delivery edit attribution: levers %s; scopes %s\n",
 			formatMetricDimensions(metrics.ReworkLevers),
 			formatMetricDimensions(metrics.ReworkScopes),
 		)
+		if cohorts := formatDeliveryReworkCohorts(metrics.Cohorts, 3); cohorts != "" {
+			fmt.Printf("Top delivery cohorts: %s\n", cohorts)
+		}
 	}
+}
+
+func formatDeliveryReworkCohorts(cohorts map[string]deliveryCohortMetrics, limit int) string {
+	type row struct {
+		name    string
+		metrics deliveryCohortMetrics
+	}
+	rows := make([]row, 0, len(cohorts))
+	for name, metrics := range cohorts {
+		if metrics.ReviewToEditCycles == 0 || name == "(unknown)" {
+			continue
+		}
+		rows = append(rows, row{name: name, metrics: metrics})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].metrics.ReviewToEditCycles != rows[j].metrics.ReviewToEditCycles {
+			return rows[i].metrics.ReviewToEditCycles > rows[j].metrics.ReviewToEditCycles
+		}
+		return rows[i].name < rows[j].name
+	})
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		testEvidence := fmt.Sprintf(
+			"tests %s/%s",
+			formatCodexCount(int64(row.metrics.DeliveriesWithPreTests)),
+			formatCodexCount(int64(row.metrics.Deliveries)),
+		)
+		if comparison := deliveryTestComparison(row.metrics); comparison != "" {
+			testEvidence = comparison
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%s %s/%s reworked, %s cycles, %s",
+			row.name,
+			formatCodexCount(int64(row.metrics.DeliveriesWithRework)),
+			formatCodexCount(int64(row.metrics.Deliveries)),
+			formatCodexCount(int64(row.metrics.ReviewToEditCycles)),
+			testEvidence,
+		))
+	}
+	return strings.Join(parts, "; ")
 }

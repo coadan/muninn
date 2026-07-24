@@ -286,6 +286,44 @@ func TestBuildSessionFindingsFlagsRepeatedPostDeliveryReviewChecks(t *testing.T)
 	}
 }
 
+func TestBuildSessionFindingsLocalizesDeliveryReworkToGenericCohort(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries:              8,
+		DeliveriesWithRework:    3,
+		ReviewToEditCycles:      5,
+		PostDeliveryEditCalls:   5,
+		Sessions:                4,
+		ReworkLevers:            map[string]int{"source code": 5},
+		ReworkScopes:            map[string]int{"(root)": 5},
+		DeliveriesWithPreTests:  2,
+		DeliveriesWithPreReview: 1,
+		Cohorts: map[string]deliveryCohortMetrics{
+			"packages/runtime": {
+				Deliveries:             5,
+				DeliveriesWithRework:   3,
+				ReviewToEditCycles:     5,
+				DeliveriesWithPreTests: 1,
+			},
+			"apps/web": {
+				Deliveries:           3,
+				DeliveriesWithRework: 1,
+				ReviewToEditCycles:   1,
+			},
+		},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 {
+		t.Fatalf("expected one localized delivery finding: %#v", findings)
+	}
+	finding := findings[0]
+	if finding.Target != "packages/runtime" || finding.Lever != "source code" ||
+		!strings.Contains(finding.Action, "focused test for this cohort") ||
+		!strings.Contains(finding.Evidence, "top cohort packages/runtime") {
+		t.Fatalf("localized delivery finding mismatch: %#v", finding)
+	}
+}
+
 func TestBuildSessionFindingsFlagsCompletedTaskCostTail(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Outcomes = completionEpisodeAnalysis{

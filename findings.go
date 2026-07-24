@@ -419,7 +419,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			case "source code":
 				action = "Strengthen the source boundary and focused tests that should catch this review class before delivery."
 			}
-		} else if delivery.PreDeliveryReviews == 0 {
+		} else if delivery.DeliveriesWithPreReview == 0 {
 			lever = "tooling"
 			confidence = "high"
 			action = "Add or strengthen a bounded pre-delivery review gate before push, then compare post-delivery rework on the same repository cohort."
@@ -429,19 +429,43 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		if dominantScope != "" && dominantScope != "(root)" && dominantScope != "(unknown)" {
 			target = dominantScope
 		}
+		cohortName, cohort := dominantDeliveryReworkCohort(delivery.Cohorts)
+		cohortEvidence := ""
+		if cohortName != "" {
+			target = cohortName
+			cohortEvidence = fmt.Sprintf("; top cohort %s: %s observed deliveries, %s with rework, %s review-to-edit cycles, tests after the latest edit on %s deliveries, and review after the latest edit on %s deliveries",
+				cohortName,
+				formatCodexCount(int64(cohort.Deliveries)),
+				formatCodexCount(int64(cohort.DeliveriesWithRework)),
+				formatCodexCount(int64(cohort.ReviewToEditCycles)),
+				formatCodexCount(int64(cohort.DeliveriesWithPreTests)),
+				formatCodexCount(int64(cohort.DeliveriesWithPreReview)),
+			)
+			if comparison := deliveryTestComparison(cohort); comparison != "" {
+				cohortEvidence += "; " + comparison
+			}
+			if lever == "source code" && cohort.Deliveries >= 2 {
+				if cohort.DeliveriesWithPreTests*2 < cohort.Deliveries {
+					action = "Add a focused test for this cohort and require it after its latest edit before delivery, then compare its rework rate."
+				} else if cohort.ReworkedDeliveriesWithPreTests > 0 {
+					action = "Tests already ran after edits on reworked deliveries in this cohort; strengthen their assertions or the source boundary they should protect."
+				}
+			}
+		}
 		findings = append(findings, sessionFinding{
 			Category: "delivery-quality",
 			Control:  "repository",
 			Title:    "review after delivery is causing repeated rework",
-			Evidence: fmt.Sprintf("%s deliveries, %s with post-delivery edits, %s review-to-edit cycles, %s pre-delivery reviews, and %s post-delivery review checks across %s sessions; edit levers %s; edit scopes %s",
+			Evidence: fmt.Sprintf("%s deliveries, %s with post-delivery edits, %s review-to-edit cycles, review after the latest edit on %s deliveries, and %s post-delivery review checks across %s sessions; edit levers %s; edit scopes %s%s",
 				formatCodexCount(int64(delivery.Deliveries)),
 				formatCodexCount(int64(delivery.DeliveriesWithRework)),
 				formatCodexCount(int64(delivery.ReviewToEditCycles)),
-				formatCodexCount(int64(delivery.PreDeliveryReviews)),
+				formatCodexCount(int64(delivery.DeliveriesWithPreReview)),
 				formatCodexCount(int64(delivery.PostDeliveryReviewChecks)),
 				formatCodexCount(int64(delivery.Sessions)),
 				formatMetricDimensions(delivery.ReworkLevers),
 				formatMetricDimensions(delivery.ReworkScopes),
+				cohortEvidence,
 			),
 			Action:     action,
 			Count:      delivery.ReviewToEditCycles,
@@ -507,6 +531,42 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		return findings[i].Title < findings[j].Title
 	})
 	return diversifySessionFindings(findings)
+}
+
+func dominantDeliveryReworkCohort(cohorts map[string]deliveryCohortMetrics) (string, deliveryCohortMetrics) {
+	name := ""
+	metrics := deliveryCohortMetrics{}
+	for candidate, value := range cohorts {
+		if candidate == "(unknown)" || value.ReviewToEditCycles == 0 {
+			continue
+		}
+		if value.ReviewToEditCycles > metrics.ReviewToEditCycles ||
+			(value.ReviewToEditCycles == metrics.ReviewToEditCycles &&
+				(value.DeliveriesWithRework > metrics.DeliveriesWithRework ||
+					(value.DeliveriesWithRework == metrics.DeliveriesWithRework && candidate < name))) {
+			name = candidate
+			metrics = value
+		}
+	}
+	return name, metrics
+}
+
+func deliveryTestComparison(metrics deliveryCohortMetrics) string {
+	testedDeliveries := metrics.DeliveriesWithPreTests
+	untestedDeliveries := metrics.Deliveries - testedDeliveries
+	testedRework := metrics.ReworkedDeliveriesWithPreTests
+	untestedRework := metrics.DeliveriesWithRework - testedRework
+	if testedDeliveries == 0 || untestedDeliveries == 0 ||
+		testedRework < 0 || untestedRework < 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"rework occurred on %s/%s tested deliveries versus %s/%s without a post-edit test",
+		formatCodexCount(int64(testedRework)),
+		formatCodexCount(int64(testedDeliveries)),
+		formatCodexCount(int64(untestedRework)),
+		formatCodexCount(int64(untestedDeliveries)),
+	)
 }
 
 func dominantMetricDimension(values map[string]int) (name string, count, total int) {
