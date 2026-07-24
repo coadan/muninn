@@ -85,7 +85,7 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 		analysis.TailDrivers.Targets[0].Name != "packages/runtime/worker.ts" {
 		t.Fatalf("exact target driver mismatch: %#v", analysis.TailDrivers.Targets)
 	}
-	if formatted := formatTaskCostTailDrivers(analysis.TailDrivers); !strings.Contains(formatted, "targets packages/runtime/worker.ts") {
+	if formatted := formatTaskCostTailDrivers(analysis.TailDrivers); !strings.Contains(formatted, "cohort targets packages/runtime/worker.ts") {
 		t.Fatalf("formatted tail drivers omit exact target: %q", formatted)
 	}
 }
