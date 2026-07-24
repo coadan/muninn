@@ -15,6 +15,17 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	repositoryRoot := filepath.Join(t.TempDir(), "repository")
 	writeCodexSessionFixture(t, sessionsDir, "indexed", []any{
 		map[string]any{
+			"timestamp": "2026-07-23T08:00:00Z",
+			"type":      "event_msg",
+			"payload": map[string]any{
+				"type": "token_count",
+				"info": map[string]any{"total_token_usage": map[string]any{
+					"input_tokens": 60, "cached_input_tokens": 40,
+					"output_tokens": 5, "total_tokens": 65,
+				}},
+			},
+		},
+		map[string]any{
 			"timestamp": "2026-07-24T08:00:00Z",
 			"type":      "session_meta",
 			"payload":   map[string]any{"cwd": repositoryRoot},
@@ -86,6 +97,13 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	directJSON, _ := json.Marshal(direct.Summary)
 	if string(indexedJSON) != string(directJSON) {
 		t.Fatalf("indexed and direct summaries differ:\nindexed=%s\ndirect=%s", indexedJSON, directJSON)
+	}
+	if got := indexed.Summary.Tokens; got.InputTokens != 20 ||
+		got.CachedInputTokens != 10 ||
+		got.UncachedInputTokens != 10 ||
+		got.OutputTokens != 5 ||
+		got.TotalTokens != 25 {
+		t.Fatalf("indexed window token delta mismatch: %#v", got)
 	}
 }
 

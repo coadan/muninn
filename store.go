@@ -443,12 +443,24 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
 		WHERE sources.provider = ?
-		  AND events.occurred_at_ns >= ?
-		  AND events.occurred_at_ns <= ?
+		  AND (
+		    (events.occurred_at_ns >= ? AND events.occurred_at_ns <= ?)
+		    OR (
+		      events.kind = 'token'
+		      AND events.sequence = (
+		        SELECT MAX(baseline.sequence)
+		        FROM events AS baseline
+		        WHERE baseline.session_id = sessions.id
+		          AND baseline.kind = 'token'
+		          AND baseline.occurred_at_ns < ?
+		      )
+		    )
+		  )
 		ORDER BY sessions.id, events.sequence`,
 		provider,
 		since.UnixNano(),
 		generatedAt.UnixNano(),
+		since.UnixNano(),
 	)
 	if err != nil {
 		return report, fmt.Errorf("query indexed sessions: %w", err)

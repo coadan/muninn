@@ -62,7 +62,17 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 
 	previousCommandRound := 0
 	previousCommand := normalizedSessionEvent{}
+	previousTokens := codexTokenUsage{}
+	hasPreviousTokens := false
 	for _, event := range session.Events {
+		if event.Kind == sessionEventToken && !event.OccurredAt.After(generatedAt) {
+			if !event.OccurredAt.Before(since) {
+				increment := codexTokenUsageIncrement(event.Tokens, previousTokens, hasPreviousTokens)
+				addCodexTokenUsage(&record.Tokens, increment)
+			}
+			previousTokens = event.Tokens
+			hasPreviousTokens = true
+		}
 		active := !event.OccurredAt.Before(since) && !event.OccurredAt.After(generatedAt)
 		if !active {
 			continue
@@ -79,10 +89,6 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		case sessionEventCompaction:
 			record.Compactions++
 			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
-		case sessionEventToken:
-			if event.Tokens.TotalTokens >= record.Tokens.TotalTokens {
-				record.Tokens = event.Tokens
-			}
 		case sessionEventToolCall:
 			record.ToolCalls++
 			if event.InlineBytes > 0 {
@@ -201,6 +207,20 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	record.Task = codexTaskName(workspaceRoot, record.CWD)
 	touchSessionActivity(record.Activity, "task", record.Task, record.EndedAt)
 	return record, nil
+}
+
+func codexTokenUsageIncrement(current, previous codexTokenUsage, hasPrevious bool) codexTokenUsage {
+	if !hasPrevious || current.TotalTokens < previous.TotalTokens {
+		return current
+	}
+	return codexTokenUsage{
+		InputTokens:         max(int64(0), current.InputTokens-previous.InputTokens),
+		CachedInputTokens:   max(int64(0), current.CachedInputTokens-previous.CachedInputTokens),
+		UncachedInputTokens: max(int64(0), current.UncachedInputTokens-previous.UncachedInputTokens),
+		OutputTokens:        max(int64(0), current.OutputTokens-previous.OutputTokens),
+		ReasoningTokens:     max(int64(0), current.ReasoningTokens-previous.ReasoningTokens),
+		TotalTokens:         max(int64(0), current.TotalTokens-previous.TotalTokens),
+	}
 }
 
 func newCodexSessionRecord() codexSessionRecord {
