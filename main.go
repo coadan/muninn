@@ -4,7 +4,6 @@ package main
 // prompts, raw tool inputs, raw tool output, paths, or session identifiers.
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -20,7 +19,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 7
+const codexSessionInsightsSchemaVersion = 8
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -45,6 +44,7 @@ type codexTaskInsights struct {
 	CompletedSessions     int                               `json:"completedSessions"`
 	IncompleteSessions    int                               `json:"incompleteSessions"`
 	DurationSeconds       int64                             `json:"durationSeconds"`
+	Compactions           int                               `json:"compactions"`
 	Tokens                codexTokenUsage                   `json:"tokens"`
 	FreshTokens           int64                             `json:"freshTokens"`
 	ToolCalls             int                               `json:"toolCalls"`
@@ -55,6 +55,7 @@ type codexTaskInsights struct {
 	ShellCommandsByFamily map[string]codexToolMetrics       `json:"shellCommandsByFamily"`
 	MixedShellShapes      map[string]codexToolMetrics       `json:"mixedShellShapes"`
 	CrossCallTransitions  map[string]codexTransitionMetrics `json:"crossCallTransitions"`
+	OwnedTooling          map[string]codexToolMetrics       `json:"ownedTooling"`
 	FailureReasons        map[string]int                    `json:"failureReasons"`
 	FailureContexts       map[string]map[string]int         `json:"failureContexts"`
 }
@@ -79,6 +80,7 @@ type codexSessionInsightsSummary struct {
 	CompletedSessions     int                               `json:"completedSessions"`
 	IncompleteSessions    int                               `json:"incompleteSessions"`
 	DurationSeconds       int64                             `json:"durationSeconds"`
+	Compactions           int                               `json:"compactions"`
 	Tokens                codexTokenUsage                   `json:"tokens"`
 	FreshTokens           int64                             `json:"freshTokens"`
 	ToolCalls             int                               `json:"toolCalls"`
@@ -91,6 +93,7 @@ type codexSessionInsightsSummary struct {
 	ShellCommandsByFamily map[string]codexToolMetrics       `json:"shellCommandsByFamily"`
 	MixedShellShapes      map[string]codexToolMetrics       `json:"mixedShellShapes"`
 	CrossCallTransitions  map[string]codexTransitionMetrics `json:"crossCallTransitions"`
+	OwnedTooling          map[string]codexToolMetrics       `json:"ownedTooling"`
 	FailureReasons        map[string]int                    `json:"failureReasons"`
 	FailureContexts       map[string]map[string]int         `json:"failureContexts"`
 }
@@ -112,6 +115,7 @@ type codexSessionRecord struct {
 	StartedAt             time.Time
 	EndedAt               time.Time
 	Completed             bool
+	Compactions           int
 	Tokens                codexTokenUsage
 	ToolCalls             int
 	FailedToolCalls       int
@@ -122,6 +126,7 @@ type codexSessionRecord struct {
 	ShellCommandsByFamily map[string]codexToolMetrics
 	MixedShellShapes      map[string]codexToolMetrics
 	CrossCallTransitions  map[string]int
+	OwnedTooling          map[string]codexToolMetrics
 	FailureReasons        map[string]int
 	FailureContexts       map[string]map[string]int
 }
@@ -165,6 +170,7 @@ type repositoryConfig struct {
 	Actions       struct {
 		SourceContext string `json:"sourceContext"`
 	} `json:"actions"`
+	OwnedTools []ownedToolConfig `json:"ownedTools"`
 }
 
 func defaultRepositoryConfig() repositoryConfig {
@@ -199,13 +205,17 @@ func loadRepositoryConfig(repoRoot, explicit string) (repositoryConfig, error) {
 	if strings.TrimSpace(decoded.Actions.SourceContext) != "" {
 		config.Actions.SourceContext = strings.TrimSpace(decoded.Actions.SourceContext)
 	}
+	if err := validateOwnedToolConfig(decoded.OwnedTools); err != nil {
+		return repositoryConfig{}, fmt.Errorf("parse Muninn config %s: %w", path, err)
+	}
+	config.OwnedTools = decoded.OwnedTools
 	return config, nil
 }
 
 type sessionSource interface {
 	Name() string
 	SessionDirs(explicit string, includeArchived bool) ([]string, error)
-	Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string) (codexSessionInsightsReport, error)
+	Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog) (codexSessionInsightsReport, error)
 }
 
 type codexSessionSource struct{}
@@ -229,8 +239,8 @@ func (codexSessionSource) SessionDirs(explicit string, includeArchived bool) ([]
 	return dirs, nil
 }
 
-func (codexSessionSource) Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string) (codexSessionInsightsReport, error) {
-	return analyzeCodexSessionsFiltered(sessionDirs, repoRoot, since, generatedAt, taskFilter)
+func (codexSessionSource) Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog) (codexSessionInsightsReport, error) {
+	return analyzeCodexSessionsFilteredWithOwnership(sessionDirs, repoRoot, since, generatedAt, taskFilter, ownership)
 }
 
 func resolveSessionSource(name string) (sessionSource, error) {
@@ -397,7 +407,7 @@ func cmdCodexSessions(root string, args []string) error {
 		return err
 	}
 	now := time.Now().UTC()
-	report, err := source.Analyze(sessionDirs, resolvedRepoRoot, now.Add(-lookback), now, strings.TrimSpace(*taskFilter))
+	report, err := source.Analyze(sessionDirs, resolvedRepoRoot, now.Add(-lookback), now, strings.TrimSpace(*taskFilter), newOwnershipCatalog(config.OwnedTools))
 	if err != nil {
 		return err
 	}
@@ -472,6 +482,10 @@ func analyzeCodexSessions(sessionDirs []string, workspaceRoot string, since, gen
 }
 
 func analyzeCodexSessionsFiltered(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string) (codexSessionInsightsReport, error) {
+	return analyzeCodexSessionsFilteredWithOwnership(sessionDirs, workspaceRoot, since, generatedAt, taskFilter, ownershipCatalog{})
+}
+
+func analyzeCodexSessionsFilteredWithOwnership(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog) (codexSessionInsightsReport, error) {
 	report := codexSessionInsightsReport{
 		SchemaVersion: codexSessionInsightsSchemaVersion,
 		GeneratedAt:   generatedAt.Format(time.RFC3339),
@@ -484,6 +498,7 @@ func analyzeCodexSessionsFiltered(sessionDirs []string, workspaceRoot string, si
 			ShellCommandsByFamily: map[string]codexToolMetrics{},
 			MixedShellShapes:      map[string]codexToolMetrics{},
 			CrossCallTransitions:  map[string]codexTransitionMetrics{},
+			OwnedTooling:          map[string]codexToolMetrics{},
 			FailureReasons:        map[string]int{},
 			FailureContexts:       map[string]map[string]int{},
 		},
@@ -499,7 +514,7 @@ func analyzeCodexSessionsFiltered(sessionDirs []string, workspaceRoot string, si
 				return nil
 			}
 			report.Summary.FilesScanned++
-			record, err := parseCodexSession(path, workspaceRoot, since, generatedAt)
+			record, err := parseCodexSessionWithOwnership(path, workspaceRoot, since, generatedAt, ownership)
 			if err != nil {
 				report.Summary.FilesUnreadable++
 				return nil
@@ -534,200 +549,21 @@ func analyzeCodexSessionsFiltered(sessionDirs []string, workspaceRoot string, si
 }
 
 func parseCodexSession(path, workspaceRoot string, since, generatedAt time.Time) (codexSessionRecord, error) {
-	file, err := os.Open(path)
+	return parseCodexSessionWithOwnership(path, workspaceRoot, since, generatedAt, ownershipCatalog{})
+}
+
+func parseCodexSessionWithOwnership(path, workspaceRoot string, since, generatedAt time.Time, ownership ownershipCatalog) (codexSessionRecord, error) {
+	session, err := parseCodexNormalizedSession(path)
 	if err != nil {
 		return codexSessionRecord{}, err
 	}
-	defer file.Close()
-
-	record := codexSessionRecord{
-		ToolCallsByName:       map[string]int{},
-		ToolMetricsByName:     map[string]codexToolMetrics{},
-		ShellCommandsByFamily: map[string]codexToolMetrics{},
-		MixedShellShapes:      map[string]codexToolMetrics{},
-		CrossCallTransitions:  map[string]int{},
-		FailureReasons:        map[string]int{},
-		FailureContexts:       map[string]map[string]int{},
-	}
-	callDescriptors := map[string]codexToolCallDescriptor{}
-	execSessions := map[string]codexToolCallDescriptor{}
-	execCells := map[string]codexToolCallDescriptor{}
-	toolRound := 0
-	previousCommandRound := 0
-	previousCommand := codexToolCallDescriptor{}
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if !codexRolloutLineNeeded(line) {
-			continue
-		}
-		var envelope codexRolloutEnvelope
-		if err := json.Unmarshal(line, &envelope); err != nil {
-			continue
-		}
-		timestamp, err := time.Parse(time.RFC3339Nano, envelope.Timestamp)
-		active := err == nil && !timestamp.Before(since) && !timestamp.After(generatedAt)
-		if active && envelope.Type != "session_meta" {
-			if record.StartedAt.IsZero() || timestamp.Before(record.StartedAt) {
-				record.StartedAt = timestamp
-			}
-			if record.EndedAt.IsZero() || timestamp.After(record.EndedAt) {
-				record.EndedAt = timestamp
-			}
-		}
-		var payload codexRolloutPayload
-		if len(envelope.Payload) > 0 {
-			_ = json.Unmarshal(envelope.Payload, &payload)
-		}
-		switch envelope.Type {
-		case "session_meta":
-			if payload.CWD != "" {
-				record.CWD = payload.CWD
-			}
-			if record.CWD != "" && !record.StartedAt.IsZero() {
-				inside, pathErr := pathInsideRoot(workspaceRoot, record.CWD)
-				if pathErr != nil || !inside {
-					return codexSessionRecord{}, nil
-				}
-			}
-		case "event_msg":
-			if !active {
-				continue
-			}
-			switch payload.Type {
-			case "task_complete", "task_completed":
-				record.Completed = true
-			case "token_count":
-				usage := codexTokenUsage{
-					InputTokens:       payload.Info.TotalTokenUsage.InputTokens,
-					CachedInputTokens: payload.Info.TotalTokenUsage.CachedInputTokens,
-					OutputTokens:      payload.Info.TotalTokenUsage.OutputTokens,
-					ReasoningTokens:   payload.Info.TotalTokenUsage.ReasoningTokens,
-					TotalTokens:       payload.Info.TotalTokenUsage.TotalTokens,
-				}
-				usage.UncachedInputTokens = usage.InputTokens - usage.CachedInputTokens
-				if usage.UncachedInputTokens < 0 {
-					usage.UncachedInputTokens = 0
-				}
-				if usage.TotalTokens >= record.Tokens.TotalTokens {
-					record.Tokens = usage
-				}
-			}
-		case "response_item":
-			switch payload.Type {
-			case "function_call", "custom_tool_call":
-				toolRound++
-				name := strings.TrimSpace(payload.Name)
-				if name == "" {
-					name = "(unknown)"
-				}
-				descriptor := codexToolCallDescriptor{Name: name, Active: active}
-				continuation := false
-				if reference, ok := codexNestedContinuationReference(name, payload.Input); ok {
-					continuation = true
-					if reference.Type == "session" {
-						descriptor = execSessions[reference.ID]
-					} else {
-						descriptor = execCells[strings.ToLower(reference.ID)]
-					}
-					descriptor.Name = name
-					descriptor.Active = active
-					descriptor.First = ""
-					descriptor.Last = ""
-				}
-				if descriptor.Family == "" {
-					descriptor.Family, descriptor.Shape, descriptor.First, descriptor.Last = codexShellCommandDetails(name, payload.Arguments, payload.Input)
-				}
-				if descriptor.Family == "" {
-					if continuationType, continuationID := codexContinuationID(name, payload.Arguments); continuationID != "" {
-						continuation = true
-						if continuationType == "session" {
-							descriptor = execSessions[continuationID]
-						} else {
-							descriptor = execCells[continuationID]
-						}
-						descriptor.Name = name
-						descriptor.Active = active
-						descriptor.First = ""
-						descriptor.Last = ""
-					}
-				}
-				if active {
-					record.ToolCalls++
-					record.ToolCallsByName[name]++
-					addCodexToolMetrics(record.ToolMetricsByName, name, 1, false, false, 0)
-					if descriptor.Family != "" {
-						addCodexToolMetrics(record.ShellCommandsByFamily, descriptor.Family, 1, false, false, 0)
-					}
-					if descriptor.Shape != "" {
-						addCodexToolMetrics(record.MixedShellShapes, descriptor.Shape, 1, false, false, 0)
-					}
-					if !continuation && descriptor.First != "" {
-						if previousCommand.Active && previousCommandRound == toolRound-1 && previousCommand.Last != "" {
-							record.CrossCallTransitions[previousCommand.Last+" -> "+descriptor.First]++
-						}
-						previousCommand = descriptor
-						previousCommandRound = toolRound
-					}
-				}
-				if payload.CallID != "" {
-					callDescriptors[payload.CallID] = descriptor
-				}
-			case "function_call_output", "custom_tool_call_output":
-				text, statusText, byteCount := codexToolOutputText(payload.Output)
-				truncated := codexToolOutputTruncated(text)
-				descriptor := callDescriptors[payload.CallID]
-				failed := codexToolOutputFailed(statusText, descriptor.Name)
-				if descriptor.Active && active {
-					record.ToolOutputBytes += byteCount
-					if truncated {
-						record.TruncatedToolCalls++
-					}
-					if failed {
-						record.FailedToolCalls++
-						reason := codexToolFailureReasonForDescriptor(statusText, descriptor)
-						record.FailureReasons[reason]++
-						addCodexFailureContext(record.FailureContexts, reason, codexFailureContextLabel(descriptor))
-					}
-					if descriptor.Name != "" {
-						addCodexToolMetrics(record.ToolMetricsByName, descriptor.Name, 0, failed, truncated, byteCount)
-					}
-					if descriptor.Family != "" {
-						addCodexToolMetrics(record.ShellCommandsByFamily, descriptor.Family, 0, failed, truncated, byteCount)
-					}
-					if descriptor.Shape != "" {
-						addCodexToolMetrics(record.MixedShellShapes, descriptor.Shape, 0, failed, truncated, byteCount)
-					}
-				}
-				if descriptor.Family != "" {
-					for _, reference := range codexToolContinuationReferences(payload.Output) {
-						if reference.Type == "session" {
-							execSessions[reference.ID] = descriptor
-						} else {
-							execCells[strings.ToLower(reference.ID)] = descriptor
-						}
-					}
-				}
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return codexSessionRecord{}, err
-	}
-	if record.CWD == "" {
-		return codexSessionRecord{}, nil
-	}
-	inside, err := pathInsideRoot(workspaceRoot, record.CWD)
-	if err != nil || !inside {
-		return codexSessionRecord{}, nil
-	}
-	record.Task = codexTaskName(workspaceRoot, record.CWD)
-	return record, nil
+	return sessionRecordFromNormalized(session, workspaceRoot, since, generatedAt, ownership)
 }
 
 func codexRolloutLineNeeded(line []byte) bool {
 	return bytes.Contains(line, []byte(`"type":"session_meta"`)) ||
+		bytes.Contains(line, []byte(`"type":"compacted"`)) ||
+		bytes.Contains(line, []byte(`"type":"context_compacted"`)) ||
 		bytes.Contains(line, []byte(`"type":"token_count"`)) ||
 		bytes.Contains(line, []byte(`"type":"task_complete"`)) ||
 		bytes.Contains(line, []byte(`"type":"task_completed"`)) ||
@@ -1482,6 +1318,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	}
 	duration := codexSessionDuration(record)
 	summary.DurationSeconds += duration
+	summary.Compactions += record.Compactions
 	addCodexTokenUsage(&summary.Tokens, record.Tokens)
 	summary.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
 	summary.ToolCalls += record.ToolCalls
@@ -1502,6 +1339,9 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 		addCodexToolMetricsValue(summary.MixedShellShapes, shape, metrics)
 	}
 	addCodexTransitionMetrics(summary.CrossCallTransitions, record.CrossCallTransitions)
+	for id, metrics := range record.OwnedTooling {
+		addCodexToolMetricsValue(summary.OwnedTooling, id, metrics)
+	}
 	for reason, count := range record.FailureReasons {
 		summary.FailureReasons[reason] += count
 	}
@@ -1514,6 +1354,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			ShellCommandsByFamily: map[string]codexToolMetrics{},
 			MixedShellShapes:      map[string]codexToolMetrics{},
 			CrossCallTransitions:  map[string]codexTransitionMetrics{},
+			OwnedTooling:          map[string]codexToolMetrics{},
 			FailureReasons:        map[string]int{},
 			FailureContexts:       map[string]map[string]int{},
 		}
@@ -1526,6 +1367,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 		task.IncompleteSessions++
 	}
 	task.DurationSeconds += duration
+	task.Compactions += record.Compactions
 	addCodexTokenUsage(&task.Tokens, record.Tokens)
 	task.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
 	task.ToolCalls += record.ToolCalls
@@ -1540,6 +1382,9 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 		addCodexToolMetricsValue(task.MixedShellShapes, shape, metrics)
 	}
 	addCodexTransitionMetrics(task.CrossCallTransitions, record.CrossCallTransitions)
+	for id, metrics := range record.OwnedTooling {
+		addCodexToolMetricsValue(task.OwnedTooling, id, metrics)
+	}
 	for reason, count := range record.FailureReasons {
 		task.FailureReasons[reason] += count
 	}
@@ -1656,10 +1501,21 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	printCodexToolMetrics("\nShell output by command family:", "FAMILY", summary.ShellCommandsByFamily, 12, 32)
 	printCodexToolMetrics("\nMixed-shell output by family sequence:", "SEQUENCE", summary.MixedShellShapes, 12, 56)
 	printCodexTransitions(summary.CrossCallTransitions, 12)
+	printOwnedTooling(summary.OwnedTooling, config.OwnedTools)
 	printCodexFailureReasons(summary.FailureReasons)
 	printCodexFailureContexts(summary.FailureContexts, 12)
 
 	fmt.Println("\nSignals:")
+	if summary.Compactions > 0 {
+		cachedRatio := float64(0)
+		if summary.Tokens.InputTokens > 0 {
+			cachedRatio = 100 * float64(summary.Tokens.CachedInputTokens) / float64(summary.Tokens.InputTokens)
+		}
+		fmt.Printf("- %s context compactions occurred with %.0f%% cached input. Repeated compactions plus recurring transitions indicate a session loop or stale-context problem; cache hits alone do not.\n",
+			formatCodexCount(int64(summary.Compactions)),
+			cachedRatio,
+		)
+	}
 	if summary.TruncatedToolCalls > 0 {
 		fmt.Printf("- %s tool calls returned truncated output. Narrow file/diff reads or lower command output before retrying.\n", formatCodexCount(int64(summary.TruncatedToolCalls)))
 	} else {
@@ -1764,6 +1620,53 @@ func printCodexTransitions(transitions map[string]codexTransitionMetrics, limit 
 			formatCodexCount(int64(row.Metrics.Count)),
 			formatCodexCount(int64(row.Metrics.Sessions)),
 		)
+	}
+}
+
+func printOwnedTooling(metrics map[string]codexToolMetrics, configs []ownedToolConfig) {
+	if len(metrics) == 0 {
+		return
+	}
+	configByID := map[string]ownedToolConfig{}
+	for _, config := range configs {
+		configByID[config.ID] = config
+	}
+	type row struct {
+		ID      string
+		Metrics codexToolMetrics
+		Config  ownedToolConfig
+	}
+	rows := make([]row, 0, len(metrics))
+	for id, value := range metrics {
+		value.EstimatedOutputTokens = estimatedTokens(value.OutputBytes)
+		rows = append(rows, row{ID: id, Metrics: value, Config: configByID[id]})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.FailedCalls != rows[j].Metrics.FailedCalls {
+			return rows[i].Metrics.FailedCalls > rows[j].Metrics.FailedCalls
+		}
+		if rows[i].Metrics.OutputBytes != rows[j].Metrics.OutputBytes {
+			return rows[i].Metrics.OutputBytes > rows[j].Metrics.OutputBytes
+		}
+		return rows[i].ID < rows[j].ID
+	})
+	fmt.Println("\nLocally controlled tooling:")
+	fmt.Printf("%-24s %-24s %9s %10s %10s\n", "TOOL", "REPOSITORY", "CALLS", "OUTPUT", "FAILED")
+	for _, row := range rows {
+		repository := row.Config.Repository
+		if repository == "" {
+			repository = "(configured locally)"
+		}
+		fmt.Printf("%-24s %-24s %9s %10s %10s\n",
+			truncateCodexLabel(row.ID, 24),
+			truncateCodexLabel(repository, 24),
+			formatCodexCount(int64(row.Metrics.Calls)),
+			"~"+formatCodexCount(row.Metrics.EstimatedOutputTokens),
+			formatCodexCount(int64(row.Metrics.FailedCalls)),
+		)
+		if recommendation := strings.TrimSpace(row.Config.Recommendation); recommendation != "" {
+			fmt.Printf("  %s\n", recommendation)
+		}
 	}
 }
 

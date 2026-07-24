@@ -1,0 +1,210 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"strings"
+	"time"
+)
+
+type indexedCodexDescriptor struct {
+	codexToolCallDescriptor
+	OccurredAt      time.Time
+	SelectorDigests []string
+}
+
+func parseCodexNormalizedSession(path string) (normalizedSession, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return normalizedSession{}, err
+	}
+	defer file.Close()
+
+	session := normalizedSession{Provider: "codex", SourcePath: path}
+	callDescriptors := map[string]indexedCodexDescriptor{}
+	execSessions := map[string]indexedCodexDescriptor{}
+	execCells := map[string]indexedCodexDescriptor{}
+	toolRound := 0
+	sequence := 0
+	var lastCompaction time.Time
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !codexRolloutLineNeeded(line) {
+			continue
+		}
+		var envelope codexRolloutEnvelope
+		if err := json.Unmarshal(line, &envelope); err != nil {
+			continue
+		}
+		timestamp, err := time.Parse(time.RFC3339Nano, envelope.Timestamp)
+		if err != nil {
+			continue
+		}
+		var payload codexRolloutPayload
+		if len(envelope.Payload) > 0 {
+			_ = json.Unmarshal(envelope.Payload, &payload)
+		}
+		switch envelope.Type {
+		case "compacted":
+			appendNormalizedCompaction(&session, &sequence, &lastCompaction, timestamp)
+		case "session_meta":
+			if payload.CWD != "" {
+				session.CWD = payload.CWD
+			}
+		case "event_msg":
+			switch payload.Type {
+			case "task_complete", "task_completed":
+				sequence++
+				session.Events = append(session.Events, normalizedSessionEvent{
+					Sequence:   sequence,
+					OccurredAt: timestamp,
+					Kind:       sessionEventComplete,
+				})
+			case "context_compacted":
+				appendNormalizedCompaction(&session, &sequence, &lastCompaction, timestamp)
+			case "token_count":
+				usage := codexTokenUsage{
+					InputTokens:       payload.Info.TotalTokenUsage.InputTokens,
+					CachedInputTokens: payload.Info.TotalTokenUsage.CachedInputTokens,
+					OutputTokens:      payload.Info.TotalTokenUsage.OutputTokens,
+					ReasoningTokens:   payload.Info.TotalTokenUsage.ReasoningTokens,
+					TotalTokens:       payload.Info.TotalTokenUsage.TotalTokens,
+				}
+				usage.UncachedInputTokens = usage.InputTokens - usage.CachedInputTokens
+				if usage.UncachedInputTokens < 0 {
+					usage.UncachedInputTokens = 0
+				}
+				sequence++
+				session.Events = append(session.Events, normalizedSessionEvent{
+					Sequence:   sequence,
+					OccurredAt: timestamp,
+					Kind:       sessionEventToken,
+					Tokens:     usage,
+				})
+			}
+		case "response_item":
+			switch payload.Type {
+			case "function_call", "custom_tool_call":
+				toolRound++
+				name := strings.TrimSpace(payload.Name)
+				if name == "" {
+					name = "(unknown)"
+				}
+				descriptor := indexedCodexDescriptor{
+					codexToolCallDescriptor: codexToolCallDescriptor{Name: name},
+					OccurredAt:              timestamp,
+					SelectorDigests:         codexSelectorDigests(name, payload.Arguments, payload.Input),
+				}
+				continuation := false
+				if reference, ok := codexNestedContinuationReference(name, payload.Input); ok {
+					continuation = true
+					if reference.Type == "session" {
+						descriptor = execSessions[reference.ID]
+					} else {
+						descriptor = execCells[strings.ToLower(reference.ID)]
+					}
+					descriptor.Name = name
+					descriptor.OccurredAt = timestamp
+					descriptor.First = ""
+					descriptor.Last = ""
+				}
+				if descriptor.Family == "" {
+					descriptor.Family, descriptor.Shape, descriptor.First, descriptor.Last = codexShellCommandDetails(name, payload.Arguments, payload.Input)
+				}
+				if descriptor.Family == "" {
+					if continuationType, continuationID := codexContinuationID(name, payload.Arguments); continuationID != "" {
+						continuation = true
+						if continuationType == "session" {
+							descriptor = execSessions[continuationID]
+						} else {
+							descriptor = execCells[continuationID]
+						}
+						descriptor.Name = name
+						descriptor.OccurredAt = timestamp
+						descriptor.First = ""
+						descriptor.Last = ""
+					}
+				}
+				sequence++
+				event := normalizedSessionEvent{
+					Sequence:        sequence,
+					OccurredAt:      timestamp,
+					Kind:            sessionEventToolCall,
+					ToolName:        name,
+					Family:          descriptor.Family,
+					Shape:           descriptor.Shape,
+					FirstFamily:     descriptor.First,
+					LastFamily:      descriptor.Last,
+					ToolRound:       toolRound,
+					SelectorDigests: descriptor.SelectorDigests,
+				}
+				if continuation {
+					event.FirstFamily = ""
+					event.LastFamily = ""
+				}
+				session.Events = append(session.Events, event)
+				if payload.CallID != "" {
+					callDescriptors[payload.CallID] = descriptor
+				}
+			case "function_call_output", "custom_tool_call_output":
+				text, statusText, byteCount := codexToolOutputText(payload.Output)
+				descriptor := callDescriptors[payload.CallID]
+				failed := codexToolOutputFailed(statusText, descriptor.Name)
+				reason := ""
+				context := ""
+				if failed {
+					reason = codexToolFailureReasonForDescriptor(statusText, descriptor.codexToolCallDescriptor)
+					context = codexFailureContextLabel(descriptor.codexToolCallDescriptor)
+				}
+				sequence++
+				session.Events = append(session.Events, normalizedSessionEvent{
+					Sequence:        sequence,
+					OccurredAt:      timestamp,
+					Kind:            sessionEventToolOutput,
+					ToolName:        descriptor.Name,
+					Family:          descriptor.Family,
+					Shape:           descriptor.Shape,
+					CallOccurredAt:  descriptor.OccurredAt,
+					Failed:          failed,
+					Truncated:       codexToolOutputTruncated(text),
+					OutputBytes:     byteCount,
+					FailureReason:   reason,
+					FailureContext:  context,
+					SelectorDigests: descriptor.SelectorDigests,
+				})
+				if descriptor.Family != "" {
+					for _, reference := range codexToolContinuationReferences(payload.Output) {
+						if reference.Type == "session" {
+							execSessions[reference.ID] = descriptor
+						} else {
+							execCells[strings.ToLower(reference.ID)] = descriptor
+						}
+					}
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return normalizedSession{}, err
+	}
+	return session, nil
+}
+
+func appendNormalizedCompaction(session *normalizedSession, sequence *int, last *time.Time, timestamp time.Time) {
+	if !last.IsZero() {
+		delta := timestamp.Sub(*last)
+		if delta >= -5*time.Second && delta <= 5*time.Second {
+			return
+		}
+	}
+	*sequence++
+	session.Events = append(session.Events, normalizedSessionEvent{
+		Sequence:   *sequence,
+		OccurredAt: timestamp,
+		Kind:       sessionEventCompaction,
+	})
+	*last = timestamp
+}
