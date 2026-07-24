@@ -430,6 +430,32 @@ func TestBuildSessionFindingsLocalizesCompletedTaskCostTail(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsUsesHighTailPhaseMix(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Outcomes = completionEpisodeAnalysis{
+		ToolUsingCompleted:       40,
+		TopDecileFreshTokenShare: 0.45,
+		FreshTokens: outcomeDistribution{
+			Count: 40,
+			P50:   100,
+			P90:   500,
+			Max:   3_000,
+		},
+		TailPhases: []taskPhaseTailAssociation{{
+			Phase:         "verification",
+			TailShare:     0.42,
+			OrdinaryShare: 0.17,
+			ShareDelta:    0.25,
+		}},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 ||
+		!strings.Contains(findings[0].Evidence, "verification accounted for 42%") ||
+		!strings.Contains(findings[0].Action, "checks, failures, and output") {
+		t.Fatalf("phase cost finding mismatch: %#v", findings)
+	}
+}
+
 func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
 	finding := sessionFinding{
 		Title:  "individual tool calls return oversized output: file reads",

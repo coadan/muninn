@@ -324,6 +324,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			outcomes.FreshTokens.Max >= 5*outcomes.FreshTokens.P90) {
 		driverKind, driver := dominantTaskCostTailDriver(outcomes.TailDrivers)
 		driverEvidence := ""
+		phaseEvidence := ""
 		target := ""
 		action := "Compare high-tail episodes with ordinary completed tasks by operation, rework, compaction, and target cohort before changing tooling, guidance, or source."
 		if driver.Name != "" {
@@ -352,17 +353,40 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				action = "Inspect the repeated command shapes and output in this family inside high-tail tasks, then replace the dominant loop with a bounded repository interface."
 			}
 		}
+		if phase, ok := dominantTaskPhaseTailAssociation(outcomes.TailPhases); ok &&
+			phase.ShareDelta >= 0.05 {
+			phaseEvidence = fmt.Sprintf(
+				"; %s accounted for %.0f%% of high-tail fresh tokens versus %.0f%% in ordinary completed tasks (+%.0f percentage points)",
+				phase.Phase,
+				100*phase.TailShare,
+				100*phase.OrdinaryShare,
+				100*phase.ShareDelta,
+			)
+			switch phase.Phase {
+			case "discovery":
+				action = "Compare discovery calls, output, and repeated targets in high-tail versus ordinary tasks, then improve the bounded context or ownership surface."
+			case "editing":
+				action = "Compare edited cohorts in high-tail versus ordinary tasks, then simplify the source boundary responsible for repeated implementation work."
+			case "verification":
+				action = "Compare checks, failures, and output in high-tail versus ordinary tasks, then reduce redundant validation or strengthen the narrow check boundary."
+			case "delivery":
+				action = "Compare delivery operations and waits in high-tail versus ordinary tasks, then remove repeated handoff or publication work."
+			case "rework":
+				action = "Compare review-to-edit cycles and exact targets in high-tail versus ordinary tasks, then strengthen the pre-delivery source or verification boundary."
+			}
+		}
 		findings = append(findings, sessionFinding{
 			Category: "task-cost",
 			Control:  "repository",
 			Title:    "completed tool-task cost is concentrated in a high tail",
-			Evidence: fmt.Sprintf("%s fully observed tool tasks; fresh-token p50 %s, p90 %s, max %s; the highest-cost 10%% account for %.0f%% of fresh tokens%s",
+			Evidence: fmt.Sprintf("%s fully observed tool tasks; fresh-token p50 %s, p90 %s, max %s; the highest-cost 10%% account for %.0f%% of fresh tokens%s%s",
 				formatCodexCount(int64(outcomes.ToolUsingCompleted)),
 				formatCodexCount(outcomes.FreshTokens.P50),
 				formatCodexCount(outcomes.FreshTokens.P90),
 				formatCodexCount(outcomes.FreshTokens.Max),
 				100*outcomes.TopDecileFreshTokenShare,
 				driverEvidence,
+				phaseEvidence,
 			),
 			Action:     action,
 			Count:      outcomes.ToolUsingCompleted,
@@ -613,6 +637,17 @@ func repositoryTargetSize(repositoryRoot, target string) (size int64, lines int,
 		lines++
 	}
 	return int64(len(content)), lines, true
+}
+
+func dominantTaskPhaseTailAssociation(
+	associations []taskPhaseTailAssociation,
+) (taskPhaseTailAssociation, bool) {
+	for _, association := range associations {
+		if association.ShareDelta > 0 {
+			return association, true
+		}
+	}
+	return taskPhaseTailAssociation{}, false
 }
 
 func dominantDeliveryReworkCohort(cohorts map[string]deliveryCohortMetrics) (string, deliveryCohortMetrics) {

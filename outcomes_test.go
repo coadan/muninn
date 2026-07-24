@@ -80,6 +80,99 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 	}
 }
 
+func TestTaskPhaseSequencingTracksDeliveryAndRework(t *testing.T) {
+	episode := codexTaskEpisode{}
+	at := func(second int) time.Time { return time.Unix(int64(second), 0) }
+	observe := func(second int, event normalizedSessionEvent, operations ...string) {
+		event.OccurredAt = at(second)
+		episode.observe(event, event.Tokens, operations)
+	}
+	observe(0, normalizedSessionEvent{Kind: sessionEventToolCall, Family: "search"})
+	observe(1, normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "search", OutputBytes: 400})
+	observe(2, normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "apply_patch"})
+	observe(3, normalizedSessionEvent{Kind: sessionEventToolCall, Family: "tests"})
+	observe(4, normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "tests", Failed: true})
+	observe(5, normalizedSessionEvent{Kind: sessionEventToolCall, Family: "delivery"})
+	observe(6, normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"})
+	observe(7, normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "exec", Family: "review"})
+	observe(8, normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "apply_patch"})
+	observe(9, normalizedSessionEvent{
+		Kind: sessionEventToken,
+		Tokens: codexTokenUsage{
+			UncachedInputTokens: 80,
+			OutputTokens:        20,
+		},
+	})
+	observe(10, normalizedSessionEvent{Kind: sessionEventComplete})
+
+	for phase, wantCalls := range map[string]int{
+		"discovery":    1,
+		"editing":      1,
+		"verification": 1,
+		"delivery":     1,
+		"rework":       2,
+	} {
+		if got := episode.Phases[phase].ToolCalls; got != wantCalls {
+			t.Fatalf("%s calls=%d want %d; phases=%#v", phase, got, wantCalls, episode.Phases)
+		}
+	}
+	if episode.Phases["verification"].FailedCalls != 1 {
+		t.Fatalf("verification failure missing: %#v", episode.Phases["verification"])
+	}
+	if got := phaseFreshTokens(episode.Phases["rework"]); got != 100 {
+		t.Fatalf("rework fresh tokens=%d want 100", got)
+	}
+	var duration int64
+	for _, metrics := range episode.Phases {
+		duration += metrics.DurationSeconds
+	}
+	if duration != 10 {
+		t.Fatalf("phase duration=%d want 10: %#v", duration, episode.Phases)
+	}
+}
+
+func TestAnalyzeTaskPhaseTailAssociationsComparesPhaseMix(t *testing.T) {
+	var episodes []codexTaskEpisode
+	for index := range 20 {
+		episode := codexTaskEpisode{
+			Completed: true,
+			ToolCalls: 1,
+			Phases: map[string]taskPhaseCost{
+				"discovery": {
+					Tokens:    codexTokenUsage{UncachedInputTokens: 90},
+					ToolCalls: 1,
+				},
+				"editing": {
+					Tokens: codexTokenUsage{UncachedInputTokens: 10},
+				},
+			},
+			Tokens: codexTokenUsage{UncachedInputTokens: 100},
+		}
+		if index < 2 {
+			episode.Phases = map[string]taskPhaseCost{
+				"discovery": {
+					Tokens:    codexTokenUsage{UncachedInputTokens: 200},
+					ToolCalls: 1,
+				},
+				"rework": {
+					Tokens: codexTokenUsage{UncachedInputTokens: 800},
+				},
+			}
+			episode.Tokens.UncachedInputTokens = 1_000
+		}
+		episodes = append(episodes, episode)
+	}
+	associations := analyzeTaskPhaseTailAssociations(episodes)
+	if len(associations) == 0 || associations[0].Phase != "rework" ||
+		associations[0].TailShare != 0.8 || associations[0].OrdinaryShare != 0 {
+		t.Fatalf("phase tail association mismatch: %#v", associations)
+	}
+	phases := analyzeTaskPhases(episodes)
+	if phases["rework"].Episodes != 2 || phases["discovery"].Episodes != 20 {
+		t.Fatalf("phase outcome aggregation mismatch: %#v", phases)
+	}
+}
+
 func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T) {
 	tracker := deliveryReworkTracker{}
 	target := ".workbench/repos/engine/packages/runtime/src/runtime.go"

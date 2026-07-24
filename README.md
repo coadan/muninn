@@ -75,6 +75,8 @@ Muninn highlights:
   marked as left-censored
 - p50/p75/p90 fresh-token, tool-call, output, duration, failure, and compaction
   outcomes for fully observed completed tool tasks
+- discovery, editing, verification, delivery, and review-driven rework phase
+  outcomes, including phase-mix differences in the completed-task cost tail
 - explicit finding attribution to tooling, instructions/docs, source code, or
   unknown, with confidence kept separate from impact
 - post-delivery quality signals: pushes/lands, pre- and post-delivery review,
@@ -233,6 +235,11 @@ path-normalization inputs. Test/review comparisons are observational and do not
 claim that the executed check covered the edited subsystem. Long-running tool
 outputs count verification or delivery only at the terminal continuation, so
 polling does not create duplicate check outcomes.
+
+Phase boundaries come from typed tool families, configured operations, edits,
+terminal delivery, and post-delivery review. Token deltas belong to the latest
+observable phase; they are useful comparative estimates, not exact attribution
+of model-internal work.
 
 ## Direction
 
