@@ -168,16 +168,18 @@ func TestCodexToolOutputFailedUsesStatusBlockOnly(t *testing.T) {
 func TestCodexToolFailureReasonUsesFixedPrivacySafeLabels(t *testing.T) {
 	tests := map[string]string{
 		"--api override is disabled unless you provide a service-account API key": "local CLI targeting",
+		"parse-error: missing test result sentinel":                               "test harness protocol",
+		"nREPL eval failed before reporting test results":                         "test harness protocol",
 		"GraphQL: Head sha can't be blank, No commits between main and task/x":    "PR branch state",
-		"Unknown option: --path":                                  "unsupported command option",
-		"listen tcp 127.0.0.1:8080: bind: address already in use": "port collision",
-		"dial tcp 127.0.0.1:8090: connection refused":             "local service unavailable",
-		"zsh: command not found: playwright-cli":                  "missing executable",
-		"fixture file not found: fixtures/missing.clj":            "missing path or fixture",
-		"command timed out after 30s":                             "timeout",
-		"Process exited with code 130":                            "interrupted process",
-		"FAIL in (expected-result)":                               "test failure",
-		"Process exited with code 1":                              "other non-zero exit",
+		"Unknown option: --path":                                                  "unsupported command option",
+		"listen tcp 127.0.0.1:8080: bind: address already in use":                 "port collision",
+		"dial tcp 127.0.0.1:8090: connection refused":                             "local service unavailable",
+		"zsh: command not found: playwright-cli":                                  "missing executable",
+		"fixture file not found: fixtures/missing.clj":                            "missing path or fixture",
+		"command timed out after 30s":                                             "timeout",
+		"Process exited with code 130":                                            "interrupted process",
+		"FAIL in (expected-result)":                                               "test failure",
+		"Process exited with code 1":                                              "other non-zero exit",
 	}
 	for input, want := range tests {
 		if got := codexToolFailureReason(input); got != want {

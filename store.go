@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 6
+const sessionStoreSchemaVersion = 7
 
 type sessionNormalizer interface {
 	NormalizeSession(path string) (normalizedSession, error)
@@ -165,7 +165,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 	}
 	var existing string
 	err := store.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&existing)
-	reindexTargets := err == nil && existing != fmt.Sprint(sessionStoreSchemaVersion)
+	reindexSources := err == nil && existing != fmt.Sprint(sessionStoreSchemaVersion)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := store.db.ExecContext(ctx, `INSERT INTO metadata(key, value) VALUES('schema_version', ?)`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
@@ -214,12 +214,16 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
+	case existing == "6":
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
 	case existing != fmt.Sprint(sessionStoreSchemaVersion):
 		return fmt.Errorf("unsupported Muninn store schema version %s (expected %d); remove the local cache to rebuild it", existing, sessionStoreSchemaVersion)
 	}
-	if reindexTargets {
+	if reindexSources {
 		if _, err := store.db.ExecContext(ctx, `DELETE FROM sources`); err != nil {
-			return fmt.Errorf("invalidate Muninn sources for target normalization: %w", err)
+			return fmt.Errorf("invalidate Muninn sources for normalizer update: %w", err)
 		}
 	}
 	return nil

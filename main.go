@@ -1465,6 +1465,9 @@ func codexToolFailureReason(statusText string) string {
 	switch {
 	case strings.Contains(preview, "--api override is disabled"):
 		return "local CLI targeting"
+	case strings.Contains(preview, "missing test result sentinel") ||
+		strings.Contains(preview, "failed before reporting test results"):
+		return "test harness protocol"
 	case strings.Contains(preview, "head sha can't be blank") ||
 		strings.Contains(preview, "base sha can't be blank") ||
 		strings.Contains(preview, "no commits between"):
