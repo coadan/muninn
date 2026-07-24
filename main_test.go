@@ -644,7 +644,7 @@ func TestOwnedOperationFailureReasonsSeparateExpectedFailures(t *testing.T) {
 	}
 	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)
 	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
-	actionable, expected := ownedOperationFailureCounts(report.Summary.OwnedOperationFailureReasons["bwb/test"])
+	actionable, expected := ownedOperationFailureCounts("bwb/test", report.Summary.OwnedOperationFailureReasons["bwb/test"])
 	if actionable != 0 || expected != 1 {
 		t.Fatalf("failure split=(%d,%d) want (0,1)", actionable, expected)
 	}
