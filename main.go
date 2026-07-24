@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 10
+const codexSessionInsightsSchemaVersion = 11
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -40,35 +40,48 @@ type codexTokenUsage struct {
 }
 
 type codexTaskInsights struct {
-	Task                        string                                       `json:"task"`
-	Sessions                    int                                          `json:"sessions"`
-	CompletedSessions           int                                          `json:"completedSessions"`
-	IncompleteSessions          int                                          `json:"incompleteSessions"`
-	DurationSeconds             int64                                        `json:"durationSeconds"`
-	Compactions                 int                                          `json:"compactions"`
-	SessionsWithCompactions     int                                          `json:"sessionsWithCompactions"`
-	Tokens                      codexTokenUsage                              `json:"tokens"`
-	FreshTokens                 int64                                        `json:"freshTokens"`
-	ToolCalls                   int                                          `json:"toolCalls"`
-	FailedToolCalls             int                                          `json:"failedToolCalls"`
-	TruncatedToolCalls          int                                          `json:"truncatedToolCalls"`
-	ToolOutputBytes             int64                                        `json:"toolOutputBytes"`
-	ToolOutputTokens            int64                                        `json:"toolOutputTokens"`
-	ShellCommandsByFamily       map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
-	MixedShellShapes            map[string]codexToolMetrics                  `json:"mixedShellShapes"`
-	CrossCallTransitions        map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
-	OwnedTooling                map[string]codexToolMetrics                  `json:"ownedTooling"`
-	ReadTargets                 map[string]codexTargetMetrics                `json:"readTargets"`
-	InlineOrchestrationCalls    int                                          `json:"inlineOrchestrationCalls"`
-	InlineOrchestrationBytes    int64                                        `json:"inlineOrchestrationBytes"`
-	InlineOrchestrationSessions int                                          `json:"inlineOrchestrationSessions"`
-	FailureReasons              map[string]int                               `json:"failureReasons"`
-	FailureContexts             map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
+	Task                         string                                       `json:"task"`
+	Sessions                     int                                          `json:"sessions"`
+	CompletedSessions            int                                          `json:"completedSessions"`
+	IncompleteSessions           int                                          `json:"incompleteSessions"`
+	DurationSeconds              int64                                        `json:"durationSeconds"`
+	Compactions                  int                                          `json:"compactions"`
+	SessionsWithCompactions      int                                          `json:"sessionsWithCompactions"`
+	Tokens                       codexTokenUsage                              `json:"tokens"`
+	FreshTokens                  int64                                        `json:"freshTokens"`
+	ToolCalls                    int                                          `json:"toolCalls"`
+	FailedToolCalls              int                                          `json:"failedToolCalls"`
+	TruncatedToolCalls           int                                          `json:"truncatedToolCalls"`
+	ToolOutputBytes              int64                                        `json:"toolOutputBytes"`
+	ToolOutputTokens             int64                                        `json:"toolOutputTokens"`
+	ShellCommandsByFamily        map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
+	MixedShellShapes             map[string]codexToolMetrics                  `json:"mixedShellShapes"`
+	CrossCallTransitions         map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
+	OwnedTooling                 map[string]codexToolMetrics                  `json:"ownedTooling"`
+	OwnedOperations              map[string]codexOwnedOperationMetrics        `json:"ownedOperations"`
+	OwnedOperationFailureReasons map[string]map[string]codexOccurrenceMetrics `json:"ownedOperationFailureReasons"`
+	ReadTargets                  map[string]codexTargetMetrics                `json:"readTargets"`
+	InlineOrchestrationCalls     int                                          `json:"inlineOrchestrationCalls"`
+	InlineOrchestrationBytes     int64                                        `json:"inlineOrchestrationBytes"`
+	InlineOrchestrationMaxBytes  int64                                        `json:"inlineOrchestrationMaxBytes"`
+	InlineOrchestrationSessions  int                                          `json:"inlineOrchestrationSessions"`
+	FailureReasons               map[string]int                               `json:"failureReasons"`
+	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 }
 
 type codexToolMetrics struct {
 	Calls                 int   `json:"calls"`
 	FailedCalls           int   `json:"failedCalls"`
+	TruncatedCalls        int   `json:"truncatedCalls"`
+	OutputBytes           int64 `json:"outputBytes"`
+	EstimatedOutputTokens int64 `json:"estimatedOutputTokens"`
+}
+
+type codexOwnedOperationMetrics struct {
+	Calls                 int   `json:"calls"`
+	Sessions              int   `json:"sessions"`
+	FailedCalls           int   `json:"failedCalls"`
+	AmbiguousFailedCalls  int   `json:"ambiguousFailedCalls"`
 	TruncatedCalls        int   `json:"truncatedCalls"`
 	OutputBytes           int64 `json:"outputBytes"`
 	EstimatedOutputTokens int64 `json:"estimatedOutputTokens"`
@@ -91,33 +104,36 @@ type codexTargetMetrics struct {
 }
 
 type codexSessionInsightsSummary struct {
-	FilesScanned                int                                          `json:"filesScanned"`
-	FilesUnreadable             int                                          `json:"filesUnreadable"`
-	Sessions                    int                                          `json:"sessions"`
-	CompletedSessions           int                                          `json:"completedSessions"`
-	IncompleteSessions          int                                          `json:"incompleteSessions"`
-	DurationSeconds             int64                                        `json:"durationSeconds"`
-	Compactions                 int                                          `json:"compactions"`
-	SessionsWithCompactions     int                                          `json:"sessionsWithCompactions"`
-	Tokens                      codexTokenUsage                              `json:"tokens"`
-	FreshTokens                 int64                                        `json:"freshTokens"`
-	ToolCalls                   int                                          `json:"toolCalls"`
-	FailedToolCalls             int                                          `json:"failedToolCalls"`
-	TruncatedToolCalls          int                                          `json:"truncatedToolCalls"`
-	ToolOutputBytes             int64                                        `json:"toolOutputBytes"`
-	ToolOutputTokens            int64                                        `json:"toolOutputTokens"`
-	ToolCallsByName             map[string]int                               `json:"toolCallsByName"`
-	ToolMetricsByName           map[string]codexToolMetrics                  `json:"toolMetricsByName"`
-	ShellCommandsByFamily       map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
-	MixedShellShapes            map[string]codexToolMetrics                  `json:"mixedShellShapes"`
-	CrossCallTransitions        map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
-	OwnedTooling                map[string]codexToolMetrics                  `json:"ownedTooling"`
-	ReadTargets                 map[string]codexTargetMetrics                `json:"readTargets"`
-	InlineOrchestrationCalls    int                                          `json:"inlineOrchestrationCalls"`
-	InlineOrchestrationBytes    int64                                        `json:"inlineOrchestrationBytes"`
-	InlineOrchestrationSessions int                                          `json:"inlineOrchestrationSessions"`
-	FailureReasons              map[string]int                               `json:"failureReasons"`
-	FailureContexts             map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
+	FilesScanned                 int                                          `json:"filesScanned"`
+	FilesUnreadable              int                                          `json:"filesUnreadable"`
+	Sessions                     int                                          `json:"sessions"`
+	CompletedSessions            int                                          `json:"completedSessions"`
+	IncompleteSessions           int                                          `json:"incompleteSessions"`
+	DurationSeconds              int64                                        `json:"durationSeconds"`
+	Compactions                  int                                          `json:"compactions"`
+	SessionsWithCompactions      int                                          `json:"sessionsWithCompactions"`
+	Tokens                       codexTokenUsage                              `json:"tokens"`
+	FreshTokens                  int64                                        `json:"freshTokens"`
+	ToolCalls                    int                                          `json:"toolCalls"`
+	FailedToolCalls              int                                          `json:"failedToolCalls"`
+	TruncatedToolCalls           int                                          `json:"truncatedToolCalls"`
+	ToolOutputBytes              int64                                        `json:"toolOutputBytes"`
+	ToolOutputTokens             int64                                        `json:"toolOutputTokens"`
+	ToolCallsByName              map[string]int                               `json:"toolCallsByName"`
+	ToolMetricsByName            map[string]codexToolMetrics                  `json:"toolMetricsByName"`
+	ShellCommandsByFamily        map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
+	MixedShellShapes             map[string]codexToolMetrics                  `json:"mixedShellShapes"`
+	CrossCallTransitions         map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
+	OwnedTooling                 map[string]codexToolMetrics                  `json:"ownedTooling"`
+	OwnedOperations              map[string]codexOwnedOperationMetrics        `json:"ownedOperations"`
+	OwnedOperationFailureReasons map[string]map[string]codexOccurrenceMetrics `json:"ownedOperationFailureReasons"`
+	ReadTargets                  map[string]codexTargetMetrics                `json:"readTargets"`
+	InlineOrchestrationCalls     int                                          `json:"inlineOrchestrationCalls"`
+	InlineOrchestrationBytes     int64                                        `json:"inlineOrchestrationBytes"`
+	InlineOrchestrationMaxBytes  int64                                        `json:"inlineOrchestrationMaxBytes"`
+	InlineOrchestrationSessions  int                                          `json:"inlineOrchestrationSessions"`
+	FailureReasons               map[string]int                               `json:"failureReasons"`
+	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 }
 
 type codexSessionInsightsReport struct {
@@ -133,28 +149,32 @@ type codexSessionInsightsReport struct {
 }
 
 type codexSessionRecord struct {
-	CWD                      string
-	Task                     string
-	StartedAt                time.Time
-	EndedAt                  time.Time
-	Completed                bool
-	Compactions              int
-	Tokens                   codexTokenUsage
-	ToolCalls                int
-	FailedToolCalls          int
-	TruncatedToolCalls       int
-	ToolOutputBytes          int64
-	ToolCallsByName          map[string]int
-	ToolMetricsByName        map[string]codexToolMetrics
-	ShellCommandsByFamily    map[string]codexToolMetrics
-	MixedShellShapes         map[string]codexToolMetrics
-	CrossCallTransitions     map[string]int
-	OwnedTooling             map[string]codexToolMetrics
-	ReadTargets              map[string]codexTargetMetrics
-	InlineOrchestrationCalls int
-	InlineOrchestrationBytes int64
-	FailureReasons           map[string]int
-	FailureContexts          map[string]map[string]int
+	CWD                             string
+	Task                            string
+	StartedAt                       time.Time
+	EndedAt                         time.Time
+	Completed                       bool
+	Compactions                     int
+	Tokens                          codexTokenUsage
+	ToolCalls                       int
+	FailedToolCalls                 int
+	TruncatedToolCalls              int
+	ToolOutputBytes                 int64
+	ToolCallsByName                 map[string]int
+	ToolMetricsByName               map[string]codexToolMetrics
+	ShellCommandsByFamily           map[string]codexToolMetrics
+	MixedShellShapes                map[string]codexToolMetrics
+	CrossCallTransitions            map[string]int
+	OwnedTooling                    map[string]codexToolMetrics
+	OwnedOperations                 map[string]codexToolMetrics
+	OwnedOperationAmbiguousFailures map[string]int
+	OwnedOperationFailureReasons    map[string]map[string]int
+	ReadTargets                     map[string]codexTargetMetrics
+	InlineOrchestrationCalls        int
+	InlineOrchestrationBytes        int64
+	InlineOrchestrationMaxBytes     int64
+	FailureReasons                  map[string]int
+	FailureContexts                 map[string]map[string]int
 }
 
 type codexToolCallDescriptor struct {
@@ -538,7 +558,7 @@ func cmdCodexSessions(root string, args []string) error {
 			return fmt.Errorf("%w (use --no-cache to bypass the index)", err)
 		}
 		defer store.Close()
-		stats, err := store.refresh(context.Background(), source.Name(), sessionDirs, resolvedRepoRoot, normalizer, *forceRefresh)
+		stats, err := store.refresh(context.Background(), source.Name(), sessionDirs, resolvedRepoRoot, normalizer, ownership, *forceRefresh)
 		if err != nil {
 			return err
 		}
@@ -703,15 +723,17 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 		WorkspaceRoot: workspaceRoot,
 		SessionDirs:   append([]string(nil), sessionDirs...),
 		Summary: codexSessionInsightsSummary{
-			ToolCallsByName:       map[string]int{},
-			ToolMetricsByName:     map[string]codexToolMetrics{},
-			ShellCommandsByFamily: map[string]codexToolMetrics{},
-			MixedShellShapes:      map[string]codexToolMetrics{},
-			CrossCallTransitions:  map[string]codexTransitionMetrics{},
-			OwnedTooling:          map[string]codexToolMetrics{},
-			ReadTargets:           map[string]codexTargetMetrics{},
-			FailureReasons:        map[string]int{},
-			FailureContexts:       map[string]map[string]codexOccurrenceMetrics{},
+			ToolCallsByName:              map[string]int{},
+			ToolMetricsByName:            map[string]codexToolMetrics{},
+			ShellCommandsByFamily:        map[string]codexToolMetrics{},
+			MixedShellShapes:             map[string]codexToolMetrics{},
+			CrossCallTransitions:         map[string]codexTransitionMetrics{},
+			OwnedTooling:                 map[string]codexToolMetrics{},
+			OwnedOperations:              map[string]codexOwnedOperationMetrics{},
+			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
+			ReadTargets:                  map[string]codexTargetMetrics{},
+			FailureReasons:               map[string]int{},
+			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 		},
 	}
 }
@@ -1529,9 +1551,12 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(summary.OwnedTooling, id, metrics)
 	}
+	addCodexOwnedOperationMetrics(summary.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguousFailures)
+	addCodexFailureContexts(summary.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
 	addCodexTargetMetrics(summary.ReadTargets, record.ReadTargets)
 	summary.InlineOrchestrationCalls += record.InlineOrchestrationCalls
 	summary.InlineOrchestrationBytes += record.InlineOrchestrationBytes
+	summary.InlineOrchestrationMaxBytes = max(summary.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
 	if record.InlineOrchestrationCalls > 0 {
 		summary.InlineOrchestrationSessions++
 	}
@@ -1543,14 +1568,16 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	task := taskMap[record.Task]
 	if task == nil {
 		task = &codexTaskInsights{
-			Task:                  record.Task,
-			ShellCommandsByFamily: map[string]codexToolMetrics{},
-			MixedShellShapes:      map[string]codexToolMetrics{},
-			CrossCallTransitions:  map[string]codexTransitionMetrics{},
-			OwnedTooling:          map[string]codexToolMetrics{},
-			ReadTargets:           map[string]codexTargetMetrics{},
-			FailureReasons:        map[string]int{},
-			FailureContexts:       map[string]map[string]codexOccurrenceMetrics{},
+			Task:                         record.Task,
+			ShellCommandsByFamily:        map[string]codexToolMetrics{},
+			MixedShellShapes:             map[string]codexToolMetrics{},
+			CrossCallTransitions:         map[string]codexTransitionMetrics{},
+			OwnedTooling:                 map[string]codexToolMetrics{},
+			OwnedOperations:              map[string]codexOwnedOperationMetrics{},
+			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
+			ReadTargets:                  map[string]codexTargetMetrics{},
+			FailureReasons:               map[string]int{},
+			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 		}
 		taskMap[record.Task] = task
 	}
@@ -1582,9 +1609,12 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(task.OwnedTooling, id, metrics)
 	}
+	addCodexOwnedOperationMetrics(task.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguousFailures)
+	addCodexFailureContexts(task.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
 	addCodexTargetMetrics(task.ReadTargets, record.ReadTargets)
 	task.InlineOrchestrationCalls += record.InlineOrchestrationCalls
 	task.InlineOrchestrationBytes += record.InlineOrchestrationBytes
+	task.InlineOrchestrationMaxBytes = max(task.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
 	if record.InlineOrchestrationCalls > 0 {
 		task.InlineOrchestrationSessions++
 	}
@@ -1635,6 +1665,22 @@ func addCodexToolMetricsValue(target map[string]codexToolMetrics, key string, ad
 	value.OutputBytes += addition.OutputBytes
 	value.EstimatedOutputTokens = estimatedTokens(value.OutputBytes)
 	target[key] = value
+}
+
+func addCodexOwnedOperationMetrics(target map[string]codexOwnedOperationMetrics, additions map[string]codexToolMetrics, ambiguousFailures map[string]int) {
+	for operation, addition := range additions {
+		metrics := target[operation]
+		metrics.Calls += addition.Calls
+		if addition.Calls > 0 {
+			metrics.Sessions++
+		}
+		metrics.FailedCalls += addition.FailedCalls
+		metrics.AmbiguousFailedCalls += ambiguousFailures[operation]
+		metrics.TruncatedCalls += addition.TruncatedCalls
+		metrics.OutputBytes += addition.OutputBytes
+		metrics.EstimatedOutputTokens = estimatedTokens(metrics.OutputBytes)
+		target[operation] = metrics
+	}
 }
 
 func codexSessionDuration(record codexSessionRecord) int64 {
@@ -1729,15 +1775,17 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	printCodexTransitions(summary.CrossCallTransitions, 12)
 	printCodexReadTargets(summary.ReadTargets, 12)
 	printOwnedTooling(summary.OwnedTooling, config.OwnedTools)
+	printOwnedOperations(summary.OwnedOperations, 16)
 	printCodexFailureReasons(summary.FailureReasons)
 	printCodexFailureContexts(summary.FailureContexts, 12)
 
 	fmt.Println("\nSignals:")
 	if summary.InlineOrchestrationCalls > 0 {
-		fmt.Printf("- %s large inline orchestration calls carried %s input bytes across %s sessions. Extract repeated scripts into a tested helper or compact agent-facing command.\n",
+		fmt.Printf("- %s large inline orchestration calls carried %s input bytes across %s sessions (largest call: %s bytes). Extract repeated scripts into a tested helper or compact agent-facing command.\n",
 			formatCodexCount(int64(summary.InlineOrchestrationCalls)),
 			formatCodexCount(summary.InlineOrchestrationBytes),
 			formatCodexCount(int64(summary.InlineOrchestrationSessions)),
+			formatCodexCount(summary.InlineOrchestrationMaxBytes),
 		)
 	}
 	if summary.Compactions > 0 {
@@ -1901,6 +1949,48 @@ func printOwnedTooling(metrics map[string]codexToolMetrics, configs []ownedToolC
 		if recommendation := strings.TrimSpace(row.Config.Recommendation); recommendation != "" {
 			fmt.Printf("  %s\n", recommendation)
 		}
+	}
+}
+
+func printOwnedOperations(metrics map[string]codexOwnedOperationMetrics, limit int) {
+	type row struct {
+		Operation string
+		Metrics   codexOwnedOperationMetrics
+	}
+	rows := make([]row, 0, len(metrics))
+	for operation, value := range metrics {
+		rows = append(rows, row{Operation: operation, Metrics: value})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.FailedCalls != rows[j].Metrics.FailedCalls {
+			return rows[i].Metrics.FailedCalls > rows[j].Metrics.FailedCalls
+		}
+		if rows[i].Metrics.OutputBytes != rows[j].Metrics.OutputBytes {
+			return rows[i].Metrics.OutputBytes > rows[j].Metrics.OutputBytes
+		}
+		if rows[i].Metrics.Calls != rows[j].Metrics.Calls {
+			return rows[i].Metrics.Calls > rows[j].Metrics.Calls
+		}
+		return rows[i].Operation < rows[j].Operation
+	})
+	if len(rows) == 0 {
+		return
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println("\nLocally controlled operations:")
+	fmt.Printf("%-36s %9s %9s %10s %10s %10s %10s\n", "OPERATION", "CALLS", "SESSIONS", "OUTPUT", "TRUNC", "FAILED", "AMBIG")
+	for _, row := range rows {
+		fmt.Printf("%-36s %9s %9s %10s %10s %10s %10s\n",
+			truncateCodexLabel(row.Operation, 36),
+			formatCodexCount(int64(row.Metrics.Calls)),
+			formatCodexCount(int64(row.Metrics.Sessions)),
+			"~"+formatCodexCount(row.Metrics.EstimatedOutputTokens),
+			formatCodexCount(int64(row.Metrics.TruncatedCalls)),
+			formatCodexCount(int64(row.Metrics.FailedCalls)),
+			formatCodexCount(int64(row.Metrics.AmbiguousFailedCalls)),
+		)
 	}
 }
 

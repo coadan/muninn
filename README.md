@@ -61,7 +61,8 @@ Muninn highlights:
 - substantive command-family transitions across separate tool calls
 - fixed failure reasons and their privacy-safe command context
 - repeated safe repository-relative read targets and current file size
-- large inline orchestration payloads without retaining their content
+- repeated or individually long inline code/orchestration payloads without
+  retaining their content
 
 Muninn includes recent tool events from sessions that started before the
 lookback boundary. This avoids losing active work simply because a session is
@@ -93,6 +94,12 @@ their preferred tooling surface:
       "id": "repository-cli",
       "repository": "path-or-logical-repo-name",
       "executables": ["repo-cli"],
+      "operations": [
+        {
+          "id": "status",
+          "args": ["task", "*", "status"]
+        }
+      ],
       "recommendation": "Prefer improving this locally controlled surface."
     }
   ]
@@ -105,6 +112,12 @@ are stored as one-way digests in normalized events; reports use only the
 configured ID and logical repository name.
 
 Owned-tool attribution lets Muninn prioritize fixes with a short local path.
+Optional operation patterns use exact argument prefixes with `*` matching one
+privacy-safe variable segment. Reports retain only configured IDs such as
+`repository-cli/status`, never the matched arguments. Patterns may overlap to
+provide both broad and targeted views, so operation totals are not additive.
+Use `--refresh` after changing operation patterns so cached source events are
+reclassified.
 Findings that do not map to an owned tool can instead recommend repository
 guidance, an agent-optimized façade for a fragmented workflow, or an upstream
 follow-up.

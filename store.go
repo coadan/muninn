@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 2
+const sessionStoreSchemaVersion = 3
 
 type sessionNormalizer interface {
 	NormalizeSession(path string) (normalizedSession, error)
@@ -120,6 +120,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
 			total_tokens INTEGER NOT NULL DEFAULT 0,
 			selector_digests TEXT NOT NULL DEFAULT '[]',
+			owned_operations TEXT NOT NULL DEFAULT '[]',
 			targets TEXT NOT NULL DEFAULT '[]',
 			inline_bytes INTEGER NOT NULL DEFAULT 0,
 			UNIQUE(session_id, sequence)
@@ -161,6 +162,16 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN inline_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("migrate Muninn store inline orchestration: %w", err)
 		}
+		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN owned_operations TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("migrate Muninn store owned operations: %w", err)
+		}
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
+	case existing == "2":
+		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN owned_operations TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("migrate Muninn store owned operations: %w", err)
+		}
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
@@ -170,7 +181,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 	return nil
 }
 
-func (store *sessionStore) refresh(ctx context.Context, provider string, sessionDirs []string, repositoryRoot string, normalizer sessionNormalizer, force bool) (sessionRefreshStats, error) {
+func (store *sessionStore) refresh(ctx context.Context, provider string, sessionDirs []string, repositoryRoot string, normalizer sessionNormalizer, ownership ownershipCatalog, force bool) (sessionRefreshStats, error) {
 	var stats sessionRefreshStats
 	for _, sessionDir := range sessionDirs {
 		err := filepath.WalkDir(sessionDir, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -214,6 +225,8 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, session
 			for index := range session.Events {
 				session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
 				session.Events[index].TargetCandidates = nil
+				session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
+				session.Events[index].CommandCandidates = nil
 			}
 			if err := store.replaceSession(ctx, session, info.Size(), info.ModTime().UnixNano()); err != nil {
 				return err
@@ -287,8 +300,9 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		first_family, last_family, tool_round, call_occurred_at_ns, failed,
 		truncated, output_bytes, failure_reason, failure_context, input_tokens,
 		cached_input_tokens, uncached_input_tokens, output_tokens,
-		reasoning_tokens, total_tokens, selector_digests, targets, inline_bytes
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		reasoning_tokens, total_tokens, selector_digests, owned_operations,
+		targets, inline_bytes
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -297,6 +311,10 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		selectorDigests, err := json.Marshal(event.SelectorDigests)
 		if err != nil {
 			return fmt.Errorf("encode selector digests: %w", err)
+		}
+		ownedOperations, err := json.Marshal(event.OwnedOperations)
+		if err != nil {
+			return fmt.Errorf("encode owned operations: %w", err)
 		}
 		targets, err := json.Marshal(event.Targets)
 		if err != nil {
@@ -331,6 +349,7 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 			event.Tokens.ReasoningTokens,
 			event.Tokens.TotalTokens,
 			string(selectorDigests),
+			string(ownedOperations),
 			string(targets),
 			event.InlineBytes,
 		); err != nil {
@@ -364,7 +383,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.input_tokens, events.cached_input_tokens,
 		events.uncached_input_tokens, events.output_tokens,
 		events.reasoning_tokens, events.total_tokens, events.selector_digests,
-		events.targets, events.inline_bytes
+		events.owned_operations, events.targets, events.inline_bytes
 		FROM sessions
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
@@ -394,6 +413,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			failed           int
 			truncated        int
 			selectorDigests  string
+			ownedOperations  string
 			targets          string
 		)
 		err := rows.Scan(
@@ -422,6 +442,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&event.Tokens.ReasoningTokens,
 			&event.Tokens.TotalTokens,
 			&selectorDigests,
+			&ownedOperations,
 			&targets,
 			&event.InlineBytes,
 		)
@@ -444,6 +465,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		event.Failed = failed != 0
 		event.Truncated = truncated != 0
 		_ = json.Unmarshal([]byte(selectorDigests), &event.SelectorDigests)
+		_ = json.Unmarshal([]byte(ownedOperations), &event.OwnedOperations)
 		_ = json.Unmarshal([]byte(targets), &event.Targets)
 		session.Events = append(session.Events, event)
 	}

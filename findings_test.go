@@ -47,6 +47,19 @@ func TestCodexInlineOrchestrationExcludesEdits(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsFlagsOneVeryLongInlineToolCall(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.InlineOrchestrationCalls = 1
+	report.Summary.InlineOrchestrationBytes = 9 * 1024
+	report.Summary.InlineOrchestrationMaxBytes = 9 * 1024
+	report.Summary.InlineOrchestrationSessions = 1
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "agent-interface" ||
+		!strings.Contains(findings[0].Title, "long inline code") {
+		t.Fatalf("long inline call finding mismatch: %#v", findings)
+	}
+}
+
 func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 	findings := []sessionFinding{
 		{Category: "owned-tool", Title: "tool"},

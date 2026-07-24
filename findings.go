@@ -24,6 +24,49 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	summary := report.Summary
 	var findings []sessionFinding
 
+	ownedConfigByID := map[string]ownedToolConfig{}
+	for _, owned := range config.OwnedTools {
+		ownedConfigByID[owned.ID] = owned
+	}
+	for operation, metrics := range summary.OwnedOperations {
+		if metrics.Sessions < 2 {
+			continue
+		}
+		actionableFailures, expectedFailures := ownedOperationFailureCounts(summary.OwnedOperationFailureReasons[operation])
+		if actionableFailures < 2 && metrics.TruncatedCalls < 3 &&
+			metrics.EstimatedOutputTokens < 10_000 && metrics.Calls < 20 {
+			continue
+		}
+		toolID, _, _ := strings.Cut(operation, "/")
+		owned := ownedConfigByID[toolID]
+		action := strings.TrimSpace(owned.Recommendation)
+		if action == "" {
+			action = "Improve this locally controlled operation or its defaults before documenting another agent workaround."
+		}
+		title := "high-cost locally controlled operation: " + operation
+		if actionableFailures >= 2 || metrics.TruncatedCalls >= 3 {
+			title = "locally controlled operation has recurring friction: " + operation
+		}
+		findings = append(findings, sessionFinding{
+			Category: "owned-operation",
+			Control:  "local",
+			Title:    title,
+			Evidence: fmt.Sprintf("%s calls across %s sessions, %s actionable failures, %s expected/product failures, %s ambiguous bundled failures, %s truncations, ~%s visible output tokens",
+				formatCodexCount(int64(metrics.Calls)),
+				formatCodexCount(int64(metrics.Sessions)),
+				formatCodexCount(int64(actionableFailures)),
+				formatCodexCount(int64(expectedFailures)),
+				formatCodexCount(int64(metrics.AmbiguousFailedCalls)),
+				formatCodexCount(int64(metrics.TruncatedCalls)),
+				formatCodexCount(metrics.EstimatedOutputTokens),
+			),
+			Action:   action,
+			Count:    metrics.Calls,
+			Sessions: metrics.Sessions,
+			score:    650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + int(metrics.EstimatedOutputTokens/5_000),
+		})
+	}
+
 	for _, owned := range config.OwnedTools {
 		metrics := summary.OwnedTooling[owned.ID]
 		outputTokens := estimatedTokens(metrics.OutputBytes)
@@ -164,15 +207,20 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
-	if summary.InlineOrchestrationCalls >= 2 || summary.InlineOrchestrationBytes >= 16*1024 {
+	if summary.InlineOrchestrationCalls >= 2 || summary.InlineOrchestrationBytes >= 16*1024 || summary.InlineOrchestrationMaxBytes >= 8*1024 {
+		title := "long inline code is carrying orchestration inside a tool call"
+		if summary.InlineOrchestrationCalls >= 2 {
+			title = "repeated inline code is rebuilding a workflow inside tool calls"
+		}
 		findings = append(findings, sessionFinding{
 			Category: "agent-interface",
 			Control:  "repository",
-			Title:    "large inline orchestration is rebuilding a workflow inside tool calls",
-			Evidence: fmt.Sprintf("%s large inline calls across %s sessions; %s input bytes",
+			Title:    title,
+			Evidence: fmt.Sprintf("%s large inline calls across %s sessions; %s total input bytes; largest call %s bytes",
 				formatCodexCount(int64(summary.InlineOrchestrationCalls)),
 				formatCodexCount(int64(summary.InlineOrchestrationSessions)),
 				formatCodexCount(summary.InlineOrchestrationBytes),
+				formatCodexCount(summary.InlineOrchestrationMaxBytes),
 			),
 			Action:   config.Actions.InlineOrchestration,
 			Count:    summary.InlineOrchestrationCalls,
@@ -226,6 +274,18 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	return diversifySessionFindings(findings)
 }
 
+func ownedOperationFailureCounts(reasons map[string]codexOccurrenceMetrics) (actionable int, expected int) {
+	for reason, metrics := range reasons {
+		switch reason {
+		case "test failure", "search no match":
+			expected += metrics.Count
+		default:
+			actionable += metrics.Count
+		}
+	}
+	return actionable, expected
+}
+
 func repositoryManifestTarget(target string) bool {
 	switch strings.ToLower(filepath.Base(target)) {
 	case "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
@@ -245,6 +305,7 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 	allowed := map[string]map[string]bool{
 		"tooling": {
 			"owned-tool":        true,
+			"owned-operation":   true,
 			"recurring-failure": true,
 		},
 		"instructions": {
@@ -312,6 +373,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"instruction-discovery": 4,
 		"recurring-failure":     4,
 		"owned-tool":            4,
+		"owned-operation":       6,
 	}
 	counts := map[string]int{}
 	result := make([]sessionFinding, 0, len(findings))
