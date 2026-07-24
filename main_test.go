@@ -562,6 +562,80 @@ func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
 	}
 }
 
+func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      workspaceRoot,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt:     generatedAt.Add(-3 * time.Minute),
+				Kind:           sessionEventToolOutput,
+				ToolName:       "exec_command",
+				Family:         "search",
+				OutputBytes:    oversizedOutputMinimumBytes - 1,
+				CallOccurredAt: generatedAt.Add(-4 * time.Minute),
+			},
+			{
+				OccurredAt:     generatedAt.Add(-2 * time.Minute),
+				Kind:           sessionEventToolOutput,
+				ToolName:       "exec_command",
+				Family:         "search",
+				OutputBytes:    oversizedOutputMinimumBytes,
+				CallOccurredAt: generatedAt.Add(-3 * time.Minute),
+			},
+			{
+				OccurredAt:      generatedAt.Add(-time.Minute),
+				Kind:            sessionEventToolOutput,
+				ToolName:        "exec_command",
+				Family:          "mixed shell",
+				OutputBytes:     45_000,
+				CallOccurredAt:  generatedAt.Add(-2 * time.Minute),
+				OwnedOperations: []string{"bwb/inspect", "bwb/inspect-namespace"},
+			},
+			{
+				OccurredAt:                    generatedAt.Add(-30 * time.Second),
+				Kind:                          sessionEventToolOutput,
+				ToolName:                      "exec_command",
+				Family:                        "mixed shell",
+				OutputBytes:                   60_000,
+				CallOccurredAt:                generatedAt.Add(-90 * time.Second),
+				OwnedOperations:               []string{"bwb/status-env", "bwb/cli"},
+				OperationAttributionAmbiguous: true,
+			},
+		},
+	}
+	record, err := sessionRecordFromNormalized(session, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt, ownershipCatalog{})
+	if err != nil {
+		t.Fatalf("normalize session: %v", err)
+	}
+	if got := record.OversizedOutputs["search"]; got.Calls != 1 ||
+		got.OutputBytes != oversizedOutputMinimumBytes ||
+		got.MaxOutputBytes != oversizedOutputMinimumBytes {
+		t.Fatalf("search oversized output=%#v", got)
+	}
+	if got := record.OversizedOutputs["bwb/inspect-namespace"]; got.Calls != 1 ||
+		got.OutputBytes != 45_000 ||
+		got.MaxOutputBytes != 45_000 {
+		t.Fatalf("owned oversized output=%#v", got)
+	}
+	if got := record.OversizedOutputs["mixed shell"]; got.Calls != 1 || got.OutputBytes != 60_000 {
+		t.Fatalf("ambiguous oversized output should use family context: %#v", got)
+	}
+	if _, exists := record.OversizedOutputs["bwb/status-env"]; exists {
+		t.Fatalf("ambiguous bundled output must not be charged to an owned operation: %#v", record.OversizedOutputs)
+	}
+	if len(record.OversizedOutputs) != 3 {
+		t.Fatalf("below-threshold output should be absent: %#v", record.OversizedOutputs)
+	}
+	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)
+	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
+	if got := report.Summary.OversizedOutputs["search"]; got.Sessions != 1 {
+		t.Fatalf("oversized output sessions=%#v want one", got)
+	}
+}
+
 func TestCodexMixedSearchReadMetricsAggregatesOnlyRelevantShapes(t *testing.T) {
 	got := codexMixedSearchReadMetrics(map[string]codexToolMetrics{
 		"search -> file reads":          {Calls: 2, FailedCalls: 1, OutputBytes: 400},

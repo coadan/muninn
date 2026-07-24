@@ -167,6 +167,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				ownedOperations = ownership.classifyOperations(event.CommandCandidates)
 			}
 			recordProgressWait(record, event, ownedOperations)
+			recordOversizedOutput(record, event, ownedOperations)
 			for _, operation := range ownedOperations {
 				target := record.OwnedOperations
 				if event.OperationAttributionAmbiguous {
@@ -206,7 +207,25 @@ func newCodexSessionRecord() codexSessionRecord {
 		FailureContexts:              map[string]map[string]int{},
 		ProgressStalls:               map[string]codexWaitMetrics{},
 		ExpectedWaits:                map[string]codexWaitMetrics{},
+		OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 	}
+}
+
+const oversizedOutputMinimumBytes int64 = 30_000
+
+func recordOversizedOutput(record codexSessionRecord, event normalizedSessionEvent, ownedOperations []string) {
+	if event.OutputBytes < oversizedOutputMinimumBytes {
+		return
+	}
+	if event.OperationAttributionAmbiguous {
+		ownedOperations = nil
+	}
+	context := progressWaitContext(event, ownedOperations)
+	metrics := record.OversizedOutputs[context]
+	metrics.Calls++
+	metrics.OutputBytes += event.OutputBytes
+	metrics.MaxOutputBytes = max(metrics.MaxOutputBytes, event.OutputBytes)
+	record.OversizedOutputs[context] = metrics
 }
 
 const progressStallMinimum = 20 * time.Second

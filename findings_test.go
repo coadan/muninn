@@ -163,6 +163,47 @@ func TestBuildSessionFindingsSuppressesOnlyExactSignal(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsCapsOversizedOutputsAndMarksOwnedContext(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.OversizedOutputs["bwb/test"] = codexOversizedOutputMetrics{
+		Calls: 3, OutputBytes: 180_000, MaxOutputBytes: 90_000, Sessions: 2,
+	}
+	report.Summary.OversizedOutputs["search"] = codexOversizedOutputMetrics{
+		Calls: 2, OutputBytes: 100_000, MaxOutputBytes: 60_000, Sessions: 2,
+	}
+	report.Summary.OversizedOutputs["git inspect"] = codexOversizedOutputMetrics{
+		Calls: 1, OutputBytes: 80_000, MaxOutputBytes: 80_000, Sessions: 1,
+	}
+	report.Summary.OversizedOutputs["tests"] = codexOversizedOutputMetrics{
+		Calls: 1, OutputBytes: 30_000, MaxOutputBytes: 30_000, Sessions: 1,
+	}
+	config := defaultRepositoryConfig()
+	config.OwnedTools = []ownedToolConfig{{ID: "bwb"}}
+	findings := buildSessionFindings(report, config)
+	outputFindings, err := filterSessionFindings(findings, "output")
+	if err != nil {
+		t.Fatalf("filter output findings: %v", err)
+	}
+	if len(outputFindings) != 3 {
+		t.Fatalf("oversized output findings should be capped at three: %#v", outputFindings)
+	}
+	bySignal := map[string]sessionFinding{}
+	for _, finding := range outputFindings {
+		bySignal[finding.Signal] = finding
+	}
+	owned := bySignal["output-cost/bwb/test"]
+	if owned.Control != "local" || !strings.Contains(owned.Action, "locally controlled") ||
+		!strings.Contains(owned.Evidence, "largest call 90,000 bytes") {
+		t.Fatalf("owned output finding mismatch: %#v", owned)
+	}
+	if search := bySignal["output-cost/search"]; !strings.Contains(search.Action, "cap matches") {
+		t.Fatalf("search output action mismatch: %#v", search)
+	}
+	if _, exists := bySignal["output-cost/tests"]; exists {
+		t.Fatalf("lowest-ranked fourth output should not displace top three: %#v", outputFindings)
+	}
+}
+
 func TestSessionFindingSignalIsPrivacySafeAndBounded(t *testing.T) {
 	finding := sessionFinding{
 		Category: "session-loop",
@@ -193,6 +234,10 @@ func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 	}
 	if _, err := filterSessionFindings(findings, "unknown"); err == nil {
 		t.Fatal("unsupported focus did not fail")
+	}
+	output, err := filterSessionFindings([]sessionFinding{{Category: "output-cost", Title: "large"}}, "output")
+	if err != nil || len(output) != 1 {
+		t.Fatalf("output focus mismatch: %#v, %v", output, err)
 	}
 }
 
