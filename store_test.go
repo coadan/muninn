@@ -122,7 +122,7 @@ func TestSessionStoreSavesPrivacySafeCheckpoint(t *testing.T) {
 	}
 }
 
-func TestSessionStoreMigrationReindexesCanonicalRepositoryTargets(t *testing.T) {
+func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "muninn.db")
 	store, err := openSessionStore(path)
 	if err != nil {
@@ -132,7 +132,7 @@ func TestSessionStoreMigrationReindexesCanonicalRepositoryTargets(t *testing.T) 
 		VALUES('codex', '/private/session.jsonl', 1, 1, 1)`); err != nil {
 		t.Fatalf("insert stale source: %v", err)
 	}
-	if _, err := store.db.Exec(`UPDATE metadata SET value = '5' WHERE key = 'schema_version'`); err != nil {
+	if _, err := store.db.Exec(`UPDATE metadata SET value = '6' WHERE key = 'schema_version'`); err != nil {
 		t.Fatalf("set old schema version: %v", err)
 	}
 	if err := store.Close(); err != nil {
@@ -155,8 +155,8 @@ func TestSessionStoreMigrationReindexesCanonicalRepositoryTargets(t *testing.T) 
 	if err := migrated.db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != "6" {
-		t.Fatalf("expected schema version 6, got %q", version)
+	if version != "7" {
+		t.Fatalf("expected schema version 7, got %q", version)
 	}
 }
 
