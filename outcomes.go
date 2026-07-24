@@ -23,6 +23,7 @@ type codexTaskEpisode struct {
 	ToolOutputBytes int64
 	Families        map[string]int
 	OwnedOperations map[string]int
+	Targets         map[string]int
 	TargetCohorts   map[string]int
 	Phases          map[string]taskPhaseCost
 	currentPhase    string
@@ -596,6 +597,9 @@ func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncr
 			}
 		}
 		if len(event.Targets) > 0 {
+			if episode.Targets == nil {
+				episode.Targets = map[string]int{}
+			}
 			if episode.TargetCohorts == nil {
 				episode.TargetCohorts = map[string]int{}
 			}
@@ -603,6 +607,7 @@ func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncr
 			for _, target := range event.Targets {
 				if taskCostSourceTarget(target) {
 					sourceTargets = append(sourceTargets, target)
+					episode.Targets[target]++
 				}
 			}
 			for cohort := range eventTargetCohorts(sourceTargets) {
@@ -800,6 +805,7 @@ type taskCostTailDrivers struct {
 	OrdinaryEpisodes int                  `json:"ordinaryEpisodes"`
 	Families         []taskCostTailDriver `json:"families,omitempty"`
 	OwnedOperations  []taskCostTailDriver `json:"ownedOperations,omitempty"`
+	Targets          []taskCostTailDriver `json:"targets,omitempty"`
 	TargetCohorts    []taskCostTailDriver `json:"targetCohorts,omitempty"`
 }
 
@@ -986,6 +992,9 @@ func analyzeTaskCostTailDrivers(episodes []codexTaskEpisode) taskCostTailDrivers
 	})
 	drivers.OwnedOperations = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
 		return episode.OwnedOperations
+	})
+	drivers.Targets = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
+		return episode.Targets
 	})
 	drivers.TargetCohorts = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
 		return episode.TargetCohorts
@@ -1206,6 +1215,7 @@ func formatTaskCostTailDrivers(drivers taskCostTailDrivers) string {
 		label   string
 		drivers []taskCostTailDriver
 	}{
+		{label: "targets", drivers: drivers.Targets},
 		{label: "cohorts", drivers: drivers.TargetCohorts},
 		{label: "operations", drivers: drivers.OwnedOperations},
 		{label: "families", drivers: drivers.Families},
@@ -1238,6 +1248,7 @@ func dominantTaskCostTailDriver(drivers taskCostTailDrivers) (kind string, drive
 		drivers []taskCostTailDriver
 	}{
 		{kind: "operation", drivers: drivers.OwnedOperations},
+		{kind: "target", drivers: drivers.Targets},
 		{kind: "cohort", drivers: drivers.TargetCohorts},
 		{kind: "family", drivers: drivers.Families},
 	} {

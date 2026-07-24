@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -54,11 +55,13 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 			episode.Tokens.UncachedInputTokens = 10_000
 			episode.Families["tests"] = 4
 			episode.OwnedOperations = map[string]int{"bwb/test": 3}
+			episode.Targets = map[string]int{"packages/runtime/worker.ts": 5}
 			episode.TargetCohorts["packages/runtime"] = 5
 		}
 		if index >= 3 && index < 5 {
 			episode.Families["tests"] = 1
 			episode.OwnedOperations = map[string]int{"bwb/test": 1}
+			episode.Targets = map[string]int{"packages/runtime/worker.ts": 1}
 			episode.TargetCohorts["packages/runtime"] = 1
 		}
 		episodes = append(episodes, episode)
@@ -77,6 +80,13 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 	if len(analysis.TailDrivers.TargetCohorts) != 1 ||
 		analysis.TailDrivers.TargetCohorts[0].Name != "packages/runtime" {
 		t.Fatalf("target cohort driver mismatch: %#v", analysis.TailDrivers.TargetCohorts)
+	}
+	if len(analysis.TailDrivers.Targets) != 1 ||
+		analysis.TailDrivers.Targets[0].Name != "packages/runtime/worker.ts" {
+		t.Fatalf("exact target driver mismatch: %#v", analysis.TailDrivers.Targets)
+	}
+	if formatted := formatTaskCostTailDrivers(analysis.TailDrivers); !strings.Contains(formatted, "targets packages/runtime/worker.ts") {
+		t.Fatalf("formatted tail drivers omit exact target: %q", formatted)
 	}
 }
 
