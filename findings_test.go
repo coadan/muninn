@@ -289,13 +289,18 @@ func TestBuildSessionFindingsFlagsRepeatedPostDeliveryReviewChecks(t *testing.T)
 func TestBuildSessionFindingsLocalizesDeliveryReworkToGenericCohort(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.DeliveryRework = deliveryReworkMetrics{
-		Deliveries:              8,
-		DeliveriesWithRework:    3,
-		ReviewToEditCycles:      5,
-		PostDeliveryEditCalls:   5,
-		Sessions:                4,
-		ReworkLevers:            map[string]int{"source code": 5},
-		ReworkScopes:            map[string]int{"(root)": 5},
+		Deliveries:            8,
+		DeliveriesWithRework:  3,
+		ReviewToEditCycles:    5,
+		PostDeliveryEditCalls: 5,
+		Sessions:              4,
+		ReworkLevers:          map[string]int{"source code": 5},
+		ReworkScopes:          map[string]int{"(root)": 5},
+		ReworkTargets: map[string]int{
+			"packages/runtime/src/engine.go": 4,
+			"packages/runtime/src/cache.go":  3,
+			"apps/web/src/page.ts":           2,
+		},
 		DeliveriesWithPreTests:  2,
 		DeliveriesWithPreReview: 1,
 		Cohorts: map[string]deliveryCohortMetrics{
@@ -317,9 +322,10 @@ func TestBuildSessionFindingsLocalizesDeliveryReworkToGenericCohort(t *testing.T
 		t.Fatalf("expected one localized delivery finding: %#v", findings)
 	}
 	finding := findings[0]
-	if finding.Target != "packages/runtime" || finding.Lever != "source code" ||
-		!strings.Contains(finding.Action, "focused test for this cohort") ||
-		!strings.Contains(finding.Evidence, "top cohort packages/runtime") {
+	if finding.Target != "packages/runtime/src/engine.go" || finding.Lever != "source code" ||
+		!strings.Contains(finding.Action, "exact target") ||
+		!strings.Contains(finding.Evidence, "top cohort packages/runtime") ||
+		!strings.Contains(finding.Evidence, "top exact rework target packages/runtime/src/engine.go: 4 cycles") {
 		t.Fatalf("localized delivery finding mismatch: %#v", finding)
 	}
 }
