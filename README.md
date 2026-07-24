@@ -47,6 +47,8 @@ muninn analyze --repo . --focus structure
 muninn analyze --repo . --focus output
 muninn analyze --repo . --focus quality
 muninn analyze --repo . --details
+muninn failures --repo . --operation bwb/comments-wait --since 14d
+muninn failures --repo . --operation bwb/test-nses --reason "test harness protocol" --json
 muninn feedback add \
   --category roundtrip \
   --target bwb/pr \
@@ -60,6 +62,12 @@ muninn feedback resolve \
 ```
 
 `muninn sessions` is a compatibility alias for `muninn analyze`.
+
+`muninn failures` gives a bounded event timeline for one configured
+`ownedTools.operations` ID. It refreshes the local index, defaults to 20
+events, and caps `--limit` at 100. Its output is limited to timestamps, fixed
+failure and command-family labels, output byte counts, and operation
+attribution quality; it does not reveal raw session content or identifiers.
 
 The default human report is findings-first. Use `--overview` for compact
 family totals and `--details` for command, transition, source-target, failure,
