@@ -67,6 +67,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	hasPreviousTokens := false
 	episode := codexTaskEpisode{}
 	deliveryTracker := deliveryReworkTracker{}
+	downstreamTracker := downstreamQualityTracker{}
 	for _, event := range session.Events {
 		event = withoutContinuationCallAttribution(event)
 		if event.OccurredAt.Before(since) {
@@ -109,12 +110,25 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 		postDeliveryEdits := deliveryTracker.metrics.PostDeliveryEditCalls
 		postDeliveryReviews := deliveryTracker.metrics.PostDeliveryReviewChecks
+		downstreamFailures := downstreamTracker.metrics.DeliveriesWithFailure
+		downstreamRecoveries := downstreamTracker.metrics.RecoveredDeliveries
+		downstreamReverts := downstreamTracker.metrics.Reverts
 		deliveryTracker.observe(event, eventOperations)
+		downstreamTracker.observe(event, eventOperations)
 		if deliveryTracker.metrics.PostDeliveryEditCalls > postDeliveryEdits {
 			touchSessionActivity(record.Activity, "delivery-rework", "", event.OccurredAt)
 		}
 		if deliveryTracker.metrics.PostDeliveryReviewChecks > postDeliveryReviews {
 			touchSessionActivity(record.Activity, "delivery-review", "", event.OccurredAt)
+		}
+		if downstreamTracker.metrics.DeliveriesWithFailure > downstreamFailures {
+			touchSessionActivity(record.Activity, "downstream-failure", "", event.OccurredAt)
+		}
+		if downstreamTracker.metrics.RecoveredDeliveries > downstreamRecoveries {
+			touchSessionActivity(record.Activity, "downstream-recovery", "", event.OccurredAt)
+		}
+		if downstreamTracker.metrics.Reverts > downstreamReverts {
+			touchSessionActivity(record.Activity, "downstream-revert", "", event.OccurredAt)
 		}
 		switch event.Kind {
 		case sessionEventComplete:
@@ -237,6 +251,13 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if record.DeliveryRework.Deliveries > 0 ||
 		record.DeliveryRework.PostDeliveryReviewChecks > 0 {
 		record.DeliveryRework.Sessions = 1
+	}
+	record.DownstreamQuality = downstreamTracker.metrics
+	finalizeDownstreamQualityMetrics(&record.DownstreamQuality)
+	if record.DownstreamQuality.Deliveries > 0 ||
+		record.DownstreamQuality.DeliveriesWithFailure > 0 ||
+		record.DownstreamQuality.Reverts > 0 {
+		record.DownstreamQuality.Sessions = 1
 	}
 	if record.StartedAt.IsZero() {
 		return codexSessionRecord{}, nil

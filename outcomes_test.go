@@ -141,6 +141,33 @@ func TestTaskPhaseSequencingTracksDeliveryAndRework(t *testing.T) {
 	}
 }
 
+func TestTaskPhaseKeepsNewPostDeliveryWorkOutOfDownstreamRework(t *testing.T) {
+	episode := codexTaskEpisode{}
+	at := func(second int) time.Time { return time.Unix(int64(second), 0) }
+	observe := func(second int, event normalizedSessionEvent) {
+		event.OccurredAt = at(second)
+		episode.observe(event, event.Tokens, nil)
+	}
+	observe(0, normalizedSessionEvent{Kind: sessionEventToolCall, Family: "delivery"})
+	observe(1, normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"})
+	observe(2, normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "apply_patch"})
+	observe(3, normalizedSessionEvent{Kind: sessionEventToolCall, Family: "tests"})
+	observe(4, normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "tests", Failed: true})
+	observe(5, normalizedSessionEvent{
+		Kind: sessionEventToken,
+		Tokens: codexTokenUsage{
+			UncachedInputTokens: 20,
+		},
+	})
+
+	if _, exists := episode.Phases["rework"]; exists {
+		t.Fatalf("new post-delivery task was classified as downstream rework: %#v", episode.Phases)
+	}
+	if got := episode.Phases["verification"]; got.FailedCalls != 1 || phaseFreshTokens(got) != 20 {
+		t.Fatalf("new task verification phase mismatch: %#v", got)
+	}
+}
+
 func TestAnalyzeTaskPhaseTailAssociationsComparesPhaseMix(t *testing.T) {
 	var episodes []codexTaskEpisode
 	for index := range 20 {
@@ -418,6 +445,153 @@ func TestDeliveryTargetLabelRemovesTaskInfrastructure(t *testing.T) {
 		if got := deliveryTargetLabel(target); got != want {
 			t.Fatalf("deliveryTargetLabel(%q)=%q want %q", target, got, want)
 		}
+	}
+}
+
+func TestDownstreamQualityTracksFailureFixPassAndRedelivery(t *testing.T) {
+	tracker := downstreamQualityTracker{}
+	at := func(second int) time.Time { return time.Unix(int64(second), 0) }
+	target := "packages/runtime/src/runtime.go"
+	edit := normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{target},
+	}
+	check := normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "tests"}
+	operations := []string{"repo/test-unit"}
+
+	edit.OccurredAt = at(1)
+	tracker.observe(edit, nil)
+	check.OccurredAt = at(2)
+	tracker.observe(check, operations)
+	tracker.observe(normalizedSessionEvent{
+		Kind:       sessionEventToolOutput,
+		Family:     "delivery",
+		OccurredAt: at(3),
+	}, nil)
+	check.OccurredAt = at(13)
+	check.Failed = true
+	check.OperationContinues = true
+	tracker.observe(check, operations)
+	check.OperationContinues = false
+	tracker.observe(check, operations)
+	edit.OccurredAt = at(20)
+	tracker.observe(edit, nil)
+	check.OccurredAt = at(25)
+	check.Failed = false
+	tracker.observe(check, operations)
+	tracker.observe(normalizedSessionEvent{
+		Kind:       sessionEventToolOutput,
+		Family:     "delivery",
+		OccurredAt: at(33),
+	}, nil)
+
+	got := tracker.metrics
+	finalizeDownstreamQualityMetrics(&got)
+	if got.Deliveries != 2 || got.DeliveriesWithFailure != 1 || got.FailureRuns != 1 ||
+		got.FollowUpEditCycles != 1 || got.RedeliveryAttempts != 1 ||
+		got.RecoveredDeliveries != 1 || got.Reverts != 0 {
+		t.Fatalf("downstream recovery mismatch: %#v", got)
+	}
+	if got.DeliveriesWithPreTests != 2 || got.FailedDeliveriesWithPreTests != 1 {
+		t.Fatalf("fresh verification attribution mismatch: %#v", got)
+	}
+	if got.FailureChecks["repo/test-unit"] != 1 {
+		t.Fatalf("failure check mismatch: %#v", got.FailureChecks)
+	}
+	if got.TimeToFailureSeconds.P50 != 10 || got.TimeToRecoverySeconds.P50 != 20 {
+		t.Fatalf("downstream timing mismatch: %#v %#v", got.TimeToFailureSeconds, got.TimeToRecoverySeconds)
+	}
+	cohort := got.Cohorts["packages/runtime"]
+	if cohort.Deliveries != 2 || cohort.DeliveriesWithFailure != 1 ||
+		cohort.FollowUpEditCycles != 1 || cohort.RecoveredDeliveries != 1 {
+		t.Fatalf("downstream cohort mismatch: %#v", cohort)
+	}
+	preCheck := got.PreDeliveryChecks["repo/test-unit"]
+	if preCheck.Deliveries != 2 || preCheck.DeliveriesWithFailure != 1 {
+		t.Fatalf("pre-delivery check rate mismatch: %#v", preCheck)
+	}
+}
+
+func TestDownstreamQualitySeparatesReviewCleanupAndUnrelatedEdits(t *testing.T) {
+	tracker := downstreamQualityTracker{}
+	deliveredTarget := "src/runtime.go"
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{deliveredTarget},
+	}, nil)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "exec",
+		Family:   "review",
+	}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"docs/runtime.md"},
+	}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:   sessionEventToolOutput,
+		Family: "tests",
+		Failed: true,
+	}, nil)
+
+	if got := tracker.metrics; got.DeliveriesWithFailure != 0 ||
+		got.FailureRuns != 0 || got.FollowUpEditCycles != 0 {
+		t.Fatalf("review cleanup or unrelated edit became downstream failure: %#v", got)
+	}
+}
+
+func TestDownstreamQualityRequiresExactTargetAndMatchingRecoveryCheck(t *testing.T) {
+	tracker := downstreamQualityTracker{}
+	target := "src/runtime.go"
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{target},
+	}, nil)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:   sessionEventToolOutput,
+		Family: "tests",
+		Failed: true,
+	}, []string{"repo/test-unit"})
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"src/unrelated.go"},
+	}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:   sessionEventToolOutput,
+		Family: "tests",
+	}, []string{"repo/test-integration"})
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+
+	got := tracker.metrics
+	if got.DeliveriesWithFailure != 1 || got.FollowUpEditCycles != 0 ||
+		got.RedeliveryAttempts != 0 || got.RecoveredDeliveries != 0 {
+		t.Fatalf("unrelated recovery was attributed: %#v", got)
+	}
+}
+
+func TestDownstreamQualityCountsSuccessfulRevertAsBrokenDelivery(t *testing.T) {
+	tracker := downstreamQualityTracker{}
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"src/runtime.go"},
+	}, nil)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:   sessionEventToolOutput,
+		Family: "revert",
+	}, nil)
+
+	if got := tracker.metrics; got.Reverts != 1 || got.DeliveriesWithFailure != 1 ||
+		got.Cohorts["src"].Reverts != 1 {
+		t.Fatalf("revert quality mismatch: %#v", got)
 	}
 }
 

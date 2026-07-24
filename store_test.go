@@ -60,6 +60,44 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 				}},
 			},
 		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:04Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"call_id":   "delivery",
+				"name":      "exec_command",
+				"arguments": `{"cmd":"git push origin feature"}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:05Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "function_call_output",
+				"call_id": "delivery",
+				"output":  "exit code: 0",
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:06Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"call_id":   "downstream-test",
+				"name":      "exec_command",
+				"arguments": `{"cmd":"go test ./..."}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:07Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "function_call_output",
+				"call_id": "downstream-test",
+				"output":  "exit code: 1",
+			},
+		},
 	})
 
 	store, err := openSessionStore(filepath.Join(t.TempDir(), "muninn.db"))
@@ -102,6 +140,10 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	directOutcomesJSON, _ := json.Marshal(direct.Outcomes)
 	if string(indexedOutcomesJSON) != string(directOutcomesJSON) {
 		t.Fatalf("indexed and direct outcomes differ:\nindexed=%s\ndirect=%s", indexedOutcomesJSON, directOutcomesJSON)
+	}
+	if got := indexed.Summary.DownstreamQuality; got.Deliveries != 1 ||
+		got.DeliveriesWithFailure != 1 || got.FailureRuns != 1 {
+		t.Fatalf("indexed downstream quality mismatch: %#v", got)
 	}
 	if got := indexed.Summary.Tokens; got.InputTokens != 20 ||
 		got.CachedInputTokens != 10 ||

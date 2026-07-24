@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 25
+const codexSessionInsightsSchemaVersion = 26
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -74,6 +74,7 @@ type codexTaskInsights struct {
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
 	DeliveryRework               deliveryReworkMetrics                        `json:"deliveryRework"`
+	DownstreamQuality            downstreamQualityMetrics                     `json:"downstreamQuality"`
 	Activity                     map[string]time.Time                         `json:"-"`
 }
 
@@ -171,6 +172,7 @@ type codexSessionInsightsSummary struct {
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
 	DeliveryRework               deliveryReworkMetrics                        `json:"deliveryRework"`
+	DownstreamQuality            downstreamQualityMetrics                     `json:"downstreamQuality"`
 	Activity                     map[string]time.Time                         `json:"-"`
 }
 
@@ -221,6 +223,7 @@ type codexSessionRecord struct {
 	ExpectedWaits                map[string]codexWaitMetrics
 	OversizedOutputs             map[string]codexOversizedOutputMetrics
 	DeliveryRework               deliveryReworkMetrics
+	DownstreamQuality            downstreamQualityMetrics
 	Activity                     map[string]time.Time
 	TaskEpisodes                 []codexTaskEpisode
 }
@@ -1175,6 +1178,8 @@ func codexShellSegmentFamily(tokens []string) string {
 		switch subcommand {
 		case "push":
 			return "delivery"
+		case "revert":
+			return "revert"
 		case "diff", "status", "log", "show", "branch", "rev-parse", "rev-list", "merge-base", "ls-files", "grep":
 			return "git inspect"
 		}
@@ -1746,6 +1751,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexWaitMetrics(summary.ExpectedWaits, record.ExpectedWaits)
 	addCodexOversizedOutputMetrics(summary.OversizedOutputs, record.OversizedOutputs)
 	addDeliveryReworkMetrics(&summary.DeliveryRework, record.DeliveryRework)
+	addDownstreamQualityMetrics(&summary.DownstreamQuality, record.DownstreamQuality)
 	mergeSessionActivity(summary.Activity, record.Activity)
 	report.taskEpisodes = append(report.taskEpisodes, record.TaskEpisodes...)
 
@@ -1816,6 +1822,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexWaitMetrics(task.ExpectedWaits, record.ExpectedWaits)
 	addCodexOversizedOutputMetrics(task.OversizedOutputs, record.OversizedOutputs)
 	addDeliveryReworkMetrics(&task.DeliveryRework, record.DeliveryRework)
+	addDownstreamQualityMetrics(&task.DownstreamQuality, record.DownstreamQuality)
 	mergeSessionActivity(task.Activity, record.Activity)
 }
 
@@ -1978,6 +1985,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	)
 	printCompletionEpisodeAnalysis(report.Outcomes)
 	printDeliveryReworkAnalysis(summary.DeliveryRework)
+	printDownstreamQualityAnalysis(summary.DownstreamQuality)
 	if summary.FilesUnreadable > 0 {
 		fmt.Printf("Files: %s scanned, %s unreadable\n", formatCodexCount(int64(summary.FilesScanned)), formatCodexCount(int64(summary.FilesUnreadable)))
 	}
