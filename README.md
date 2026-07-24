@@ -43,6 +43,7 @@ muninn analyze --repo . --compare before-tooling-change
 muninn analyze --repo . --overview
 muninn analyze --repo . --focus structure
 muninn analyze --repo . --focus output
+muninn analyze --repo . --focus quality
 muninn analyze --repo . --details
 muninn feedback add \
   --category roundtrip \
@@ -61,7 +62,7 @@ muninn feedback resolve \
 The default human report is findings-first. Use `--overview` for compact
 family totals and `--details` for command, transition, source-target, failure,
 and output rankings. Use `--focus` with `tooling`, `instructions`, `interface`,
-`structure`, `discovery`, `failures`, or `loops` to narrow the action queue
+`structure`, `discovery`, `failures`, `loops`, or `quality` to narrow the action queue
 without loading details. Use `output` to isolate individual oversized tool
 responses. Findings are ordered by most recent supporting activity, show a
 privacy-safe relative `Last seen` age, and retain the exact timestamp in JSON.
@@ -69,6 +70,15 @@ This keeps already-fixed historical friction from outranking current work.
 
 Muninn highlights:
 
+- completion episodes segmented inside long-lived provider sessions, with
+  response-only turns separated from tool-using work and window boundaries
+  marked as left-censored
+- p50/p75/p90 fresh-token, tool-call, output, duration, failure, and compaction
+  outcomes for fully observed completed tool tasks
+- explicit finding attribution to tooling, instructions/docs, source code, or
+  unknown, with confidence kept separate from impact
+- post-delivery quality signals: pushes/lands, pre- and post-delivery review,
+  review-to-edit cycles, and deliveries that required rework
 - total, cached, uncached, and per-session input-token cost
 - fresh-token and visible tool-output volume
 - long low-output tool waits, with tests, builds, and review waits reported
@@ -199,6 +209,13 @@ with compactions and recurring loops indicates stale session context.
 The overview should lead with findings. Focused detail may identify safe
 repository-relative source targets, but paths outside the analyzed repository
 must remain private.
+
+Completion episodes are observational task proxies, not semantic claims about
+user intent. Muninn starts a new episode after each provider completion marker.
+It excludes response-only and left-censored episodes from completed tool-task
+distributions. Delivery rework similarly measures sequence evidence; when it
+cannot distinguish tooling, guidance, and source ownership, it reports
+`unknown` instead of guessing from review text.
 
 ## Direction
 

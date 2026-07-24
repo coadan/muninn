@@ -413,6 +413,17 @@ func TestCodexSelectorDigestsRecognizeOwnedCommandSubstitution(t *testing.T) {
 	}
 }
 
+func TestCodexShellCommandClassifiesPushAsDelivery(t *testing.T) {
+	family, shape := codexShellCommandAnalysis(
+		"exec_command",
+		`{"cmd":"git -C breyta push origin feature"}`,
+		"",
+	)
+	if family != "delivery" || shape != "" {
+		t.Fatalf("git push should establish a delivery boundary: (%q, %q)", family, shape)
+	}
+}
+
 func TestOperationsOnlyDoesNotClaimSharedLauncher(t *testing.T) {
 	catalog := newOwnershipCatalog([]ownedToolConfig{{
 		ID:             "void-cli",

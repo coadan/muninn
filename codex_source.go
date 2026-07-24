@@ -151,8 +151,11 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					CommandCandidates:             descriptor.CommandCandidates,
 					OwnedOperations:               descriptor.OwnedOperations,
 					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
-					TargetCandidates:              codexReadTargetCandidates(name, payload.Arguments, payload.Input),
-					InlineBytes:                   codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
+					TargetCandidates: append(
+						codexReadTargetCandidates(name, payload.Arguments, payload.Input),
+						codexEditTargetCandidates(name, payload.Input)...,
+					),
+					InlineBytes: codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
 				}
 				if continuation {
 					event.FirstFamily = ""

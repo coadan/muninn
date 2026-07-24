@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 8
+const sessionStoreSchemaVersion = 9
 
 type sessionNormalizer interface {
 	NormalizeSession(path string) (normalizedSession, error)
@@ -222,6 +222,10 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
+	case existing == "8":
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
 	case existing != fmt.Sprint(sessionStoreSchemaVersion):
 		return fmt.Errorf("unsupported Muninn store schema version %s (expected %d); remove the local cache to rebuild it", existing, sessionStoreSchemaVersion)
 	}
@@ -275,7 +279,11 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, session
 			session.Provider = provider
 			session.SourcePath = path
 			for index := range session.Events {
-				session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
+				if session.Events[index].ToolName == "apply_patch" {
+					session.Events[index].Targets = normalizeRepositoryEditTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
+				} else {
+					session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
+				}
 				session.Events[index].TargetCandidates = nil
 				session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
 				session.Events[index].CommandCandidates = nil
@@ -443,24 +451,12 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
 		WHERE sources.provider = ?
-		  AND (
-		    (events.occurred_at_ns >= ? AND events.occurred_at_ns <= ?)
-		    OR (
-		      events.kind = 'token'
-		      AND events.sequence = (
-		        SELECT MAX(baseline.sequence)
-		        FROM events AS baseline
-		        WHERE baseline.session_id = sessions.id
-		          AND baseline.kind = 'token'
-		          AND baseline.occurred_at_ns < ?
-		      )
-		    )
-		  )
+		  AND events.occurred_at_ns >= ?
+		  AND events.occurred_at_ns <= ?
 		ORDER BY sessions.id, events.sequence`,
 		provider,
 		since.UnixNano(),
 		generatedAt.UnixNano(),
-		since.UnixNano(),
 	)
 	if err != nil {
 		return report, fmt.Errorf("query indexed sessions: %w", err)
@@ -542,6 +538,16 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 	if err := rows.Err(); err != nil {
 		return report, fmt.Errorf("iterate indexed session events: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return report, fmt.Errorf("close indexed session events: %w", err)
+	}
+	for sessionID, session := range sessions {
+		boundaries, err := store.analysisBoundaries(ctx, sessionID, since)
+		if err != nil {
+			return report, err
+		}
+		session.Events = append(boundaries, session.Events...)
+	}
 	sort.Slice(sessionOrder, func(i, j int) bool { return sessionOrder[i] < sessionOrder[j] })
 	taskMap := map[string]*codexTaskInsights{}
 	for _, sessionID := range sessionOrder {
@@ -556,6 +562,51 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 	}
 	finishSessionInsightsReport(&report, taskMap)
 	return report, nil
+}
+
+func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int64, since time.Time) ([]normalizedSessionEvent, error) {
+	bySequence := map[int]normalizedSessionEvent{}
+	queries := []string{
+		`SELECT sequence, occurred_at_ns, kind, input_tokens, cached_input_tokens,
+			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens
+		 FROM events
+		 WHERE session_id = ? AND kind = 'token' AND occurred_at_ns < ?
+		 ORDER BY sequence DESC LIMIT 1`,
+		`SELECT sequence, occurred_at_ns, kind, input_tokens, cached_input_tokens,
+			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens
+		 FROM events
+		 WHERE session_id = ? AND occurred_at_ns < ?
+		 ORDER BY sequence DESC LIMIT 1`,
+	}
+	for _, query := range queries {
+		event := normalizedSessionEvent{}
+		var occurredAtNS int64
+		err := store.db.QueryRowContext(ctx, query, sessionID, since.UnixNano()).Scan(
+			&event.Sequence,
+			&occurredAtNS,
+			&event.Kind,
+			&event.Tokens.InputTokens,
+			&event.Tokens.CachedInputTokens,
+			&event.Tokens.UncachedInputTokens,
+			&event.Tokens.OutputTokens,
+			&event.Tokens.ReasoningTokens,
+			&event.Tokens.TotalTokens,
+		)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read indexed analysis boundary: %w", err)
+		}
+		event.OccurredAt = time.Unix(0, occurredAtNS).UTC()
+		bySequence[event.Sequence] = event
+	}
+	boundaries := make([]normalizedSessionEvent, 0, len(bySequence))
+	for _, event := range bySequence {
+		boundaries = append(boundaries, event)
+	}
+	sort.Slice(boundaries, func(i, j int) bool { return boundaries[i].Sequence < boundaries[j].Sequence })
+	return boundaries, nil
 }
 
 func pathInsideAnyRoot(roots []string, path string) bool {

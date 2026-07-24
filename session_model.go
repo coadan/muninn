@@ -64,19 +64,27 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	previousCommand := normalizedSessionEvent{}
 	previousTokens := codexTokenUsage{}
 	hasPreviousTokens := false
+	episode := codexTaskEpisode{}
+	deliveryTracker := deliveryReworkTracker{}
 	for _, event := range session.Events {
 		event = withoutContinuationCallAttribution(event)
-		if event.Kind == sessionEventToken && !event.OccurredAt.After(generatedAt) {
-			if !event.OccurredAt.Before(since) {
-				increment := codexTokenUsageIncrement(event.Tokens, previousTokens, hasPreviousTokens)
-				addCodexTokenUsage(&record.Tokens, increment)
+		if event.OccurredAt.Before(since) {
+			if event.Kind == sessionEventToken {
+				previousTokens = event.Tokens
+				hasPreviousTokens = true
 			}
+			episode.LeftCensored = event.Kind != sessionEventComplete
+			continue
+		}
+		if event.OccurredAt.After(generatedAt) {
+			continue
+		}
+		tokenIncrement := codexTokenUsage{}
+		if event.Kind == sessionEventToken {
+			tokenIncrement = codexTokenUsageIncrement(event.Tokens, previousTokens, hasPreviousTokens)
+			addCodexTokenUsage(&record.Tokens, tokenIncrement)
 			previousTokens = event.Tokens
 			hasPreviousTokens = true
-		}
-		active := !event.OccurredAt.Before(since) && !event.OccurredAt.After(generatedAt)
-		if !active {
-			continue
 		}
 		if record.StartedAt.IsZero() || event.OccurredAt.Before(record.StartedAt) {
 			record.StartedAt = event.OccurredAt
@@ -84,9 +92,37 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		if record.EndedAt.IsZero() || event.OccurredAt.After(record.EndedAt) {
 			record.EndedAt = event.OccurredAt
 		}
+		if event.Kind != sessionEventToolOutput {
+			episode.observe(event, tokenIncrement)
+		}
+		if event.Kind == sessionEventToolCall && len(event.Targets) == 0 {
+			if event.ToolName == "apply_patch" {
+				event.Targets = normalizeRepositoryEditTargets(event.TargetCandidates, session.CWD, workspaceRoot)
+			} else {
+				event.Targets = normalizeRepositoryTargets(event.TargetCandidates, session.CWD, workspaceRoot)
+			}
+		}
+		eventOperations := event.OwnedOperations
+		if len(eventOperations) == 0 {
+			eventOperations = ownership.classifyOperations(event.CommandCandidates)
+		}
+		postDeliveryEdits := deliveryTracker.metrics.PostDeliveryEditCalls
+		postDeliveryReviews := deliveryTracker.metrics.PostDeliveryReviewChecks
+		deliveryTracker.observe(event, eventOperations)
+		if deliveryTracker.metrics.PostDeliveryEditCalls > postDeliveryEdits {
+			touchSessionActivity(record.Activity, "delivery-rework", "", event.OccurredAt)
+		}
+		if deliveryTracker.metrics.PostDeliveryReviewChecks > postDeliveryReviews {
+			touchSessionActivity(record.Activity, "delivery-review", "", event.OccurredAt)
+		}
 		switch event.Kind {
 		case sessionEventComplete:
 			record.Completed = true
+			touchSessionActivity(record.Activity, "completion", "", event.OccurredAt)
+			record.TaskEpisodes = append(record.TaskEpisodes, episode)
+			episode = codexTaskEpisode{}
+			previousCommand = normalizedSessionEvent{}
+			previousCommandRound = 0
 		case sessionEventCompaction:
 			record.Compactions++
 			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
@@ -116,10 +152,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 1, false, false, 0)
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
-			ownedOperations := event.OwnedOperations
-			if len(ownedOperations) == 0 {
-				ownedOperations = ownership.classifyOperations(event.CommandCandidates)
-			}
+			ownedOperations := eventOperations
 			for _, operation := range ownedOperations {
 				target := record.OwnedOperations
 				if event.OperationAttributionAmbiguous {
@@ -128,11 +161,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				addCodexToolMetrics(target, operation, 1, false, false, 0)
 				touchSessionActivity(record.Activity, "owned-operation", operation, event.OccurredAt)
 			}
-			targets := event.Targets
-			if len(targets) == 0 {
-				targets = normalizeRepositoryTargets(event.TargetCandidates, session.CWD, workspaceRoot)
-			}
-			for _, target := range targets {
+			for _, target := range event.Targets {
 				metrics := record.ReadTargets[target]
 				metrics.Reads++
 				if previousCommand.LastFamily == "search" && previousCommandRound == event.ToolRound-1 {
@@ -156,6 +185,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			if event.CallOccurredAt.Before(since) || event.CallOccurredAt.After(generatedAt) {
 				continue
 			}
+			episode.observe(event, codexTokenUsage{})
 			record.ToolOutputBytes += event.OutputBytes
 			if event.Truncated {
 				record.TruncatedToolCalls++
@@ -180,10 +210,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 0, event.Failed, event.Truncated, event.OutputBytes)
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
-			ownedOperations := event.OwnedOperations
-			if len(ownedOperations) == 0 {
-				ownedOperations = ownership.classifyOperations(event.CommandCandidates)
-			}
+			ownedOperations := eventOperations
 			recordProgressWait(record, event, ownedOperations)
 			recordOversizedOutput(record, event, ownedOperations)
 			for _, operation := range ownedOperations {
@@ -201,6 +228,15 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				}
 			}
 		}
+	}
+	if !episode.StartedAt.IsZero() {
+		record.TaskEpisodes = append(record.TaskEpisodes, episode)
+	}
+	record.DeliveryRework = deliveryTracker.metrics
+	if record.DeliveryRework.Deliveries > 0 ||
+		record.DeliveryRework.PreDeliveryReviews > 0 ||
+		record.DeliveryRework.PostDeliveryReviewChecks > 0 {
+		record.DeliveryRework.Sessions = 1
 	}
 	if record.StartedAt.IsZero() {
 		return codexSessionRecord{}, nil
