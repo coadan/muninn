@@ -311,6 +311,114 @@ func TestSessionStoreWaitsForConcurrentWriter(t *testing.T) {
 	}
 }
 
+func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *testing.T) {
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "muninn.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	root := filepath.Join(t.TempDir(), "repository")
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	sessions := []normalizedSession{
+		{
+			Provider:   "codex",
+			SourcePath: "inside.jsonl",
+			CWD:        filepath.Join(root, "worktree"),
+			Events: []normalizedSessionEvent{
+				{
+					Sequence:        1,
+					OccurredAt:      now.Add(-3 * time.Hour),
+					Kind:            sessionEventToolOutput,
+					Family:          "tests",
+					Failed:          true,
+					OutputBytes:     120,
+					FailureReason:   "test failure",
+					OwnedOperations: []string{"bwb/test-nses"},
+				},
+				{
+					Sequence:                      2,
+					OccurredAt:                    now.Add(-2 * time.Hour),
+					Kind:                          sessionEventToolOutput,
+					Family:                        "mixed shell",
+					Failed:                        true,
+					OutputBytes:                   480,
+					FailureReason:                 "test harness protocol",
+					OwnedOperations:               []string{"bwb/test-nses"},
+					OperationAttributionAmbiguous: true,
+				},
+				{
+					Sequence:        3,
+					OccurredAt:      now.Add(-time.Hour),
+					Kind:            sessionEventToolOutput,
+					Family:          "tests",
+					Failed:          false,
+					OutputBytes:     80,
+					OwnedOperations: []string{"bwb/test-nses"},
+				},
+			},
+		},
+		{
+			Provider:   "codex",
+			SourcePath: "outside.jsonl",
+			CWD:        root + "-other",
+			Events: []normalizedSessionEvent{{
+				Sequence:        1,
+				OccurredAt:      now.Add(-30 * time.Minute),
+				Kind:            sessionEventToolOutput,
+				Family:          "tests",
+				Failed:          true,
+				OutputBytes:     999,
+				FailureReason:   "test failure",
+				OwnedOperations: []string{"bwb/test-nses"},
+			}},
+		},
+	}
+	for index, session := range sessions {
+		if err := store.replaceSession(context.Background(), session, int64(index+1), int64(index+1)); err != nil {
+			t.Fatalf("replace session %d: %v", index, err)
+		}
+	}
+
+	events, err := store.ownedOperationFailures(
+		context.Background(),
+		"codex",
+		root,
+		now.Add(-24*time.Hour),
+		"bwb/test-nses",
+		"",
+		1,
+	)
+	if err != nil {
+		t.Fatalf("query failures: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events=%d want 1", len(events))
+	}
+	if events[0].Reason != "test harness protocol" || events[0].OutputBytes != 480 || !events[0].AttributionAmbiguous {
+		t.Fatalf("unexpected event: %#v", events[0])
+	}
+	if events[0].Operation != "bwb/test-nses" || events[0].Family != "mixed shell" {
+		t.Fatalf("missing safe event labels: %#v", events[0])
+	}
+
+	events, err = store.ownedOperationFailures(
+		context.Background(),
+		"codex",
+		root,
+		now.Add(-24*time.Hour),
+		"bwb/test-nses",
+		"test failure",
+		10,
+	)
+	if err != nil {
+		t.Fatalf("query reason-filtered failures: %v", err)
+	}
+	if len(events) != 1 || events[0].Reason != "test failure" {
+		t.Fatalf("reason-filtered events=%#v", events)
+	}
+}
+
 func containsAny(value string, candidates ...string) bool {
 	for _, candidate := range candidates {
 		if candidate != "" && strings.Contains(value, candidate) {

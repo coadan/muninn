@@ -426,6 +426,9 @@ func main() {
 		args[0] = "sessions"
 	}
 	if err := cmdCodex(root, args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -477,6 +480,8 @@ func cmdCodex(root string, args []string) error {
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
 	case "sessions":
 		return cmdCodexSessions(root, args[1:])
+	case "failures":
+		return cmdFailures(root, args[1:])
 	case "feedback":
 		return cmdFeedback(root, args[1:])
 	default:
@@ -490,11 +495,13 @@ func printCodexHelp() {
 Usage:
   muninn analyze [flags]
   muninn sessions [flags]
+  muninn failures --operation <tool/operation> [flags]
   muninn feedback <add|resolve|list> [flags]
 
 Available Commands:
   analyze   Analyze agent-session cost and friction for a repository
   sessions  Compatibility alias for analyze
+  failures  Inspect bounded failure events for one owned operation
   feedback  Record or inspect normalized agent-reported friction
 
 Codex is the first session provider. The provider boundary is explicit so
@@ -518,6 +525,7 @@ Examples:
   muninn analyze --repo . --focus structure
   muninn analyze --repo . --details
   muninn analyze --repo . --json
+  muninn failures --repo . --operation bwb/comments-wait --since 14d
   muninn feedback add --category roundtrip --target bwb/pr --signal existing-pr-create-failed
 `)
 }
@@ -1649,6 +1657,9 @@ func codexToolFailureReason(statusText string) string {
 		strings.Contains(preview, "base sha can't be blank") ||
 		strings.Contains(preview, "no commits between"):
 		return "PR branch state"
+	case strings.Contains(preview, "unknown nrepl target") ||
+		strings.Contains(preview, "unsupported nrepl target"):
+		return "unsupported command target"
 	case strings.Contains(preview, "unknown option") ||
 		strings.Contains(preview, "unknown flag") ||
 		strings.Contains(preview, "unrecognized option"):
@@ -1658,9 +1669,16 @@ func codexToolFailureReason(statusText string) string {
 		strings.Contains(preview, "bind: address in use"):
 		return "port collision"
 	case strings.Contains(preview, "connection refused") ||
-		strings.Contains(preview, "service unavailable") ||
 		strings.Contains(preview, "emulator unavailable"):
 		return "local service unavailable"
+	case strings.Contains(preview, "http 502") ||
+		strings.Contains(preview, "http 503") ||
+		strings.Contains(preview, "http 504") ||
+		strings.Contains(preview, "bad gateway") ||
+		strings.Contains(preview, "gateway timeout") ||
+		strings.Contains(preview, "service unavailable") ||
+		strings.Contains(preview, "couldn't respond to github"):
+		return "transient service failure"
 	case strings.Contains(preview, "command not found") ||
 		strings.Contains(preview, "executable file not found"):
 		return "missing executable"
@@ -1675,6 +1693,10 @@ func codexToolFailureReason(statusText string) string {
 		strings.Contains(preview, "process exited with code 137") ||
 		strings.Contains(preview, "terminated by signal"):
 		return "interrupted process"
+	case strings.Contains(preview, "lint failed") ||
+		strings.Contains(preview, "linting took") ||
+		strings.Contains(preview, "clj-kondo found"):
+		return "lint failure"
 	case strings.Contains(preview, "fail in (") ||
 		strings.Contains(preview, "tests failed") ||
 		strings.Contains(preview, "test failed"):

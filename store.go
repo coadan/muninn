@@ -35,6 +35,77 @@ type sessionRefreshStats struct {
 	FilesReused     int
 }
 
+func (store *sessionStore) ownedOperationFailures(
+	ctx context.Context,
+	provider string,
+	repositoryRoot string,
+	since time.Time,
+	operation string,
+	reason string,
+	limit int,
+) ([]ownedOperationFailureEvent, error) {
+	repositoryRoot = filepath.Clean(repositoryRoot)
+	repositoryPrefix := repositoryRoot + string(filepath.Separator)
+	query := `SELECT
+		events.occurred_at_ns,
+		operation.value,
+		events.failure_reason,
+		events.family,
+		events.output_bytes,
+		events.operation_attribution_ambiguous
+	FROM events
+	JOIN sessions ON sessions.id = events.session_id
+	JOIN sources ON sources.id = sessions.source_id
+	JOIN json_each(events.owned_operations) AS operation
+	WHERE sources.provider = ?
+	  AND (sessions.cwd = ? OR substr(sessions.cwd, 1, length(?)) = ?)
+	  AND events.failed = 1
+	  AND events.occurred_at_ns >= ?
+	  AND operation.value = ?`
+	args := []any{
+		provider,
+		repositoryRoot,
+		repositoryPrefix,
+		repositoryPrefix,
+		since.UnixNano(),
+		operation,
+	}
+	if reason != "" {
+		query += "\n  AND events.failure_reason = ?"
+		args = append(args, reason)
+	}
+	query += "\nORDER BY events.occurred_at_ns DESC, events.sequence DESC\nLIMIT ?"
+	args = append(args, limit)
+	rows, err := store.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query owned-operation failures: %w", err)
+	}
+	defer rows.Close()
+	events := make([]ownedOperationFailureEvent, 0)
+	for rows.Next() {
+		var occurredAtNS int64
+		var ambiguous int
+		var event ownedOperationFailureEvent
+		if err := rows.Scan(
+			&occurredAtNS,
+			&event.Operation,
+			&event.Reason,
+			&event.Family,
+			&event.OutputBytes,
+			&ambiguous,
+		); err != nil {
+			return nil, fmt.Errorf("scan owned-operation failure: %w", err)
+		}
+		event.OccurredAt = time.Unix(0, occurredAtNS).UTC()
+		event.AttributionAmbiguous = ambiguous != 0
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read owned-operation failures: %w", err)
+	}
+	return events, nil
+}
+
 func defaultSessionStorePath() (string, error) {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
