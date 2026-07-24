@@ -252,6 +252,59 @@ func TestBuildSessionFindingsRanksRecentSignalsFirst(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsAttributesDeliveryReworkToMissingGate(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries:               4,
+		DeliveriesWithRework:     3,
+		ReviewToEditCycles:       3,
+		PostDeliveryReviewChecks: 4,
+		Sessions:                 2,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 {
+		t.Fatalf("expected one delivery-quality finding: %#v", findings)
+	}
+	finding := findings[0]
+	if finding.Category != "delivery-quality" || finding.Lever != "tooling" ||
+		finding.Confidence != "high" || !strings.Contains(finding.Action, "pre-delivery review gate") {
+		t.Fatalf("delivery-quality attribution mismatch: %#v", finding)
+	}
+}
+
+func TestBuildSessionFindingsFlagsRepeatedPostDeliveryReviewChecks(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries:               4,
+		PostDeliveryReviewChecks: 25,
+		Sessions:                 2,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Lever != "tooling" ||
+		!strings.Contains(findings[0].Title, "repeated checks") {
+		t.Fatalf("review-check finding mismatch: %#v", findings)
+	}
+}
+
+func TestBuildSessionFindingsFlagsCompletedTaskCostTail(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Outcomes = completionEpisodeAnalysis{
+		ToolUsingCompleted: 40,
+		FreshTokens: outcomeDistribution{
+			Count: 40,
+			P50:   100,
+			P90:   300,
+			Max:   2_000,
+		},
+		TopDecileFreshTokenShare: 0.42,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "task-cost" ||
+		findings[0].Lever != "unknown" {
+		t.Fatalf("task-cost tail finding mismatch: %#v", findings)
+	}
+}
+
 func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
 	finding := sessionFinding{
 		Title:  "individual tool calls return oversized output: file reads",
@@ -263,6 +316,25 @@ func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
 	finding.Title = "a small current owner is repeatedly reread"
 	if got := sessionFindingDisplayTarget(finding); got != " · file reads" {
 		t.Fatalf("distinct target should remain visible: %q", got)
+	}
+}
+
+func TestSessionFindingLeverSeparatesToolingInstructionsAndSource(t *testing.T) {
+	tests := []struct {
+		finding sessionFinding
+		lever   string
+	}{
+		{finding: sessionFinding{Category: "code-structure", Target: "scripts/tool.go"}, lever: "tooling"},
+		{finding: sessionFinding{Category: "code-structure", Target: "bwb-src/task.go"}, lever: "tooling"},
+		{finding: sessionFinding{Category: "code-structure", Target: "docs/runtime.md"}, lever: "instructions/docs"},
+		{finding: sessionFinding{Category: "code-structure", Target: ".workbench/repos/breyta/docs/runtime.md"}, lever: "instructions/docs"},
+		{finding: sessionFinding{Category: "code-structure", Target: ".workbench/repos/breyta/scripts/check.clj"}, lever: "tooling"},
+		{finding: sessionFinding{Category: "code-structure", Target: "src/runtime.go"}, lever: "source code"},
+	}
+	for _, test := range tests {
+		if lever, confidence := sessionFindingLever(test.finding); lever != test.lever || confidence != "high" {
+			t.Fatalf("finding %#v attributed to %q/%q", test.finding, lever, confidence)
+		}
 	}
 }
 
@@ -278,6 +350,7 @@ func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 		{Category: "owned-tool", Title: "tool"},
 		{Category: "code-structure", Title: "source"},
 		{Category: "session-loop", Title: "loop"},
+		{Category: "delivery-quality", Title: "quality"},
 	}
 	filtered, err := filterSessionFindings(findings, "structure")
 	if err != nil {
@@ -292,6 +365,10 @@ func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 	output, err := filterSessionFindings([]sessionFinding{{Category: "output-cost", Title: "large"}}, "output")
 	if err != nil || len(output) != 1 {
 		t.Fatalf("output focus mismatch: %#v, %v", output, err)
+	}
+	quality, err := filterSessionFindings(findings, "quality")
+	if err != nil || len(quality) != 1 || quality[0].Title != "quality" {
+		t.Fatalf("quality focus mismatch: %#v, %v", quality, err)
 	}
 }
 

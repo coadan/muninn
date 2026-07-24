@@ -1,0 +1,137 @@
+package main
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestAnalyzeCompletionEpisodesUsesDistributionsNotAverages(t *testing.T) {
+	var episodes []codexTaskEpisode
+	for _, fresh := range []int64{10, 20, 30, 40, 100} {
+		episodes = append(episodes, codexTaskEpisode{
+			StartedAt: time.Unix(0, 0),
+			EndedAt:   time.Unix(10, 0),
+			Completed: true,
+			Tokens: codexTokenUsage{
+				UncachedInputTokens: fresh,
+			},
+			ToolCalls: int(fresh / 10),
+		})
+	}
+	analysis := analyzeCompletionEpisodes(episodes)
+	if analysis.FullyObservedCompleted != 5 {
+		t.Fatalf("completed episode count mismatch: %#v", analysis)
+	}
+	if analysis.ToolUsingCompleted != 5 || analysis.ResponseOnlyCompleted != 0 {
+		t.Fatalf("tool-using episode cohort mismatch: %#v", analysis)
+	}
+	if analysis.FreshTokens.P50 != 30 || analysis.FreshTokens.P75 != 40 ||
+		analysis.FreshTokens.P90 != 100 || analysis.FreshTokens.Max != 100 {
+		t.Fatalf("fresh-token distribution mismatch: %#v", analysis.FreshTokens)
+	}
+	if analysis.TopDecileFreshTokenShare != 0.5 {
+		t.Fatalf("top-decile share mismatch: %f", analysis.TopDecileFreshTokenShare)
+	}
+}
+
+func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T) {
+	tracker := deliveryReworkTracker{}
+	tracker.observe(normalizedSessionEvent{
+		Kind:            sessionEventToolOutput,
+		OwnedOperations: []string{"bwb/pr"},
+	}, []string{"bwb/pr"})
+	for range 2 {
+		tracker.observe(normalizedSessionEvent{
+			Kind:            sessionEventToolCall,
+			ToolName:        "exec",
+			OwnedOperations: []string{"bwb/comments"},
+		}, []string{"bwb/comments"})
+		tracker.observe(normalizedSessionEvent{
+			Kind:            sessionEventToolCall,
+			ToolName:        "write_stdin",
+			OwnedOperations: []string{"bwb/comments"},
+		}, []string{"bwb/comments"})
+		tracker.observe(normalizedSessionEvent{
+			Kind:     sessionEventToolCall,
+			ToolName: "apply_patch",
+			Targets:  []string{".workbench/repos/breyta/src/runtime.clj"},
+		}, nil)
+		tracker.observe(normalizedSessionEvent{
+			Kind:            sessionEventToolCall,
+			ToolName:        "exec",
+			OwnedOperations: []string{"bwb/comments", "bwb/comments-resolve"},
+		}, []string{"bwb/comments", "bwb/comments-resolve"})
+	}
+	got := tracker.metrics
+	if got.Deliveries != 1 || got.PostDeliveryReviewChecks != 2 ||
+		got.ReviewToEditCycles != 2 || got.DeliveriesWithRework != 1 ||
+		got.PostDeliveryEditCalls != 2 {
+		t.Fatalf("delivery rework mismatch: %#v", got)
+	}
+	if got.ReworkLevers["source code"] != 2 || got.ReworkScopes["breyta"] != 2 {
+		t.Fatalf("delivery rework attribution mismatch: %#v", got)
+	}
+}
+
+func TestSessionRecordSegmentsCompletionEpisodesAndCensoring(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Join(root, "work")
+	since := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	at := func(seconds int) time.Time { return since.Add(time.Duration(seconds) * time.Second) }
+	session := normalizedSession{
+		CWD: cwd,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt: since.Add(-time.Second),
+				Kind:       sessionEventToken,
+				Tokens: codexTokenUsage{
+					InputTokens: 100, UncachedInputTokens: 20, OutputTokens: 10, TotalTokens: 110,
+				},
+			},
+			{OccurredAt: at(1), Kind: sessionEventToolCall, ToolName: "exec", ToolRound: 1},
+			{
+				OccurredAt: at(2),
+				Kind:       sessionEventToken,
+				Tokens: codexTokenUsage{
+					InputTokens: 150, UncachedInputTokens: 30, OutputTokens: 15, TotalTokens: 165,
+				},
+			},
+			{OccurredAt: at(3), Kind: sessionEventComplete},
+			{OccurredAt: at(4), Kind: sessionEventToolCall, ToolName: "exec", ToolRound: 2},
+			{
+				OccurredAt:     at(5),
+				CallOccurredAt: at(4),
+				Kind:           sessionEventToolOutput,
+				ToolName:       "exec",
+				Failed:         true,
+				OutputBytes:    400,
+			},
+			{
+				OccurredAt: at(6),
+				Kind:       sessionEventToken,
+				Tokens: codexTokenUsage{
+					InputTokens: 200, UncachedInputTokens: 40, OutputTokens: 20, TotalTokens: 220,
+				},
+			},
+			{OccurredAt: at(7), Kind: sessionEventComplete},
+		},
+	}
+	record, err := sessionRecordFromNormalized(session, root, since, at(10), ownershipCatalog{})
+	if err != nil {
+		t.Fatalf("session record: %v", err)
+	}
+	if len(record.TaskEpisodes) != 2 {
+		t.Fatalf("episode segmentation mismatch: %#v", record.TaskEpisodes)
+	}
+	if !record.TaskEpisodes[0].Completed || !record.TaskEpisodes[0].LeftCensored {
+		t.Fatalf("first episode should be a left-censored completion: %#v", record.TaskEpisodes[0])
+	}
+	second := record.TaskEpisodes[1]
+	if !second.Completed || second.LeftCensored || second.ToolCalls != 1 || second.FailedCalls != 1 {
+		t.Fatalf("fully observed episode mismatch: %#v", second)
+	}
+	if fresh := second.Tokens.UncachedInputTokens + second.Tokens.OutputTokens; fresh != 15 {
+		t.Fatalf("second episode fresh-token delta=%d, want 15", fresh)
+	}
+}

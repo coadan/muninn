@@ -3,8 +3,11 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+var codexPatchTargetPattern = regexp.MustCompile(`(?m)^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$`)
 
 func codexReadTargetCandidates(toolName, arguments, input string) []string {
 	var candidates []string
@@ -28,6 +31,22 @@ func codexReadTargetCandidates(toolName, arguments, input string) []string {
 	return candidates
 }
 
+func codexEditTargetCandidates(toolName, input string) []string {
+	if strings.ToLower(strings.TrimSpace(toolName)) != "apply_patch" {
+		return nil
+	}
+	var targets []string
+	for _, match := range codexPatchTargetPattern.FindAllStringSubmatch(input, -1) {
+		for _, target := range match[1:] {
+			target = strings.TrimSpace(target)
+			if target != "" {
+				targets = appendUniqueString(targets, target)
+			}
+		}
+	}
+	return targets
+}
+
 func unwrapShellTokens(tokens []string) []string {
 	for len(tokens) > 0 && codexShellAssignment(tokens[0]) {
 		tokens = tokens[1:]
@@ -47,6 +66,14 @@ func unwrapShellTokens(tokens []string) []string {
 }
 
 func normalizeRepositoryTargets(candidates []string, cwd, repositoryRoot string) []string {
+	return normalizeRepositoryTargetCandidates(candidates, cwd, repositoryRoot, true)
+}
+
+func normalizeRepositoryEditTargets(candidates []string, cwd, repositoryRoot string) []string {
+	return normalizeRepositoryTargetCandidates(candidates, cwd, repositoryRoot, false)
+}
+
+func normalizeRepositoryTargetCandidates(candidates []string, cwd, repositoryRoot string, requireCurrentFile bool) []string {
 	var targets []string
 	for _, candidate := range candidates {
 		candidate = strings.TrimSpace(candidate)
@@ -65,9 +92,11 @@ func normalizeRepositoryTargets(candidates []string, cwd, repositoryRoot string)
 		if err != nil || !inside {
 			continue
 		}
-		info, err := os.Stat(absolute)
-		if err != nil || info.IsDir() {
-			continue
+		if requireCurrentFile {
+			info, err := os.Stat(absolute)
+			if err != nil || info.IsDir() {
+				continue
+			}
 		}
 		relative, err := filepath.Rel(repositoryRoot, absolute)
 		if err != nil || relative == "." || strings.HasPrefix(relative, "..") {

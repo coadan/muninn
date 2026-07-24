@@ -12,17 +12,19 @@ import (
 )
 
 type sessionFinding struct {
-	Category string `json:"category"`
-	Control  string `json:"control"`
-	Signal   string `json:"signal"`
-	Title    string `json:"title"`
-	Evidence string `json:"evidence"`
-	Action   string `json:"action"`
-	Count    int    `json:"count,omitempty"`
-	Sessions int    `json:"sessions,omitempty"`
-	Target   string `json:"target,omitempty"`
-	LastSeen string `json:"lastSeen,omitempty"`
-	score    int
+	Category   string `json:"category"`
+	Control    string `json:"control"`
+	Signal     string `json:"signal"`
+	Title      string `json:"title"`
+	Evidence   string `json:"evidence"`
+	Action     string `json:"action"`
+	Count      int    `json:"count,omitempty"`
+	Sessions   int    `json:"sessions,omitempty"`
+	Target     string `json:"target,omitempty"`
+	LastSeen   string `json:"lastSeen,omitempty"`
+	Lever      string `json:"lever"`
+	Confidence string `json:"confidence"`
+	score      int
 }
 
 func buildSessionFindings(report codexSessionInsightsReport, config repositoryConfig) []sessionFinding {
@@ -316,6 +318,31 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	outcomes := report.Outcomes
+	if outcomes.ToolUsingCompleted >= 20 &&
+		(outcomes.TopDecileFreshTokenShare >= 0.35 ||
+			outcomes.FreshTokens.Max >= 5*outcomes.FreshTokens.P90) {
+		findings = append(findings, sessionFinding{
+			Category: "task-cost",
+			Control:  "repository",
+			Title:    "completed tool-task cost is concentrated in a high tail",
+			Evidence: fmt.Sprintf("%s fully observed tool tasks; fresh-token p50 %s, p90 %s, max %s; the highest-cost 10%% account for %.0f%% of fresh tokens",
+				formatCodexCount(int64(outcomes.ToolUsingCompleted)),
+				formatCodexCount(outcomes.FreshTokens.P50),
+				formatCodexCount(outcomes.FreshTokens.P90),
+				formatCodexCount(outcomes.FreshTokens.Max),
+				100*outcomes.TopDecileFreshTokenShare,
+			),
+			Action:     "Compare high-tail episodes with ordinary completed tasks by operation, rework, compaction, and target cohort before changing tooling, guidance, or source.",
+			Count:      outcomes.ToolUsingCompleted,
+			Sessions:   summary.Sessions,
+			LastSeen:   sessionFindingLastSeen(report, "completion", ""),
+			Lever:      "unknown",
+			Confidence: "low",
+			score:      360 + int(100*outcomes.TopDecileFreshTokenShare),
+		})
+	}
+
 	inputTasks := append([]codexTaskInsights(nil), report.Tasks...)
 	sort.Slice(inputTasks, func(i, j int) bool {
 		if inputTasks[i].Tokens.UncachedInputTokens != inputTasks[j].Tokens.UncachedInputTokens {
@@ -375,6 +402,80 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	delivery := summary.DeliveryRework
+	if delivery.Deliveries >= 2 &&
+		(delivery.DeliveriesWithRework >= 2 || delivery.ReviewToEditCycles >= 2) {
+		lever := "unknown"
+		confidence := "medium"
+		action := "Classify a bounded sample of review feedback as tooling, instructions/docs, or source code, then strengthen the owning pre-delivery boundary."
+		dominantLever, dominantLeverCount, leverTotal := dominantMetricDimension(delivery.ReworkLevers)
+		if dominantLeverCount >= 2 && dominantLeverCount*2 > leverTotal {
+			lever = dominantLever
+			switch lever {
+			case "tooling":
+				action = "Strengthen the pre-delivery review/validation tooling for this cohort, then compare its post-delivery rework rate."
+			case "instructions/docs":
+				action = "Move recurring review requirements into the owning concise guidance or contract before delivery, then compare rework."
+			case "source code":
+				action = "Strengthen the source boundary and focused tests that should catch this review class before delivery."
+			}
+		} else if delivery.PreDeliveryReviews == 0 {
+			lever = "tooling"
+			confidence = "high"
+			action = "Add or strengthen a bounded pre-delivery review gate before push, then compare post-delivery rework on the same repository cohort."
+		}
+		dominantScope, _, _ := dominantMetricDimension(delivery.ReworkScopes)
+		target := ""
+		if dominantScope != "" && dominantScope != "(root)" && dominantScope != "(unknown)" {
+			target = dominantScope
+		}
+		findings = append(findings, sessionFinding{
+			Category: "delivery-quality",
+			Control:  "repository",
+			Title:    "review after delivery is causing repeated rework",
+			Evidence: fmt.Sprintf("%s deliveries, %s with post-delivery edits, %s review-to-edit cycles, %s pre-delivery reviews, and %s post-delivery review checks across %s sessions; edit levers %s; edit scopes %s",
+				formatCodexCount(int64(delivery.Deliveries)),
+				formatCodexCount(int64(delivery.DeliveriesWithRework)),
+				formatCodexCount(int64(delivery.ReviewToEditCycles)),
+				formatCodexCount(int64(delivery.PreDeliveryReviews)),
+				formatCodexCount(int64(delivery.PostDeliveryReviewChecks)),
+				formatCodexCount(int64(delivery.Sessions)),
+				formatMetricDimensions(delivery.ReworkLevers),
+				formatMetricDimensions(delivery.ReworkScopes),
+			),
+			Action:     action,
+			Count:      delivery.ReviewToEditCycles,
+			Sessions:   delivery.Sessions,
+			Target:     target,
+			LastSeen:   sessionFindingLastSeen(report, "delivery-rework", ""),
+			Lever:      lever,
+			Confidence: confidence,
+			score:      700 + delivery.DeliveriesWithRework*30 + delivery.ReviewToEditCycles*40,
+		})
+	}
+	if delivery.Deliveries >= 2 &&
+		delivery.PostDeliveryReviewChecks >= 20 &&
+		delivery.PostDeliveryReviewChecks >= delivery.Deliveries*3 {
+		findings = append(findings, sessionFinding{
+			Category: "delivery-quality",
+			Control:  "local",
+			Title:    "post-delivery review requires repeated checks",
+			Evidence: fmt.Sprintf("%s post-delivery review checks for %s deliveries across %s sessions, or %.1f checks per delivery",
+				formatCodexCount(int64(delivery.PostDeliveryReviewChecks)),
+				formatCodexCount(int64(delivery.Deliveries)),
+				formatCodexCount(int64(delivery.Sessions)),
+				ratio(float64(delivery.PostDeliveryReviewChecks), float64(delivery.Deliveries)),
+			),
+			Action:     "Make review feedback retrieval one bounded wait/resume operation that returns only new actionable state and a stable completion token.",
+			Count:      delivery.PostDeliveryReviewChecks,
+			Sessions:   delivery.Sessions,
+			LastSeen:   sessionFindingLastSeen(report, "delivery-review", ""),
+			Lever:      "tooling",
+			Confidence: "high",
+			score:      680 + delivery.PostDeliveryReviewChecks,
+		})
+	}
+
 	searchRead := codexMixedSearchReadMetrics(summary.MixedShellShapes)
 	if searchRead.Calls >= 10 && searchRead.EstimatedOutputTokens >= 50_000 {
 		findings = append(findings, sessionFinding{
@@ -408,6 +509,45 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	return diversifySessionFindings(findings)
 }
 
+func dominantMetricDimension(values map[string]int) (name string, count, total int) {
+	for candidate, value := range values {
+		total += value
+		if value > count || (value == count && candidate < name) {
+			name = candidate
+			count = value
+		}
+	}
+	return name, count, total
+}
+
+func formatMetricDimensions(values map[string]int) string {
+	type row struct {
+		name  string
+		count int
+	}
+	rows := make([]row, 0, len(values))
+	for name, count := range values {
+		rows = append(rows, row{name: name, count: count})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].count != rows[j].count {
+			return rows[i].count > rows[j].count
+		}
+		return rows[i].name < rows[j].name
+	})
+	if len(rows) > 3 {
+		rows = rows[:3]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		parts = append(parts, fmt.Sprintf("%s %s", row.name, formatCodexCount(int64(row.count))))
+	}
+	if len(parts) == 0 {
+		return "(unknown)"
+	}
+	return strings.Join(parts, ", ")
+}
+
 var signalSlugSeparators = regexp.MustCompile(`[^a-z0-9._/-]+`)
 
 func assignAndSuppressSessionFindingSignals(findings []sessionFinding, suppressions []string) []sessionFinding {
@@ -418,12 +558,87 @@ func assignAndSuppressSessionFindingSignals(findings []sessionFinding, suppressi
 	result := make([]sessionFinding, 0, len(findings))
 	for _, finding := range findings {
 		finding.Signal = sessionFindingSignal(finding)
+		if finding.Lever == "" {
+			finding.Lever, finding.Confidence = sessionFindingLever(finding)
+		}
 		if _, hidden := suppressed[finding.Signal]; hidden {
 			continue
 		}
 		result = append(result, finding)
 	}
 	return result
+}
+
+func sessionFindingLever(finding sessionFinding) (string, string) {
+	target := leverTargetPath(finding.Target)
+	switch finding.Category {
+	case "owned-tool", "owned-operation":
+		return "tooling", "high"
+	case "code-structure":
+		switch {
+		case toolingTarget(target):
+			return "tooling", "high"
+		case instructionTarget(target):
+			return "instructions/docs", "high"
+		default:
+			return "source code", "high"
+		}
+	case "instruction-discovery":
+		switch {
+		case instructionTarget(target):
+			return "instructions/docs", "high"
+		case repositoryManifestTarget(target):
+			return "tooling", "high"
+		default:
+			return "source code", "medium"
+		}
+	case "discovery", "agent-interface", "output-cost":
+		return "tooling", "medium"
+	case "session-loop":
+		switch {
+		case strings.Contains(finding.Title, "progress stalls"):
+			return "tooling", "medium"
+		case strings.Contains(finding.Title, "input-token cost"),
+			strings.Contains(finding.Title, "context compactions"):
+			return "instructions/docs", "medium"
+		default:
+			return "unknown", "low"
+		}
+	case "recurring-failure":
+		return "unknown", "low"
+	case "delivery-quality":
+		return "unknown", "medium"
+	case "task-cost":
+		return "unknown", "low"
+	default:
+		return "unknown", "low"
+	}
+}
+
+func leverTargetPath(target string) string {
+	target = strings.ToLower(filepath.ToSlash(target))
+	parts := strings.Split(target, "/")
+	if len(parts) >= 4 && parts[0] == ".workbench" && parts[1] == "repos" {
+		return strings.Join(parts[3:], "/")
+	}
+	return target
+}
+
+func instructionTarget(target string) bool {
+	target = leverTargetPath(target)
+	base := strings.ToLower(filepath.Base(target))
+	return strings.HasPrefix(target, "docs/") ||
+		base == "agents.md" ||
+		base == "readme.md"
+}
+
+func toolingTarget(target string) bool {
+	target = leverTargetPath(target)
+	return strings.HasPrefix(target, "scripts/") ||
+		strings.HasPrefix(target, "bwb-src/") ||
+		strings.HasPrefix(target, "tools/") ||
+		strings.HasPrefix(target, "tooling/") ||
+		strings.HasPrefix(target, ".github/")
 }
 
 func sessionFindingActivity(report codexSessionInsightsReport, kind, target string) time.Time {
@@ -712,10 +927,14 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 		"output": {
 			"output-cost": true,
 		},
+		"quality": {
+			"delivery-quality": true,
+			"task-cost":        true,
+		},
 	}
 	categories, ok := allowed[focus]
 	if !ok {
-		return nil, fmt.Errorf("unsupported --focus %q (available: tooling, instructions, interface, structure, discovery, failures, loops, output)", focus)
+		return nil, fmt.Errorf("unsupported --focus %q (available: tooling, instructions, interface, structure, discovery, failures, loops, output, quality)", focus)
 	}
 	filtered := make([]sessionFinding, 0, len(findings))
 	for _, finding := range findings {
@@ -759,6 +978,8 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"owned-operation":       6,
 		"session-loop":          6,
 		"output-cost":           3,
+		"delivery-quality":      3,
+		"task-cost":             2,
 	}
 	counts := map[string]int{}
 	result := make([]sessionFinding, 0, len(findings))
@@ -790,6 +1011,7 @@ func printSessionFindings(findings []sessionFinding, limit int) {
 		if finding.LastSeen != "" {
 			fmt.Printf("  Last seen: %s\n", formatSessionFindingAge(finding.LastSeen, time.Now().UTC()))
 		}
+		fmt.Printf("  Likely lever: %s (%s confidence)\n", finding.Lever, finding.Confidence)
 		fmt.Printf("  Next: %s\n", finding.Action)
 	}
 	if len(rows) < len(findings) {

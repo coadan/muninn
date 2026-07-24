@@ -98,6 +98,9 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	if string(indexedJSON) != string(directJSON) {
 		t.Fatalf("indexed and direct summaries differ:\nindexed=%s\ndirect=%s", indexedJSON, directJSON)
 	}
+	if indexed.Outcomes != direct.Outcomes {
+		t.Fatalf("indexed and direct outcomes differ:\nindexed=%#v\ndirect=%#v", indexed.Outcomes, direct.Outcomes)
+	}
 	if got := indexed.Summary.Tokens; got.InputTokens != 20 ||
 		got.CachedInputTokens != 10 ||
 		got.UncachedInputTokens != 10 ||

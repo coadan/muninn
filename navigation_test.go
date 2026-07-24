@@ -46,3 +46,26 @@ func TestCanonicalRepositoryTargetPreservesNonWorkbenchPaths(t *testing.T) {
 		t.Fatalf("expected non-workbench .worktrees target to remain unchanged: got=%q want=%q", got, want)
 	}
 }
+
+func TestCodexEditTargetsRemainAttributableAfterWorktreeRemoval(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".workbench", "repos", "breyta"), 0o755); err != nil {
+		t.Fatalf("mkdir cached repo: %v", err)
+	}
+	removedWorktree := filepath.Join(root, ".worktrees", "task", "breyta")
+	patch := "*** Begin Patch\n*** Update File: src/runtime.clj\n*** Move to: src/runtime_v2.clj\n*** End Patch\n"
+	candidates := codexEditTargetCandidates("apply_patch", patch)
+	got := normalizeRepositoryEditTargets(candidates, removedWorktree, root)
+	want := []string{
+		".workbench/repos/breyta/src/runtime.clj",
+		".workbench/repos/breyta/src/runtime_v2.clj",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected canonical edit targets: got=%q want=%q", got, want)
+	}
+	for _, target := range got {
+		if reworkTargetScope(target) != "breyta" || reworkTargetLever(target) != "source code" {
+			t.Fatalf("unexpected rework attribution for %q", target)
+		}
+	}
+}
