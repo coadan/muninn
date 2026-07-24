@@ -71,12 +71,14 @@ attribution quality; it does not reveal raw session content or identifiers.
 
 The default human report is findings-first. Use `--overview` for compact
 family totals and `--details` for command, transition, source-target, failure,
-and output rankings. Use `--focus` with `tooling`, `instructions`, `interface`,
-`structure`, `discovery`, `failures`, `loops`, or `quality` to narrow the action queue
-without loading the aggregate overview or details. Use `output` to isolate individual oversized tool
-responses. Findings are ordered by most recent supporting activity, show a
-privacy-safe relative `Last seen` age, and retain the exact timestamp in JSON.
-This keeps already-fixed historical friction from outranking current work.
+and output rankings. `--focus friction` explicitly selects the same broad
+action queue as the default report. Use `--focus` with `tooling`,
+`instructions`, `interface`, `structure`, `discovery`, `failures`, `loops`, or
+`quality` to narrow it without loading the aggregate overview or details. Use
+`output` to isolate individual oversized tool responses. Findings are ordered
+by most recent supporting activity, show a privacy-safe relative `Last seen`
+age, and retain the exact timestamp in JSON. This keeps already-fixed
+historical friction from outranking current work.
 
 Muninn highlights:
 

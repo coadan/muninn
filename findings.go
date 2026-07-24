@@ -1273,7 +1273,7 @@ func repositoryManifestTarget(target string) bool {
 
 func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFinding, error) {
 	focus = strings.ToLower(strings.TrimSpace(focus))
-	if focus == "" {
+	if focus == "" || focus == "friction" {
 		return findings, nil
 	}
 	allowed := map[string]map[string]bool{
@@ -1316,7 +1316,7 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 	}
 	categories, ok := allowed[focus]
 	if !ok {
-		return nil, fmt.Errorf("unsupported --focus %q (available: tooling, instructions, interface, structure, discovery, failures, loops, output, quality)", focus)
+		return nil, fmt.Errorf("unsupported --focus %q (available: friction, tooling, instructions, interface, structure, discovery, failures, loops, output, quality)", focus)
 	}
 	filtered := make([]sessionFinding, 0, len(findings))
 	for _, finding := range findings {
