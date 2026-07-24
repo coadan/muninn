@@ -65,21 +65,25 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		if actionableFailures >= 2 || metrics.TruncatedCalls >= 3 {
 			title = "locally controlled operation has recurring friction: " + operation
 		}
+		evidence := fmt.Sprintf("%s calls across %s sessions, %s bundled calls, %s actionable failures, %s expected/product failures, %s ambiguous bundled failures, %s truncations, ~%s attributed output tokens, ~%s ambiguous bundled output tokens",
+			formatCodexCount(int64(metrics.Calls)),
+			formatCodexCount(int64(metrics.Sessions)),
+			formatCodexCount(int64(metrics.AmbiguousCalls)),
+			formatCodexCount(int64(actionableFailures)),
+			formatCodexCount(int64(expectedFailures)),
+			formatCodexCount(int64(metrics.AmbiguousFailedCalls)),
+			formatCodexCount(int64(metrics.TruncatedCalls)),
+			formatCodexCount(metrics.EstimatedOutputTokens),
+			formatCodexCount(metrics.EstimatedAmbiguousOutputTokens),
+		)
+		if reasons := formatOwnedOperationActionableReasons(summary.OwnedOperationFailureReasons[operation]); reasons != "" {
+			evidence += "; actionable reasons: " + reasons
+		}
 		findings = append(findings, sessionFinding{
 			Category: "owned-operation",
 			Control:  "local",
 			Title:    title,
-			Evidence: fmt.Sprintf("%s calls across %s sessions, %s bundled calls, %s actionable failures, %s expected/product failures, %s ambiguous bundled failures, %s truncations, ~%s attributed output tokens, ~%s ambiguous bundled output tokens",
-				formatCodexCount(int64(metrics.Calls)),
-				formatCodexCount(int64(metrics.Sessions)),
-				formatCodexCount(int64(metrics.AmbiguousCalls)),
-				formatCodexCount(int64(actionableFailures)),
-				formatCodexCount(int64(expectedFailures)),
-				formatCodexCount(int64(metrics.AmbiguousFailedCalls)),
-				formatCodexCount(int64(metrics.TruncatedCalls)),
-				formatCodexCount(metrics.EstimatedOutputTokens),
-				formatCodexCount(metrics.EstimatedAmbiguousOutputTokens),
-			),
+			Evidence: evidence,
 			Action:   action,
 			Count:    metrics.Calls,
 			Sessions: metrics.Sessions,
@@ -368,6 +372,52 @@ func ownedOperationFailureCounts(reasons map[string]codexOccurrenceMetrics) (act
 		}
 	}
 	return actionable, expected
+}
+
+func formatOwnedOperationActionableReasons(reasons map[string]codexOccurrenceMetrics) string {
+	type row struct {
+		reason   string
+		count    int
+		sessions int
+	}
+	rows := make([]row, 0, len(reasons))
+	for reason, metrics := range reasons {
+		if reason == "test failure" || reason == "search no match" || metrics.Count <= 0 {
+			continue
+		}
+		rows = append(rows, row{
+			reason:   reason,
+			count:    metrics.Count,
+			sessions: metrics.Sessions,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].count != rows[j].count {
+			return rows[i].count > rows[j].count
+		}
+		if rows[i].sessions != rows[j].sessions {
+			return rows[i].sessions > rows[j].sessions
+		}
+		return rows[i].reason < rows[j].reason
+	})
+	if len(rows) > 3 {
+		rows = rows[:3]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		sessionLabel := "sessions"
+		if row.sessions == 1 {
+			sessionLabel = "session"
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%s %s calls/%s %s",
+			row.reason,
+			formatCodexCount(int64(row.count)),
+			formatCodexCount(int64(row.sessions)),
+			sessionLabel,
+		))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func repositoryManifestTarget(target string) bool {

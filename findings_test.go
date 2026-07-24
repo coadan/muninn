@@ -67,6 +67,40 @@ func TestBuildSessionFindingsFlagsOneVeryLongInlineToolCall(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.OwnedOperations["bwb/test"] = codexOwnedOperationMetrics{
+		Calls:       30,
+		Sessions:    4,
+		FailedCalls: 19,
+		OutputBytes: 8_000,
+	}
+	report.Summary.OwnedOperationFailureReasons["bwb/test"] = map[string]codexOccurrenceMetrics{
+		"timeout":                 {Count: 5, Sessions: 4},
+		"other non-zero exit":     {Count: 4, Sessions: 3},
+		"missing path or fixture": {Count: 3, Sessions: 1},
+		"port collision":          {Count: 2, Sessions: 2},
+		"test failure":            {Count: 5, Sessions: 3},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "owned-operation" {
+		t.Fatalf("owned-operation finding mismatch: %#v", findings)
+	}
+	evidence := findings[0].Evidence
+	for _, want := range []string{
+		"14 actionable failures",
+		"5 expected/product failures",
+		"actionable reasons: timeout 5 calls/4 sessions, other non-zero exit 4 calls/3 sessions, missing path or fixture 3 calls/1 session",
+	} {
+		if !strings.Contains(evidence, want) {
+			t.Fatalf("evidence %q missing %q", evidence, want)
+		}
+	}
+	if strings.Contains(evidence, "port collision") || strings.Contains(evidence, "test failure 5") {
+		t.Fatalf("evidence should contain only the top three actionable reasons: %q", evidence)
+	}
+}
+
 func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 	findings := []sessionFinding{
 		{Category: "owned-tool", Title: "tool"},
