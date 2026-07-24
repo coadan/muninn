@@ -28,6 +28,7 @@ var nonZeroProcessExitCodePattern = regexp.MustCompile(`(?i)process exited with 
 var searchMissExitCodePattern = regexp.MustCompile(`(?im)(?:"exit_code"\s*:\s*1(?:[^0-9]|$)|^exit code:\s*1(?:[^0-9]|$)|process exited with code\s+1(?:[^0-9]|$))`)
 var codexNestedCommandStartPattern = regexp.MustCompile(`(?:^|[,{]\s*)(?:"cmd"|'cmd'|cmd)\s*:\s*`)
 var codexNestedContinuationPattern = regexp.MustCompile(`(?s)tools\.(?:write_stdin|wait)\s*\(\s*\{[^}]*?"?(session_id|cell_id)"?\s*:\s*(?:"([^"]+)"|'([^']+)'|([0-9]+))`)
+var codexExplicitSessionMarkerPattern = regexp.MustCompile(`^SESSION_ID=([0-9]+)$`)
 var codexContinuationStatusPattern = regexp.MustCompile(`(?im)^(?:script|process) running with (session|cell) id\s+([^\s]+)\s*$`)
 var suppressedSignalPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{0,199}$`)
 
@@ -1341,6 +1342,44 @@ func codexToolContinuationReferences(raw json.RawMessage) []codexContinuationRef
 		}
 	case map[string]any:
 		references = append(references, codexContinuationReferencesFromMap(typed, false)...)
+	}
+	return references
+}
+
+func codexEmitsExplicitSessionMarker(toolName, input string) bool {
+	if !strings.EqualFold(strings.TrimSpace(toolName), "exec") {
+		return false
+	}
+	return strings.Contains(input, "tools.exec_command(") &&
+		strings.Contains(input, ".session_id") &&
+		strings.Contains(input, "SESSION_ID=${")
+}
+
+func codexExplicitSessionMarkerReferences(raw json.RawMessage) []codexContinuationReference {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return nil
+	}
+	var texts []string
+	switch typed := value.(type) {
+	case string:
+		texts = append(texts, typed)
+	case []any:
+		for _, item := range typed {
+			if text := codexOutputItemText(item); text != "" {
+				texts = append(texts, text)
+			}
+		}
+	}
+	var references []codexContinuationReference
+	for _, text := range texts {
+		match := codexExplicitSessionMarkerPattern.FindStringSubmatch(strings.TrimSpace(text))
+		if len(match) == 2 {
+			references = append(references, codexContinuationReference{Type: "session", ID: match[1]})
+		}
 	}
 	return references
 }

@@ -823,6 +823,73 @@ func TestAnalyzeCodexSessionsAttributesContinuationOutputToCommandFamily(t *test
 	}
 }
 
+func TestAnalyzeCodexSessionsAttributesExplicitWrapperSessionContinuation(t *testing.T) {
+	sessionsDir := t.TempDir()
+	workspaceRoot := filepath.Join(t.TempDir(), "breyta-workbench")
+	writeCodexSessionFixture(t, sessionsDir, "rollout-wrapper-attribution", []any{
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:00Z",
+			"type":      "session_meta",
+			"payload":   map[string]any{"cwd": workspaceRoot},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:01Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "custom_tool_call",
+				"call_id": "exec-1",
+				"name":    "exec",
+				"input":   "const r = await tools.exec_command({cmd:\"codex review --base main\"}); text(r.output); if(r.session_id) text(`SESSION_ID=${r.session_id}`);",
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:02Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "custom_tool_call_output",
+				"call_id": "exec-1",
+				"output": []any{
+					map[string]any{"type": "input_text", "text": "Script completed\nOutput:\n"},
+					map[string]any{"type": "input_text", "text": "review started"},
+					map[string]any{"type": "input_text", "text": "SESSION_ID=40401"},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:03Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"call_id":   "wait-1",
+				"name":      "write_stdin",
+				"arguments": `{"session_id":40401,"chars":""}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:04Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "function_call_output",
+				"call_id": "wait-1",
+				"output":  strings.Repeat("review output", 3000),
+			},
+		},
+	})
+
+	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	report, err := analyzeCodexSessions([]string{sessionsDir}, workspaceRoot, generatedAt.Add(-24*time.Hour), generatedAt)
+	if err != nil {
+		t.Fatalf("analyzeCodexSessions: %v", err)
+	}
+	review := report.Summary.ShellCommandsByFamily["review"]
+	if review.Calls != 2 || review.OutputBytes < oversizedOutputMinimumBytes {
+		t.Fatalf("wrapper continuation was not attributed to review: %#v", review)
+	}
+	if got := report.Summary.OversizedOutputs["review"]; got.Calls != 1 {
+		t.Fatalf("oversized continuation was not attributed to review: %#v", report.Summary.OversizedOutputs)
+	}
+}
+
 func TestCodexNestedContinuationReference(t *testing.T) {
 	tests := []struct {
 		input string
@@ -867,6 +934,27 @@ func TestCodexToolContinuationReferencesIgnoreArbitraryCommandOutput(t *testing.
 	got := codexToolContinuationReferences(structured)
 	if len(got) != 1 || got[0].Type != "session" || got[0].ID != "5678" {
 		t.Fatalf("structured nested result was not recognized: %#v", got)
+	}
+
+	explicitMarker := json.RawMessage(`[
+		{"type":"input_text","text":"Script completed\nOutput:\n"},
+		{"type":"input_text","text":"SESSION_ID=40401"}
+	]`)
+	if got := codexToolContinuationReferences(explicitMarker); len(got) != 0 {
+		t.Fatalf("unguarded explicit marker was recognized: %#v", got)
+	}
+	got = codexExplicitSessionMarkerReferences(explicitMarker)
+	if len(got) != 1 || got[0].Type != "session" || got[0].ID != "40401" {
+		t.Fatalf("guarded explicit marker was not recognized: %#v", got)
+	}
+	if codexEmitsExplicitSessionMarker("exec", `text("SESSION_ID=40401")`) {
+		t.Fatal("application output without a session-returning call enabled marker parsing")
+	}
+	if !codexEmitsExplicitSessionMarker(
+		"exec",
+		"const r = await tools.exec_command({cmd:\"go test\"}); if(r.session_id) text(`SESSION_ID=${r.session_id}`);",
+	) {
+		t.Fatal("session-returning wrapper marker was not recognized")
 	}
 }
 

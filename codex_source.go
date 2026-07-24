@@ -16,6 +16,7 @@ type indexedCodexDescriptor struct {
 	CommandCandidates             []ownedCommandInvocation
 	OwnedOperations               []string
 	OperationAttributionAmbiguous bool
+	EmitsSessionMarker            bool
 }
 
 func parseCodexNormalizedSession(path string) (normalizedSession, error) {
@@ -102,6 +103,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					OccurredAt:              timestamp,
 					SelectorDigests:         codexSelectorDigests(name, payload.Arguments, payload.Input),
 					CommandCandidates:       codexCommandInvocations(name, payload.Arguments, payload.Input),
+					EmitsSessionMarker:      codexEmitsExplicitSessionMarker(name, payload.Input),
 				}
 				descriptor.OperationAttributionAmbiguous = len(descriptor.CommandCandidates) > 1
 				continuation := false
@@ -190,7 +192,11 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
 				})
 				if descriptor.Family != "" {
-					for _, reference := range codexToolContinuationReferences(payload.Output) {
+					references := codexToolContinuationReferences(payload.Output)
+					if descriptor.EmitsSessionMarker {
+						references = append(references, codexExplicitSessionMarkerReferences(payload.Output)...)
+					}
+					for _, reference := range references {
 						if reference.Type == "session" {
 							execSessions[reference.ID] = descriptor
 						} else {
