@@ -21,6 +21,9 @@ type codexTaskEpisode struct {
 	FailedCalls     int
 	Compactions     int
 	ToolOutputBytes int64
+	Families        map[string]int
+	OwnedOperations map[string]int
+	TargetCohorts   map[string]int
 }
 
 type deliveryReworkMetrics struct {
@@ -408,7 +411,7 @@ func addDeliveryCohortMetrics(target *deliveryCohortMetrics, addition deliveryCo
 	target.ReviewToEditCycles += addition.ReviewToEditCycles
 }
 
-func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncrement codexTokenUsage) {
+func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncrement codexTokenUsage, operations []string) {
 	if episode.StartedAt.IsZero() || event.OccurredAt.Before(episode.StartedAt) {
 		episode.StartedAt = event.OccurredAt
 	}
@@ -420,6 +423,30 @@ func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncr
 		addCodexTokenUsage(&episode.Tokens, tokenIncrement)
 	case sessionEventToolCall:
 		episode.ToolCalls++
+		if event.Family != "" {
+			if episode.Families == nil {
+				episode.Families = map[string]int{}
+			}
+			episode.Families[event.Family]++
+		}
+		if len(operations) > 0 {
+			if episode.OwnedOperations == nil {
+				episode.OwnedOperations = map[string]int{}
+			}
+			for _, operation := range operations {
+				episode.OwnedOperations[operation]++
+			}
+		}
+		if len(event.Targets) > 0 {
+			if episode.TargetCohorts == nil {
+				episode.TargetCohorts = map[string]int{}
+			}
+			for cohort := range eventTargetCohorts(event.Targets) {
+				if cohort != "(unknown)" {
+					episode.TargetCohorts[cohort]++
+				}
+			}
+		}
 	case sessionEventToolOutput:
 		episode.ToolOutputBytes += event.OutputBytes
 		if event.Failed {
@@ -454,11 +481,30 @@ type completionEpisodeAnalysis struct {
 	FailedCalls              outcomeDistribution `json:"failedCalls"`
 	Compactions              outcomeDistribution `json:"compactions"`
 	TopDecileFreshTokenShare float64             `json:"topDecileFreshTokenShare"`
+	TailDrivers              taskCostTailDrivers `json:"tailDrivers"`
+}
+
+type taskCostTailDrivers struct {
+	TailEpisodes     int                  `json:"tailEpisodes"`
+	OrdinaryEpisodes int                  `json:"ordinaryEpisodes"`
+	Families         []taskCostTailDriver `json:"families,omitempty"`
+	OwnedOperations  []taskCostTailDriver `json:"ownedOperations,omitempty"`
+	TargetCohorts    []taskCostTailDriver `json:"targetCohorts,omitempty"`
+}
+
+type taskCostTailDriver struct {
+	Name             string  `json:"name"`
+	TailEpisodes     int     `json:"tailEpisodes"`
+	OrdinaryEpisodes int     `json:"ordinaryEpisodes"`
+	TailCalls        int     `json:"tailCalls"`
+	OrdinaryCalls    int     `json:"ordinaryCalls"`
+	PrevalenceLift   float64 `json:"prevalenceLift"`
 }
 
 func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAnalysis {
 	analysis := completionEpisodeAnalysis{}
 	var freshTokens, toolCalls, outputTokens, durations, failures, compactions []int64
+	var eligible []codexTaskEpisode
 	for _, episode := range episodes {
 		if !episode.Completed {
 			analysis.Incomplete++
@@ -475,6 +521,7 @@ func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAna
 			continue
 		}
 		analysis.ToolUsingCompleted++
+		eligible = append(eligible, episode)
 		freshTokens = append(freshTokens, episode.Tokens.UncachedInputTokens+episode.Tokens.OutputTokens)
 		toolCalls = append(toolCalls, int64(episode.ToolCalls))
 		outputTokens = append(outputTokens, estimatedTokens(episode.ToolOutputBytes))
@@ -489,7 +536,101 @@ func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAna
 	analysis.FailedCalls = summarizeOutcomeDistribution(failures)
 	analysis.Compactions = summarizeOutcomeDistribution(compactions)
 	analysis.TopDecileFreshTokenShare = topOutcomeShare(freshTokens, 0.10)
+	analysis.TailDrivers = analyzeTaskCostTailDrivers(eligible)
 	return analysis
+}
+
+func analyzeTaskCostTailDrivers(episodes []codexTaskEpisode) taskCostTailDrivers {
+	drivers := taskCostTailDrivers{}
+	if len(episodes) < 10 {
+		return drivers
+	}
+	ranked := append([]codexTaskEpisode(nil), episodes...)
+	sort.Slice(ranked, func(i, j int) bool {
+		iTokens := ranked[i].Tokens.UncachedInputTokens + ranked[i].Tokens.OutputTokens
+		jTokens := ranked[j].Tokens.UncachedInputTokens + ranked[j].Tokens.OutputTokens
+		return iTokens > jTokens
+	})
+	drivers.TailEpisodes = max(1, int(math.Ceil(0.10*float64(len(ranked)))))
+	drivers.OrdinaryEpisodes = len(ranked) - drivers.TailEpisodes
+	tail := ranked[:drivers.TailEpisodes]
+	ordinary := ranked[drivers.TailEpisodes:]
+	drivers.Families = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
+		return episode.Families
+	})
+	drivers.OwnedOperations = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
+		return episode.OwnedOperations
+	})
+	drivers.TargetCohorts = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
+		return episode.TargetCohorts
+	})
+	return drivers
+}
+
+func taskCostTailDimension(
+	tail,
+	ordinary []codexTaskEpisode,
+	values func(codexTaskEpisode) map[string]int,
+) []taskCostTailDriver {
+	type counts struct {
+		tailEpisodes     int
+		ordinaryEpisodes int
+		tailCalls        int
+		ordinaryCalls    int
+	}
+	byName := map[string]counts{}
+	for _, episode := range tail {
+		for name, calls := range values(episode) {
+			current := byName[name]
+			current.tailEpisodes++
+			current.tailCalls += calls
+			byName[name] = current
+		}
+	}
+	for _, episode := range ordinary {
+		for name, calls := range values(episode) {
+			current := byName[name]
+			current.ordinaryEpisodes++
+			current.ordinaryCalls += calls
+			byName[name] = current
+		}
+	}
+	var drivers []taskCostTailDriver
+	for name, current := range byName {
+		if current.tailEpisodes < 3 {
+			continue
+		}
+		tailRate := ratio(float64(current.tailEpisodes), float64(len(tail)))
+		ordinaryRate := ratio(float64(current.ordinaryEpisodes), float64(len(ordinary)))
+		if tailRate-ordinaryRate < 0.10 {
+			continue
+		}
+		lift := tailRate / math.Max(ordinaryRate, 1/float64(max(1, len(ordinary))))
+		if lift < 1.5 {
+			continue
+		}
+		drivers = append(drivers, taskCostTailDriver{
+			Name:             name,
+			TailEpisodes:     current.tailEpisodes,
+			OrdinaryEpisodes: current.ordinaryEpisodes,
+			TailCalls:        current.tailCalls,
+			OrdinaryCalls:    current.ordinaryCalls,
+			PrevalenceLift:   lift,
+		})
+	}
+	sort.Slice(drivers, func(i, j int) bool {
+		if drivers[i].PrevalenceLift != drivers[j].PrevalenceLift {
+			return drivers[i].PrevalenceLift > drivers[j].PrevalenceLift
+		}
+		if drivers[i].TailEpisodes != drivers[j].TailEpisodes {
+			return drivers[i].TailEpisodes > drivers[j].TailEpisodes
+		}
+		return drivers[i].Name < drivers[j].Name
+	})
+	if len(drivers) > 3 {
+		drivers = drivers[:3]
+	}
+	return drivers
 }
 
 func summarizeOutcomeDistribution(values []int64) outcomeDistribution {
@@ -566,6 +707,60 @@ func printCompletionEpisodeAnalysis(analysis completionEpisodeAnalysis) {
 		formatDurationSeconds(analysis.DurationSeconds.P75),
 		formatDurationSeconds(analysis.DurationSeconds.P90),
 	)
+	if drivers := formatTaskCostTailDrivers(analysis.TailDrivers); drivers != "" {
+		fmt.Printf("Fresh-token tail drivers: %s\n", drivers)
+	}
+}
+
+func formatTaskCostTailDrivers(drivers taskCostTailDrivers) string {
+	var parts []string
+	for _, dimension := range []struct {
+		label   string
+		drivers []taskCostTailDriver
+	}{
+		{label: "cohorts", drivers: drivers.TargetCohorts},
+		{label: "operations", drivers: drivers.OwnedOperations},
+		{label: "families", drivers: drivers.Families},
+	} {
+		if len(dimension.drivers) == 0 {
+			continue
+		}
+		rendered := make([]string, 0, len(dimension.drivers))
+		for _, driver := range dimension.drivers {
+			rendered = append(rendered, fmt.Sprintf(
+				"%s %s/%s tail vs %s/%s ordinary (%.1fx)",
+				driver.Name,
+				formatCodexCount(int64(driver.TailEpisodes)),
+				formatCodexCount(int64(drivers.TailEpisodes)),
+				formatCodexCount(int64(driver.OrdinaryEpisodes)),
+				formatCodexCount(int64(drivers.OrdinaryEpisodes)),
+				driver.PrevalenceLift,
+			))
+		}
+		parts = append(parts, dimension.label+" "+strings.Join(rendered, ", "))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func dominantTaskCostTailDriver(drivers taskCostTailDrivers) (kind string, driver taskCostTailDriver) {
+	for _, dimension := range []struct {
+		kind    string
+		drivers []taskCostTailDriver
+	}{
+		{kind: "cohort", drivers: drivers.TargetCohorts},
+		{kind: "operation", drivers: drivers.OwnedOperations},
+		{kind: "family", drivers: drivers.Families},
+	} {
+		for _, candidate := range dimension.drivers {
+			if candidate.PrevalenceLift > driver.PrevalenceLift ||
+				(candidate.PrevalenceLift == driver.PrevalenceLift &&
+					candidate.TailEpisodes > driver.TailEpisodes) {
+				kind = dimension.kind
+				driver = candidate
+			}
+		}
+	}
+	return kind, driver
 }
 
 func printDeliveryReworkAnalysis(metrics deliveryReworkMetrics) {

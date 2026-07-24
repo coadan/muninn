@@ -322,20 +322,46 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	if outcomes.ToolUsingCompleted >= 20 &&
 		(outcomes.TopDecileFreshTokenShare >= 0.35 ||
 			outcomes.FreshTokens.Max >= 5*outcomes.FreshTokens.P90) {
+		driverKind, driver := dominantTaskCostTailDriver(outcomes.TailDrivers)
+		driverEvidence := ""
+		target := ""
+		action := "Compare high-tail episodes with ordinary completed tasks by operation, rework, compaction, and target cohort before changing tooling, guidance, or source."
+		if driver.Name != "" {
+			driverEvidence = fmt.Sprintf("; strongest observed %s driver %s appeared in %s/%s tail episodes versus %s/%s ordinary episodes (%.1fx prevalence)",
+				driverKind,
+				driver.Name,
+				formatCodexCount(int64(driver.TailEpisodes)),
+				formatCodexCount(int64(outcomes.TailDrivers.TailEpisodes)),
+				formatCodexCount(int64(driver.OrdinaryEpisodes)),
+				formatCodexCount(int64(outcomes.TailDrivers.OrdinaryEpisodes)),
+				driver.PrevalenceLift,
+			)
+			target = driver.Name
+			switch driverKind {
+			case "cohort":
+				action = "Compare the calls and output inside this repository cohort between high-tail and ordinary completed tasks, then reduce its dominant navigation, validation, or source-boundary cost."
+			case "operation":
+				action = "Inspect why this owned operation is overrepresented in high-tail tasks, then reduce redundant calls, output, or prerequisite discovery at that operation boundary."
+			case "family":
+				action = "Inspect the repeated command shapes and output in this family inside high-tail tasks, then replace the dominant loop with a bounded repository interface."
+			}
+		}
 		findings = append(findings, sessionFinding{
 			Category: "task-cost",
 			Control:  "repository",
 			Title:    "completed tool-task cost is concentrated in a high tail",
-			Evidence: fmt.Sprintf("%s fully observed tool tasks; fresh-token p50 %s, p90 %s, max %s; the highest-cost 10%% account for %.0f%% of fresh tokens",
+			Evidence: fmt.Sprintf("%s fully observed tool tasks; fresh-token p50 %s, p90 %s, max %s; the highest-cost 10%% account for %.0f%% of fresh tokens%s",
 				formatCodexCount(int64(outcomes.ToolUsingCompleted)),
 				formatCodexCount(outcomes.FreshTokens.P50),
 				formatCodexCount(outcomes.FreshTokens.P90),
 				formatCodexCount(outcomes.FreshTokens.Max),
 				100*outcomes.TopDecileFreshTokenShare,
+				driverEvidence,
 			),
-			Action:     "Compare high-tail episodes with ordinary completed tasks by operation, rework, compaction, and target cohort before changing tooling, guidance, or source.",
+			Action:     action,
 			Count:      outcomes.ToolUsingCompleted,
 			Sessions:   summary.Sessions,
+			Target:     target,
 			LastSeen:   sessionFindingLastSeen(report, "completion", ""),
 			Lever:      "unknown",
 			Confidence: "low",

@@ -359,6 +359,40 @@ func TestBuildSessionFindingsFlagsCompletedTaskCostTail(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsLocalizesCompletedTaskCostTail(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Outcomes = completionEpisodeAnalysis{
+		ToolUsingCompleted:       40,
+		TopDecileFreshTokenShare: 0.45,
+		FreshTokens: outcomeDistribution{
+			Count: 40,
+			P50:   100,
+			P90:   500,
+			Max:   3_000,
+		},
+		TailDrivers: taskCostTailDrivers{
+			TailEpisodes:     4,
+			OrdinaryEpisodes: 36,
+			TargetCohorts: []taskCostTailDriver{{
+				Name:             "packages/runtime",
+				TailEpisodes:     4,
+				OrdinaryEpisodes: 6,
+				PrevalenceLift:   6,
+			}},
+		},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 {
+		t.Fatalf("expected one task cost finding: %#v", findings)
+	}
+	finding := findings[0]
+	if finding.Target != "packages/runtime" ||
+		!strings.Contains(finding.Evidence, "strongest observed cohort driver packages/runtime") ||
+		!strings.Contains(finding.Action, "repository cohort") {
+		t.Fatalf("localized task-cost finding mismatch: %#v", finding)
+	}
+}
+
 func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
 	finding := sessionFinding{
 		Title:  "individual tool calls return oversized output: file reads",

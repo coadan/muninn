@@ -98,8 +98,10 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	if string(indexedJSON) != string(directJSON) {
 		t.Fatalf("indexed and direct summaries differ:\nindexed=%s\ndirect=%s", indexedJSON, directJSON)
 	}
-	if indexed.Outcomes != direct.Outcomes {
-		t.Fatalf("indexed and direct outcomes differ:\nindexed=%#v\ndirect=%#v", indexed.Outcomes, direct.Outcomes)
+	indexedOutcomesJSON, _ := json.Marshal(indexed.Outcomes)
+	directOutcomesJSON, _ := json.Marshal(direct.Outcomes)
+	if string(indexedOutcomesJSON) != string(directOutcomesJSON) {
+		t.Fatalf("indexed and direct outcomes differ:\nindexed=%s\ndirect=%s", indexedOutcomesJSON, directOutcomesJSON)
 	}
 	if got := indexed.Summary.Tokens; got.InputTokens != 20 ||
 		got.CachedInputTokens != 10 ||

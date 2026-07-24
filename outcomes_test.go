@@ -35,6 +35,51 @@ func TestAnalyzeCompletionEpisodesUsesDistributionsNotAverages(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
+	var episodes []codexTaskEpisode
+	for index := range 30 {
+		fresh := int64(100)
+		episode := codexTaskEpisode{
+			StartedAt: time.Unix(0, 0),
+			EndedAt:   time.Unix(10, 0),
+			Completed: true,
+			Tokens: codexTokenUsage{
+				UncachedInputTokens: fresh,
+			},
+			ToolCalls:     2,
+			Families:      map[string]int{"file reads": 1},
+			TargetCohorts: map[string]int{"packages/common": 1},
+		}
+		if index < 3 {
+			episode.Tokens.UncachedInputTokens = 10_000
+			episode.Families["tests"] = 4
+			episode.OwnedOperations = map[string]int{"bwb/test": 3}
+			episode.TargetCohorts["packages/runtime"] = 5
+		}
+		if index >= 3 && index < 5 {
+			episode.Families["tests"] = 1
+			episode.OwnedOperations = map[string]int{"bwb/test": 1}
+			episode.TargetCohorts["packages/runtime"] = 1
+		}
+		episodes = append(episodes, episode)
+	}
+
+	analysis := analyzeCompletionEpisodes(episodes)
+	if analysis.TailDrivers.TailEpisodes != 3 || analysis.TailDrivers.OrdinaryEpisodes != 27 {
+		t.Fatalf("tail cohort size mismatch: %#v", analysis.TailDrivers)
+	}
+	if len(analysis.TailDrivers.OwnedOperations) != 1 ||
+		analysis.TailDrivers.OwnedOperations[0].Name != "bwb/test" ||
+		analysis.TailDrivers.OwnedOperations[0].TailEpisodes != 3 ||
+		analysis.TailDrivers.OwnedOperations[0].OrdinaryEpisodes != 2 {
+		t.Fatalf("owned operation driver mismatch: %#v", analysis.TailDrivers.OwnedOperations)
+	}
+	if len(analysis.TailDrivers.TargetCohorts) != 1 ||
+		analysis.TailDrivers.TargetCohorts[0].Name != "packages/runtime" {
+		t.Fatalf("target cohort driver mismatch: %#v", analysis.TailDrivers.TargetCohorts)
+	}
+}
+
 func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T) {
 	tracker := deliveryReworkTracker{}
 	target := ".workbench/repos/engine/packages/runtime/src/runtime.go"
