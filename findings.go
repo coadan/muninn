@@ -479,6 +479,9 @@ func oversizedOutputAction(context, control string) string {
 	if control == "local" {
 		return "Lower this locally controlled operation's default output and return a compact summary with explicit focused follow-ups."
 	}
+	if strings.Contains(context, " -> ") {
+		return "Keep the workflow bundled, but cap each output-heavy stage and return one compact summary with explicit focused follow-ups."
+	}
 	switch context {
 	case "file reads":
 		return "Read the exact owner, symbol, heading, or bounded line window instead of returning the whole file."

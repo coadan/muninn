@@ -72,7 +72,8 @@ Muninn highlights:
 - long low-output tool waits, with tests, builds, and review waits reported
   separately from candidate progress stalls
 - individual tool outputs of at least 30,000 bytes, capped to three actionable
-  findings with privacy-safe context attribution
+  findings with privacy-safe context attribution; compound shell calls use a
+  bounded command-family shape instead of collapsing into `mixed shell`
 - privacy-safe tool and command-family attribution
 - mixed commands bundled into one outer tool call
 - substantive command-family transitions across separate tool calls

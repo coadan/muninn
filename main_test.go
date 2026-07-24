@@ -590,6 +590,7 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 				Kind:            sessionEventToolOutput,
 				ToolName:        "exec_command",
 				Family:          "mixed shell",
+				Shape:           "search -> file reads",
 				OutputBytes:     45_000,
 				CallOccurredAt:  generatedAt.Add(-2 * time.Minute),
 				OwnedOperations: []string{"bwb/inspect", "bwb/inspect-namespace"},
@@ -599,6 +600,7 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 				Kind:                          sessionEventToolOutput,
 				ToolName:                      "exec_command",
 				Family:                        "mixed shell",
+				Shape:                         "file reads -> tests",
 				OutputBytes:                   60_000,
 				CallOccurredAt:                generatedAt.Add(-90 * time.Second),
 				OwnedOperations:               []string{"bwb/status-env", "bwb/cli"},
@@ -620,8 +622,8 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 		got.MaxOutputBytes != 45_000 {
 		t.Fatalf("owned oversized output=%#v", got)
 	}
-	if got := record.OversizedOutputs["mixed shell"]; got.Calls != 1 || got.OutputBytes != 60_000 {
-		t.Fatalf("ambiguous oversized output should use family context: %#v", got)
+	if got := record.OversizedOutputs["file reads -> tests"]; got.Calls != 1 || got.OutputBytes != 60_000 {
+		t.Fatalf("ambiguous oversized output should use bounded shape context: %#v", got)
 	}
 	if _, exists := record.OversizedOutputs["bwb/status-env"]; exists {
 		t.Fatalf("ambiguous bundled output must not be charged to an owned operation: %#v", record.OversizedOutputs)
