@@ -56,7 +56,10 @@ func TestAnalyzeCodexSessionsAggregatesFinalCumulativeUsageAndFriction(t *testin
 			"timestamp": "2026-07-24T08:00:02Z",
 			"type":      "response_item",
 			"payload": map[string]any{
-				"type": "custom_tool_call", "call_id": "call-1", "name": "exec",
+				"type":    "custom_tool_call",
+				"call_id": "call-1",
+				"name":    "exec",
+				"input":   `const r = await tools.exec_command({cmd:"printf test"}); text(r.output);`,
 			},
 		},
 		map[string]any{
@@ -886,7 +889,7 @@ func TestAnalyzeCodexSessionsAttributesContinuationOutputToCommandFamily(t *test
 		t.Fatalf("analyzeCodexSessions: %v", err)
 	}
 	tests := report.Summary.ShellCommandsByFamily["tests"]
-	if tests.Calls != 5 || tests.TruncatedCalls != 1 {
+	if tests.Calls != 2 || tests.TruncatedCalls != 1 {
 		t.Fatalf("continuation was not attributed to tests: %#v", tests)
 	}
 	if tests.OutputBytes == 0 || tests.EstimatedOutputTokens == 0 {
@@ -956,7 +959,7 @@ func TestAnalyzeCodexSessionsAttributesExplicitWrapperSessionContinuation(t *tes
 		t.Fatalf("analyzeCodexSessions: %v", err)
 	}
 	review := report.Summary.ShellCommandsByFamily["review"]
-	if review.Calls != 2 || review.OutputBytes < oversizedOutputMinimumBytes {
+	if review.Calls != 1 || review.OutputBytes < oversizedOutputMinimumBytes {
 		t.Fatalf("wrapper continuation was not attributed to review: %#v", review)
 	}
 	if got := report.Summary.OversizedOutputs["review"]; got.Calls != 1 {

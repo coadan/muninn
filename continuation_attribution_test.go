@@ -1,0 +1,75 @@
+package main
+
+import (
+	"testing"
+	"time"
+)
+
+func TestContinuationCallDoesNotDuplicateCommandOrOwnedOperationCalls(t *testing.T) {
+	root := t.TempDir()
+	generatedAt := time.Date(2026, 7, 24, 18, 0, 0, 0, time.UTC)
+	startedAt := generatedAt.Add(-time.Minute)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      root,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt:      startedAt,
+				Kind:            sessionEventToolCall,
+				ToolName:        "exec_command",
+				Family:          "other shell",
+				FirstFamily:     "other shell",
+				LastFamily:      "other shell",
+				OwnedOperations: []string{"bwb/git"},
+			},
+			{
+				OccurredAt:      startedAt.Add(time.Second),
+				CallOccurredAt:  startedAt,
+				Kind:            sessionEventToolOutput,
+				ToolName:        "exec_command",
+				Family:          "other shell",
+				OutputBytes:     10,
+				OwnedOperations: []string{"bwb/git"},
+			},
+			{
+				OccurredAt:      startedAt.Add(2 * time.Second),
+				Kind:            sessionEventToolCall,
+				ToolName:        "write_stdin",
+				Family:          "other shell",
+				OwnedOperations: []string{"bwb/git"},
+			},
+			{
+				OccurredAt:      startedAt.Add(3 * time.Second),
+				CallOccurredAt:  startedAt.Add(2 * time.Second),
+				Kind:            sessionEventToolOutput,
+				ToolName:        "write_stdin",
+				Family:          "other shell",
+				OutputBytes:     20,
+				OwnedOperations: []string{"bwb/git"},
+			},
+		},
+	}
+
+	record, err := sessionRecordFromNormalized(
+		session,
+		root,
+		generatedAt.Add(-time.Hour),
+		generatedAt,
+		ownershipCatalog{},
+	)
+	if err != nil {
+		t.Fatalf("sessionRecordFromNormalized: %v", err)
+	}
+	if record.ToolCalls != 2 {
+		t.Fatalf("physical tool calls=%d want 2", record.ToolCalls)
+	}
+	if got := record.ShellCommandsByFamily["other shell"]; got.Calls != 1 || got.OutputBytes != 30 {
+		t.Fatalf("shell command metrics=%#v want one call with all continuation output", got)
+	}
+	if got := record.OwnedOperations["bwb/git"]; got.Calls != 1 || got.OutputBytes != 30 {
+		t.Fatalf("owned operation metrics=%#v want one call with all continuation output", got)
+	}
+	if got := record.ToolMetricsByName["write_stdin"]; got.Calls != 1 || got.OutputBytes != 20 {
+		t.Fatalf("physical continuation metrics=%#v", got)
+	}
+}

@@ -65,6 +65,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	previousTokens := codexTokenUsage{}
 	hasPreviousTokens := false
 	for _, event := range session.Events {
+		event = withoutContinuationCallAttribution(event)
 		if event.Kind == sessionEventToken && !event.OccurredAt.After(generatedAt) {
 			if !event.OccurredAt.Before(since) {
 				increment := codexTokenUsageIncrement(event.Tokens, previousTokens, hasPreviousTokens)
