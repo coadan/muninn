@@ -43,6 +43,7 @@ muninn analyze --repo . --json
 muninn analyze --repo . --checkpoint before-tooling-change
 muninn analyze --repo . --compare before-tooling-change
 muninn analyze --repo . --overview
+muninn analyze --repo . --since 24h --operations bwb
 muninn analyze --repo . --focus structure
 muninn analyze --repo . --focus output
 muninn analyze --repo . --focus quality
@@ -79,6 +80,12 @@ action queue as the default report. Use `--focus` with `tooling`,
 by most recent supporting activity, show a privacy-safe relative `Last seen`
 age, and retain the exact timestamp in JSON. This keeps already-fixed
 historical friction from outranking current work.
+
+Use `--operations <owned-tool>` for a bounded drill-down that contains only
+that locally controlled tool's configured operation IDs, calls, sessions,
+output, failures, truncations, and fixed failure-reason labels. This is the
+compact bridge from an `owned-tool` finding to the exact operation worth
+improving; add `--json` when another local tool will consume the result.
 
 Muninn highlights:
 

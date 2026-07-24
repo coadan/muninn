@@ -522,6 +522,7 @@ Examples:
   muninn analyze --repo . --checkpoint before-tooling-change
   muninn analyze --repo . --compare before-tooling-change
   muninn analyze --repo . --overview
+  muninn analyze --repo . --since 24h --operations bwb
   muninn analyze --repo . --focus structure
   muninn analyze --repo . --details
   muninn analyze --repo . --json
@@ -556,15 +557,17 @@ func cmdCodexSessions(root string, args []string) error {
 	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
 	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals")
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
+	operationsTool := fs.String("operations", "", "show only configured operations for one locally owned tool ID")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(
 		fs,
-		"muninn analyze [--provider codex] [--repo <path>] [--since <duration>] [--sessions-dir <path>] [--task <task-id>] [--include-archived] [--json] [--limit <n>]",
+		"muninn analyze [--provider codex] [--repo <path>] [--since <duration>] [--sessions-dir <path>] [--task <task-id>] [--operations <owned-tool>] [--include-archived] [--json] [--limit <n>]",
 		"Summarize token usage and tool-output attribution without exposing session content or command text.",
 		[]string{
 			"muninn analyze --repo .",
 			"muninn analyze --repo . --since 24h",
+			"muninn analyze --repo . --since 24h --operations bwb",
 			"muninn analyze --repo . --task my-worktree",
 			"muninn analyze --repo . --since 14d --include-archived --limit 20",
 			"muninn analyze --repo . --json",
@@ -605,6 +608,10 @@ func cmdCodexSessions(root string, args []string) error {
 	}
 	if strings.TrimSpace(*focus) != "" && (*overviewOutput || *detailsOutput) {
 		return errors.New("--focus applies to findings output and cannot be combined with --overview or --details")
+	}
+	if strings.TrimSpace(*operationsTool) != "" &&
+		(*overviewOutput || *findingsOutput || *detailsOutput || strings.TrimSpace(*focus) != "") {
+		return errors.New("--operations cannot be combined with --overview, --findings, --details, or --focus")
 	}
 	view := "findings"
 	if *overviewOutput {
@@ -717,6 +724,22 @@ func cmdCodexSessions(root string, args []string) error {
 		if *jsonOutput {
 			fmt.Fprintf(os.Stderr, "saved Muninn checkpoint %q\n", name)
 		}
+	}
+	if toolID := strings.TrimSpace(*operationsTool); toolID != "" {
+		drilldown, err := buildOwnedOperationsDrilldown(report, config, toolID, *limit)
+		if err != nil {
+			return err
+		}
+		if *jsonOutput {
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(drilldown)
+		}
+		printOwnedOperationsDrilldown(drilldown)
+		if name := strings.TrimSpace(*checkpointName); name != "" {
+			fmt.Printf("\nSaved checkpoint %q.\n", name)
+		}
+		return nil
 	}
 	if *jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
@@ -2442,16 +2465,29 @@ func printOwnedOperations(metrics map[string]codexOwnedOperationMetrics, limit i
 		rows = rows[:limit]
 	}
 	fmt.Println("\nLocally controlled operations:")
-	fmt.Printf("%-32s %8s %8s %10s %10s %8s %8s\n", "OPERATION", "CALLS", "SESSIONS", "OUTPUT", "AMBIG OUT", "FAILED", "AMBIG")
+	fmt.Printf(
+		"%-32s %8s %8s %10s %10s %7s %7s %7s %7s\n",
+		"OPERATION",
+		"CALLS",
+		"SESSIONS",
+		"OUTPUT",
+		"AMBIG OUT",
+		"FAILED",
+		"TRUNC",
+		"AMB F",
+		"AMB T",
+	)
 	for _, row := range rows {
-		fmt.Printf("%-32s %8s %8s %10s %10s %8s %8s\n",
+		fmt.Printf("%-32s %8s %8s %10s %10s %7s %7s %7s %7s\n",
 			truncateCodexLabel(row.Operation, 32),
 			formatCodexCount(int64(row.Metrics.Calls)),
 			formatCodexCount(int64(row.Metrics.Sessions)),
 			"~"+formatCodexCount(row.Metrics.EstimatedOutputTokens),
 			"~"+formatCodexCount(row.Metrics.EstimatedAmbiguousOutputTokens),
 			formatCodexCount(int64(row.Metrics.FailedCalls)),
+			formatCodexCount(int64(row.Metrics.TruncatedCalls)),
 			formatCodexCount(int64(row.Metrics.AmbiguousFailedCalls)),
+			formatCodexCount(int64(row.Metrics.AmbiguousTruncatedCalls)),
 		)
 	}
 }
