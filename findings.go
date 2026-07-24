@@ -27,6 +27,12 @@ type sessionFinding struct {
 	score      int
 }
 
+type workflowTransitionEvidence struct {
+	Transition string
+	Count      int
+	Sessions   int
+}
+
 func buildSessionFindings(report codexSessionInsightsReport, config repositoryConfig) []sessionFinding {
 	summary := report.Summary
 	var findings []sessionFinding
@@ -181,9 +187,10 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	}
 
 	type workflowEvidence struct {
-		Count    int
-		Sessions int
-		LastSeen time.Time
+		Count       int
+		Sessions    int
+		LastSeen    time.Time
+		Transitions []workflowTransitionEvidence
 	}
 	workflows := map[string]workflowEvidence{}
 	for transition, metrics := range summary.CrossCallTransitions {
@@ -199,20 +206,29 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		if seen := sessionFindingActivity(report, "transition", transition); seen.After(evidence.LastSeen) {
 			evidence.LastSeen = seen
 		}
+		evidence.Transitions = append(evidence.Transitions, workflowTransitionEvidence{
+			Transition: transition,
+			Count:      metrics.Count,
+			Sessions:   metrics.Sessions,
+		})
 		workflows[workflow] = evidence
 	}
 	for workflow, metrics := range workflows {
 		if metrics.Sessions < 3 || metrics.Count < 5 {
 			continue
 		}
+		evidence := fmt.Sprintf("%s transitions across at least %s sessions",
+			formatCodexCount(int64(metrics.Count)),
+			formatCodexCount(int64(metrics.Sessions)),
+		)
+		if transitions := formatAgentInterfaceTransitions(metrics.Transitions, 3); transitions != "" {
+			evidence += "; dominant transitions: " + transitions
+		}
 		findings = append(findings, sessionFinding{
 			Category: "agent-interface",
 			Control:  "repository",
 			Title:    "repeated cross-call workflow: " + workflow,
-			Evidence: fmt.Sprintf("%s transitions across %s sessions",
-				formatCodexCount(int64(metrics.Count)),
-				formatCodexCount(int64(metrics.Sessions)),
-			),
+			Evidence: evidence,
 			Action:   config.Actions.AgentInterface,
 			Count:    metrics.Count,
 			Sessions: metrics.Sessions,
@@ -1362,6 +1378,37 @@ func agentInterfaceWorkflow(transition string) string {
 	default:
 		return ""
 	}
+}
+
+func formatAgentInterfaceTransitions(transitions []workflowTransitionEvidence, limit int) string {
+	rows := append([]workflowTransitionEvidence(nil), transitions...)
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		if rows[i].Sessions != rows[j].Sessions {
+			return rows[i].Sessions > rows[j].Sessions
+		}
+		return rows[i].Transition < rows[j].Transition
+	})
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		sessionLabel := "sessions"
+		if row.Sessions == 1 {
+			sessionLabel = "session"
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%s: %s transitions/%s %s",
+			row.Transition,
+			formatCodexCount(int64(row.Count)),
+			formatCodexCount(int64(row.Sessions)),
+			sessionLabel,
+		))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func diversifySessionFindings(findings []sessionFinding) []sessionFinding {

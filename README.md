@@ -235,6 +235,10 @@ large inline orchestration payloads, repeated source reads, and files that are
 frequently searched or sliced together. Cache hits are reported separately:
 they are beneficial by themselves, but high cached-context volume combined
 with compactions and recurring loops indicates stale session context.
+Agent-interface workflow findings include the three dominant normalized
+transition families so the next tooling improvement can be selected without a
+raw-log drilldown. Their aggregate session count is reported as a lower bound
+because one session can contribute to several transitions in the same workflow.
 
 The overview should lead with findings. Focused detail may identify safe
 repository-relative source targets, but paths outside the analyzed repository
