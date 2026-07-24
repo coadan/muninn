@@ -42,6 +42,7 @@ muninn analyze --repo . --checkpoint before-tooling-change
 muninn analyze --repo . --compare before-tooling-change
 muninn analyze --repo . --overview
 muninn analyze --repo . --focus structure
+muninn analyze --repo . --focus output
 muninn analyze --repo . --details
 muninn feedback add \
   --category roundtrip \
@@ -61,7 +62,8 @@ The default human report is findings-first. Use `--overview` for compact
 family totals and `--details` for command, transition, source-target, failure,
 and output rankings. Use `--focus` with `tooling`, `instructions`, `interface`,
 `structure`, `discovery`, `failures`, or `loops` to narrow the action queue
-without loading details.
+without loading details. Use `output` to isolate individual oversized tool
+responses.
 
 Muninn highlights:
 
@@ -69,6 +71,8 @@ Muninn highlights:
 - fresh-token and visible tool-output volume
 - long low-output tool waits, with tests, builds, and review waits reported
   separately from candidate progress stalls
+- individual tool outputs of at least 30,000 bytes, capped to three actionable
+  findings with privacy-safe context attribution
 - privacy-safe tool and command-family attribution
 - mixed commands bundled into one outer tool call
 - substantive command-family transitions across separate tool calls

@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 16
+const codexSessionInsightsSchemaVersion = 17
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -71,6 +71,7 @@ type codexTaskInsights struct {
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
+	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
 }
 
 type codexToolMetrics struct {
@@ -109,6 +110,13 @@ type codexWaitMetrics struct {
 	Calls    int   `json:"calls"`
 	Seconds  int64 `json:"seconds"`
 	Sessions int   `json:"sessions"`
+}
+
+type codexOversizedOutputMetrics struct {
+	Calls          int   `json:"calls"`
+	OutputBytes    int64 `json:"outputBytes"`
+	MaxOutputBytes int64 `json:"maxOutputBytes"`
+	Sessions       int   `json:"sessions"`
 }
 
 type codexInlineMetrics struct {
@@ -158,6 +166,7 @@ type codexSessionInsightsSummary struct {
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
+	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
 }
 
 type codexSessionInsightsReport struct {
@@ -203,6 +212,7 @@ type codexSessionRecord struct {
 	FailureContexts              map[string]map[string]int
 	ProgressStalls               map[string]codexWaitMetrics
 	ExpectedWaits                map[string]codexWaitMetrics
+	OversizedOutputs             map[string]codexOversizedOutputMetrics
 }
 
 type codexToolCallDescriptor struct {
@@ -513,7 +523,7 @@ func cmdCodexSessions(root string, args []string) error {
 	overviewOutput := fs.Bool("overview", false, "show aggregate family totals only")
 	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
 	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals")
-	focus := fs.String("focus", "", "filter findings: tooling, instructions, interface, structure, discovery, failures, or loops")
+	focus := fs.String("focus", "", "filter findings: tooling, instructions, interface, structure, discovery, failures, loops, or output")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(
@@ -803,6 +813,7 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 			ProgressStalls:               map[string]codexWaitMetrics{},
 			ExpectedWaits:                map[string]codexWaitMetrics{},
+			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 		},
 	}
 }
@@ -1643,6 +1654,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexFailureContexts(summary.FailureContexts, record.FailureContexts)
 	addCodexWaitMetrics(summary.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(summary.ExpectedWaits, record.ExpectedWaits)
+	addCodexOversizedOutputMetrics(summary.OversizedOutputs, record.OversizedOutputs)
 
 	task := taskMap[record.Task]
 	if task == nil {
@@ -1660,6 +1672,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 			ProgressStalls:               map[string]codexWaitMetrics{},
 			ExpectedWaits:                map[string]codexWaitMetrics{},
+			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 		}
 		taskMap[record.Task] = task
 	}
@@ -1707,6 +1720,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexFailureContexts(task.FailureContexts, record.FailureContexts)
 	addCodexWaitMetrics(task.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(task.ExpectedWaits, record.ExpectedWaits)
+	addCodexOversizedOutputMetrics(task.OversizedOutputs, record.OversizedOutputs)
 }
 
 func addCodexWaitMetrics(target, addition map[string]codexWaitMetrics) {
@@ -1714,6 +1728,19 @@ func addCodexWaitMetrics(target, addition map[string]codexWaitMetrics) {
 		metrics := target[context]
 		metrics.Calls += value.Calls
 		metrics.Seconds += value.Seconds
+		if value.Calls > 0 {
+			metrics.Sessions++
+		}
+		target[context] = metrics
+	}
+}
+
+func addCodexOversizedOutputMetrics(target, addition map[string]codexOversizedOutputMetrics) {
+	for context, value := range addition {
+		metrics := target[context]
+		metrics.Calls += value.Calls
+		metrics.OutputBytes += value.OutputBytes
+		metrics.MaxOutputBytes = max(metrics.MaxOutputBytes, value.MaxOutputBytes)
 		if value.Calls > 0 {
 			metrics.Sessions++
 		}
@@ -1906,6 +1933,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	printOwnedOperations(summary.OwnedOperations, 16)
 	printCodexWaitMetrics("\nCandidate progress stalls (long, low-output waits):", summary.ProgressStalls, 12)
 	printCodexWaitMetrics("\nExpected long waits excluded from stall findings:", summary.ExpectedWaits, 12)
+	printCodexOversizedOutputMetrics(summary.OversizedOutputs, 12)
 	printCodexFailureReasons(summary.FailureReasons)
 	printCodexFailureContexts(summary.FailureContexts, 12)
 
@@ -1931,6 +1959,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	}
 	stallCalls, stallSeconds := codexWaitTotals(summary.ProgressStalls)
 	expectedWaitCalls, expectedWaitSeconds := codexWaitTotals(summary.ExpectedWaits)
+	oversizedCalls, oversizedBytes := codexOversizedOutputTotals(summary.OversizedOutputs)
 	if stallCalls > 0 {
 		fmt.Printf("- %s candidate low-output waits consumed %s. Remove redundant polling or add bounded progress for non-essential waits.\n",
 			formatCodexCount(int64(stallCalls)),
@@ -1941,6 +1970,12 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Printf("- %s long waits consuming %s were classified as expected tests, builds, local reviews, or remote GitHub review and excluded from stall findings.\n",
 			formatCodexCount(int64(expectedWaitCalls)),
 			formatDurationSeconds(expectedWaitSeconds),
+		)
+	}
+	if oversizedCalls > 0 {
+		fmt.Printf("- %s oversized tool outputs returned ~%s visible tokens. Lower default output or provide a bounded follow-up surface.\n",
+			formatCodexCount(int64(oversizedCalls)),
+			formatCodexCount(estimatedTokens(oversizedBytes)),
 		)
 	}
 	if summary.TruncatedToolCalls > 0 {
@@ -2018,6 +2053,51 @@ func codexWaitTotals(metrics map[string]codexWaitMetrics) (calls int, seconds in
 		seconds += value.Seconds
 	}
 	return calls, seconds
+}
+
+func printCodexOversizedOutputMetrics(metrics map[string]codexOversizedOutputMetrics, limit int) {
+	type row struct {
+		Context string
+		Metrics codexOversizedOutputMetrics
+	}
+	rows := make([]row, 0, len(metrics))
+	for context, value := range metrics {
+		rows = append(rows, row{Context: context, Metrics: value})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.OutputBytes != rows[j].Metrics.OutputBytes {
+			return rows[i].Metrics.OutputBytes > rows[j].Metrics.OutputBytes
+		}
+		if rows[i].Metrics.Calls != rows[j].Metrics.Calls {
+			return rows[i].Metrics.Calls > rows[j].Metrics.Calls
+		}
+		return rows[i].Context < rows[j].Context
+	})
+	if len(rows) == 0 {
+		return
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println("\nOversized tool outputs (at least 30,000 bytes in one call):")
+	fmt.Printf("%-40s %8s %10s %13s %13s\n", "CONTEXT", "CALLS", "SESSIONS", "OUTPUT", "MAX CALL")
+	for _, row := range rows {
+		fmt.Printf("%-40s %8s %10s %13s %13s\n",
+			truncateCodexLabel(row.Context, 40),
+			formatCodexCount(int64(row.Metrics.Calls)),
+			formatCodexCount(int64(row.Metrics.Sessions)),
+			formatCodexCount(row.Metrics.OutputBytes),
+			formatCodexCount(row.Metrics.MaxOutputBytes),
+		)
+	}
+}
+
+func codexOversizedOutputTotals(metrics map[string]codexOversizedOutputMetrics) (calls int, bytes int64) {
+	for _, value := range metrics {
+		calls += value.Calls
+		bytes += value.OutputBytes
+	}
+	return calls, bytes
 }
 
 func printCodexInlineTools(metrics map[string]codexInlineMetrics) {

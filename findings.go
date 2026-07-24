@@ -96,6 +96,30 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	for context, metrics := range summary.OversizedOutputs {
+		control := "repository"
+		if locallyControlledOutputContext(context, config.OwnedTools) {
+			control = "local"
+		}
+		findings = append(findings, sessionFinding{
+			Category: "output-cost",
+			Control:  control,
+			Title:    "individual tool calls return oversized output: " + context,
+			Evidence: fmt.Sprintf("%s calls returned %s bytes (~%s visible tokens) across %s sessions; largest call %s bytes",
+				formatCodexCount(int64(metrics.Calls)),
+				formatCodexCount(metrics.OutputBytes),
+				formatCodexCount(estimatedTokens(metrics.OutputBytes)),
+				formatCodexCount(int64(metrics.Sessions)),
+				formatCodexCount(metrics.MaxOutputBytes),
+			),
+			Action:   oversizedOutputAction(context, control),
+			Count:    metrics.Calls,
+			Sessions: metrics.Sessions,
+			Target:   context,
+			score:    600 + metrics.Calls + int(metrics.OutputBytes/10_000),
+		})
+	}
+
 	for _, owned := range config.OwnedTools {
 		metrics := summary.OwnedTooling[owned.ID]
 		outputTokens := estimatedTokens(metrics.OutputBytes)
@@ -438,6 +462,39 @@ func directFeedbackFindingCategory(category string) string {
 	}
 }
 
+func locallyControlledOutputContext(context string, ownedTools []ownedToolConfig) bool {
+	toolID, _, hasOperation := strings.Cut(context, "/")
+	if !hasOperation {
+		return false
+	}
+	for _, owned := range ownedTools {
+		if toolID == owned.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func oversizedOutputAction(context, control string) string {
+	if control == "local" {
+		return "Lower this locally controlled operation's default output and return a compact summary with explicit focused follow-ups."
+	}
+	switch context {
+	case "file reads":
+		return "Read the exact owner, symbol, heading, or bounded line window instead of returning the whole file."
+	case "search":
+		return "Narrow the search scope and cap matches or excerpts before retrying."
+	case "git inspect":
+		return "Use a diff summary or path-scoped inspection first, then load only the changed hunk that needs attention."
+	case "tests":
+		return "Keep successful test output compact and route complete failure diagnostics to a log or explicit focused follow-up."
+	case "review":
+		return "Use the compact review summary first and retrieve details only for the selected finding."
+	default:
+		return "Narrow the command, lower its output limit, or add a compact repository-owned surface that returns focused follow-ups."
+	}
+}
+
 func directFeedbackAction(feedback agentFeedbackAggregate) string {
 	switch feedback.Control {
 	case "local":
@@ -577,6 +634,7 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 			"owned-tool":        true,
 			"owned-operation":   true,
 			"recurring-failure": true,
+			"output-cost":       true,
 		},
 		"instructions": {
 			"instruction-discovery": true,
@@ -599,10 +657,13 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 			"agent-interface": true,
 			"session-loop":    true,
 		},
+		"output": {
+			"output-cost": true,
+		},
 	}
 	categories, ok := allowed[focus]
 	if !ok {
-		return nil, fmt.Errorf("unsupported --focus %q (available: tooling, instructions, interface, structure, discovery, failures, loops)", focus)
+		return nil, fmt.Errorf("unsupported --focus %q (available: tooling, instructions, interface, structure, discovery, failures, loops, output)", focus)
 	}
 	filtered := make([]sessionFinding, 0, len(findings))
 	for _, finding := range findings {
@@ -645,6 +706,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"owned-tool":            4,
 		"owned-operation":       6,
 		"session-loop":          6,
+		"output-cost":           3,
 	}
 	counts := map[string]int{}
 	result := make([]sessionFinding, 0, len(findings))
