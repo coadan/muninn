@@ -341,8 +341,6 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			)
 			target = driver.Name
 			switch driverKind {
-			case "target":
-				action = "Compare high-tail and ordinary interactions with this exact source owner, then simplify its boundary or add a bounded context surface for the repeated work."
 			case "cohort":
 				action = "Compare the calls and output inside this repository cohort between high-tail and ordinary completed tasks, then reduce its dominant navigation, validation, or source-boundary cost."
 			case "operation":

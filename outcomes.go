@@ -78,6 +78,43 @@ type verificationMetrics struct {
 	FailFixPassDeliveries int `json:"failFixPassDeliveries"`
 }
 
+type downstreamQualityMetrics struct {
+	Deliveries                        int                                `json:"deliveries"`
+	DeliveriesWithPreTests            int                                `json:"deliveriesWithPreTests"`
+	DeliveriesWithFailure             int                                `json:"deliveriesWithFailure"`
+	FailedDeliveriesWithPreTests      int                                `json:"failedDeliveriesWithPreTests"`
+	FailureRuns                       int                                `json:"failureRuns"`
+	FollowUpEditCycles                int                                `json:"followUpEditCycles"`
+	RedeliveryAttempts                int                                `json:"redeliveryAttempts"`
+	RecoveredDeliveries               int                                `json:"recoveredDeliveries"`
+	Reverts                           int                                `json:"reverts"`
+	Sessions                          int                                `json:"sessions"`
+	FailureChecks                     map[string]int                     `json:"failureChecks,omitempty"`
+	PreDeliveryChecks                 map[string]downstreamCheckMetrics  `json:"preDeliveryChecks,omitempty"`
+	Cohorts                           map[string]downstreamCohortMetrics `json:"cohorts,omitempty"`
+	TimeToFailureSeconds              outcomeDistribution                `json:"timeToFailureSeconds"`
+	TimeToRecoverySeconds             outcomeDistribution                `json:"timeToRecoverySeconds"`
+	timeToFailureSecondsObservations  []int64
+	timeToRecoverySecondsObservations []int64
+}
+
+type downstreamCheckMetrics struct {
+	Deliveries            int `json:"deliveries"`
+	DeliveriesWithFailure int `json:"deliveriesWithFailure"`
+}
+
+type downstreamCohortMetrics struct {
+	Deliveries                   int `json:"deliveries"`
+	DeliveriesWithPreTests       int `json:"deliveriesWithPreTests"`
+	DeliveriesWithFailure        int `json:"deliveriesWithFailure"`
+	FailedDeliveriesWithPreTests int `json:"failedDeliveriesWithPreTests"`
+	FailureRuns                  int `json:"failureRuns"`
+	FollowUpEditCycles           int `json:"followUpEditCycles"`
+	RedeliveryAttempts           int `json:"redeliveryAttempts"`
+	RecoveredDeliveries          int `json:"recoveredDeliveries"`
+	Reverts                      int `json:"reverts"`
+}
+
 type deliveryReworkTracker struct {
 	metrics                  deliveryReworkMetrics
 	delivered                bool
@@ -97,6 +134,276 @@ type deliveryReworkTracker struct {
 	repairCandidateChecks    map[string]struct{}
 	repairedChecksAfterEdit  map[string]struct{}
 	currentDeliveryChecks    map[string]struct{}
+}
+
+type downstreamQualityTracker struct {
+	metrics                 downstreamQualityMetrics
+	delivered               bool
+	pendingEditCohorts      map[string]struct{}
+	pendingEditTargets      map[string]struct{}
+	testsAfterLatestEdit    bool
+	passedChecksAfterEdit   map[string]struct{}
+	currentDeliveryAt       time.Time
+	currentDeliveryCohorts  map[string]struct{}
+	currentDeliveryTargets  map[string]struct{}
+	currentDeliveryPreTests bool
+	currentDeliveryChecks   map[string]struct{}
+	editSinceDelivery       bool
+	currentDeliveryFailed   bool
+	failureActive           bool
+	failureAt               time.Time
+	failureChecks           map[string]struct{}
+	recoveryEditSeen        bool
+	recoveryPassedChecks    map[string]struct{}
+	recoveryCohorts         map[string]struct{}
+}
+
+func (tracker *downstreamQualityTracker) observe(event normalizedSessionEvent, operations []string) {
+	if event.Kind == sessionEventToolCall && event.ToolName == "apply_patch" {
+		tracker.observeEdit(event)
+		return
+	}
+	if event.Kind != sessionEventToolOutput || event.OperationContinues {
+		return
+	}
+	if !event.Failed && revertOperation(event) {
+		tracker.observeRevert(event)
+		return
+	}
+	if checks := downstreamCheckIDs(event, operations); len(checks) > 0 {
+		tracker.observeCheck(event, checks)
+	}
+	if !event.Failed && deliveryOperation(event, operations) {
+		tracker.observeDelivery(event)
+	}
+}
+
+func (tracker *downstreamQualityTracker) observeEdit(event normalizedSessionEvent) {
+	if tracker.delivered {
+		tracker.editSinceDelivery = true
+	}
+	matchedTargets := matchingTargets(event.Targets, tracker.currentDeliveryTargets)
+	if tracker.failureActive && len(matchedTargets) > 0 {
+		tracker.metrics.FollowUpEditCycles++
+		tracker.recoveryEditSeen = true
+		tracker.recoveryPassedChecks = nil
+		if tracker.recoveryCohorts == nil {
+			tracker.recoveryCohorts = map[string]struct{}{}
+		}
+		for cohort := range eventTargetCohorts(matchedTargets) {
+			tracker.recoveryCohorts[cohort] = struct{}{}
+			metrics := tracker.cohort(cohort)
+			metrics.FollowUpEditCycles++
+			tracker.metrics.Cohorts[cohort] = metrics
+		}
+	}
+	if tracker.pendingEditCohorts == nil {
+		tracker.pendingEditCohorts = map[string]struct{}{}
+	}
+	for cohort := range eventTargetCohorts(event.Targets) {
+		tracker.pendingEditCohorts[cohort] = struct{}{}
+	}
+	if tracker.pendingEditTargets == nil {
+		tracker.pendingEditTargets = map[string]struct{}{}
+	}
+	for _, target := range event.Targets {
+		tracker.pendingEditTargets[target] = struct{}{}
+	}
+	tracker.testsAfterLatestEdit = false
+	tracker.passedChecksAfterEdit = nil
+}
+
+func (tracker *downstreamQualityTracker) observeCheck(event normalizedSessionEvent, checks []string) {
+	if event.Failed {
+		if tracker.delivered && (!tracker.editSinceDelivery || tracker.failureActive) {
+			tracker.observeFailure(event, checks)
+		}
+		return
+	}
+	if len(tracker.pendingEditTargets) > 0 {
+		tracker.testsAfterLatestEdit = true
+		if tracker.passedChecksAfterEdit == nil {
+			tracker.passedChecksAfterEdit = map[string]struct{}{}
+		}
+		for _, check := range checks {
+			tracker.passedChecksAfterEdit[check] = struct{}{}
+		}
+	}
+	if !tracker.failureActive || !tracker.recoveryEditSeen {
+		return
+	}
+	if tracker.recoveryPassedChecks == nil {
+		tracker.recoveryPassedChecks = map[string]struct{}{}
+	}
+	for _, check := range checks {
+		if _, failed := tracker.failureChecks[check]; failed {
+			tracker.recoveryPassedChecks[check] = struct{}{}
+		}
+	}
+}
+
+func (tracker *downstreamQualityTracker) observeFailure(event normalizedSessionEvent, checks []string) {
+	tracker.metrics.FailureRuns++
+	for _, check := range checks {
+		if tracker.metrics.FailureChecks == nil {
+			tracker.metrics.FailureChecks = map[string]int{}
+		}
+		tracker.metrics.FailureChecks[check]++
+	}
+	for cohort := range tracker.currentDeliveryCohorts {
+		metrics := tracker.cohort(cohort)
+		metrics.FailureRuns++
+		tracker.metrics.Cohorts[cohort] = metrics
+	}
+	if !tracker.currentDeliveryFailed {
+		tracker.currentDeliveryFailed = true
+		tracker.metrics.DeliveriesWithFailure++
+		if tracker.currentDeliveryPreTests {
+			tracker.metrics.FailedDeliveriesWithPreTests++
+		}
+		for check := range tracker.currentDeliveryChecks {
+			metrics := tracker.preDeliveryCheck(check)
+			metrics.DeliveriesWithFailure++
+			tracker.metrics.PreDeliveryChecks[check] = metrics
+		}
+		for cohort := range tracker.currentDeliveryCohorts {
+			metrics := tracker.cohort(cohort)
+			metrics.DeliveriesWithFailure++
+			if tracker.currentDeliveryPreTests {
+				metrics.FailedDeliveriesWithPreTests++
+			}
+			tracker.metrics.Cohorts[cohort] = metrics
+		}
+		if !tracker.currentDeliveryAt.IsZero() && event.OccurredAt.After(tracker.currentDeliveryAt) {
+			tracker.metrics.timeToFailureSecondsObservations = append(
+				tracker.metrics.timeToFailureSecondsObservations,
+				int64(event.OccurredAt.Sub(tracker.currentDeliveryAt).Seconds()),
+			)
+		}
+	}
+	if !tracker.failureActive {
+		tracker.failureAt = event.OccurredAt
+		tracker.failureChecks = map[string]struct{}{}
+	}
+	for _, check := range checks {
+		tracker.failureChecks[check] = struct{}{}
+	}
+	tracker.failureActive = true
+}
+
+func (tracker *downstreamQualityTracker) observeRevert(event normalizedSessionEvent) {
+	if !tracker.delivered || tracker.editSinceDelivery {
+		return
+	}
+	tracker.metrics.Reverts++
+	for cohort := range tracker.currentDeliveryCohorts {
+		metrics := tracker.cohort(cohort)
+		metrics.Reverts++
+		tracker.metrics.Cohorts[cohort] = metrics
+	}
+	if tracker.currentDeliveryFailed {
+		return
+	}
+	tracker.currentDeliveryFailed = true
+	tracker.metrics.DeliveriesWithFailure++
+	if tracker.currentDeliveryPreTests {
+		tracker.metrics.FailedDeliveriesWithPreTests++
+	}
+	for check := range tracker.currentDeliveryChecks {
+		metrics := tracker.preDeliveryCheck(check)
+		metrics.DeliveriesWithFailure++
+		tracker.metrics.PreDeliveryChecks[check] = metrics
+	}
+	for cohort := range tracker.currentDeliveryCohorts {
+		metrics := tracker.cohort(cohort)
+		metrics.DeliveriesWithFailure++
+		if tracker.currentDeliveryPreTests {
+			metrics.FailedDeliveriesWithPreTests++
+		}
+		tracker.metrics.Cohorts[cohort] = metrics
+	}
+	if !tracker.currentDeliveryAt.IsZero() && event.OccurredAt.After(tracker.currentDeliveryAt) {
+		tracker.metrics.timeToFailureSecondsObservations = append(
+			tracker.metrics.timeToFailureSecondsObservations,
+			int64(event.OccurredAt.Sub(tracker.currentDeliveryAt).Seconds()),
+		)
+	}
+}
+
+func (tracker *downstreamQualityTracker) observeDelivery(event normalizedSessionEvent) {
+	if tracker.failureActive && tracker.recoveryEditSeen {
+		tracker.metrics.RedeliveryAttempts++
+		for cohort := range tracker.recoveryCohorts {
+			metrics := tracker.cohort(cohort)
+			metrics.RedeliveryAttempts++
+			tracker.metrics.Cohorts[cohort] = metrics
+		}
+		if setContainsAll(tracker.recoveryPassedChecks, tracker.failureChecks) {
+			tracker.metrics.RecoveredDeliveries++
+			for cohort := range tracker.recoveryCohorts {
+				metrics := tracker.cohort(cohort)
+				metrics.RecoveredDeliveries++
+				tracker.metrics.Cohorts[cohort] = metrics
+			}
+			if !tracker.failureAt.IsZero() && event.OccurredAt.After(tracker.failureAt) {
+				tracker.metrics.timeToRecoverySecondsObservations = append(
+					tracker.metrics.timeToRecoverySecondsObservations,
+					int64(event.OccurredAt.Sub(tracker.failureAt).Seconds()),
+				)
+			}
+		}
+	}
+
+	tracker.metrics.Deliveries++
+	if tracker.testsAfterLatestEdit {
+		tracker.metrics.DeliveriesWithPreTests++
+	}
+	for cohort := range tracker.pendingEditCohorts {
+		metrics := tracker.cohort(cohort)
+		metrics.Deliveries++
+		if tracker.testsAfterLatestEdit {
+			metrics.DeliveriesWithPreTests++
+		}
+		tracker.metrics.Cohorts[cohort] = metrics
+	}
+	for check := range tracker.passedChecksAfterEdit {
+		metrics := tracker.preDeliveryCheck(check)
+		metrics.Deliveries++
+		tracker.metrics.PreDeliveryChecks[check] = metrics
+	}
+
+	tracker.delivered = true
+	tracker.currentDeliveryAt = event.OccurredAt
+	tracker.currentDeliveryCohorts = cloneStringSet(tracker.pendingEditCohorts)
+	tracker.currentDeliveryTargets = cloneStringSet(tracker.pendingEditTargets)
+	tracker.currentDeliveryPreTests = tracker.testsAfterLatestEdit
+	tracker.currentDeliveryChecks = cloneStringSet(tracker.passedChecksAfterEdit)
+	tracker.pendingEditCohorts = nil
+	tracker.pendingEditTargets = nil
+	tracker.testsAfterLatestEdit = false
+	tracker.passedChecksAfterEdit = nil
+	tracker.editSinceDelivery = false
+	tracker.currentDeliveryFailed = false
+	tracker.failureActive = false
+	tracker.failureAt = time.Time{}
+	tracker.failureChecks = nil
+	tracker.recoveryEditSeen = false
+	tracker.recoveryPassedChecks = nil
+	tracker.recoveryCohorts = nil
+}
+
+func (tracker *downstreamQualityTracker) cohort(name string) downstreamCohortMetrics {
+	if tracker.metrics.Cohorts == nil {
+		tracker.metrics.Cohorts = map[string]downstreamCohortMetrics{}
+	}
+	return tracker.metrics.Cohorts[name]
+}
+
+func (tracker *downstreamQualityTracker) preDeliveryCheck(name string) downstreamCheckMetrics {
+	if tracker.metrics.PreDeliveryChecks == nil {
+		tracker.metrics.PreDeliveryChecks = map[string]downstreamCheckMetrics{}
+	}
+	return tracker.metrics.PreDeliveryChecks[name]
 }
 
 func (tracker *deliveryReworkTracker) observe(event normalizedSessionEvent, operations []string) {
@@ -345,6 +652,28 @@ func cloneStringSet(values map[string]struct{}) map[string]struct{} {
 	return cloned
 }
 
+func matchingTargets(targets []string, candidates map[string]struct{}) []string {
+	var matched []string
+	for _, target := range targets {
+		if _, ok := candidates[target]; ok {
+			matched = append(matched, target)
+		}
+	}
+	return matched
+}
+
+func setContainsAll(values, required map[string]struct{}) bool {
+	if len(required) == 0 {
+		return false
+	}
+	for value := range required {
+		if _, ok := values[value]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (tracker *deliveryReworkTracker) cohort(name string) deliveryCohortMetrics {
 	if tracker.metrics.Cohorts == nil {
 		tracker.metrics.Cohorts = map[string]deliveryCohortMetrics{}
@@ -442,6 +771,50 @@ func verificationCheckIDs(event normalizedSessionEvent, operations []string) []s
 	}
 	sort.Strings(checks)
 	return checks
+}
+
+func downstreamCheckIDs(event normalizedSessionEvent, operations []string) []string {
+	if event.Family == "review" || reviewOperation(event, operations) {
+		return nil
+	}
+	var checks []string
+	for _, operation := range operations {
+		name := strings.ToLower(operation[strings.LastIndex(operation, "/")+1:])
+		if downstreamCheckName(name) {
+			checks = appendUniqueString(checks, operation)
+		}
+	}
+	if len(checks) == 0 {
+		switch event.Family {
+		case "tests":
+			checks = append(checks, "tests")
+		case "build, lint, or install":
+			checks = append(checks, "build/lint")
+		}
+	}
+	sort.Strings(checks)
+	return checks
+}
+
+func downstreamCheckName(name string) bool {
+	for _, prefix := range []string{"test", "build", "lint", "check", "verify", "ci"} {
+		if name == prefix || strings.HasPrefix(name, prefix+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+func revertOperation(event normalizedSessionEvent) bool {
+	if event.Family == "revert" || event.FirstFamily == "revert" || event.LastFamily == "revert" {
+		return true
+	}
+	for _, family := range strings.Split(event.Shape, " -> ") {
+		if family == "revert" {
+			return true
+		}
+	}
+	return false
 }
 
 func reworkTargetLever(target string) string {
@@ -569,6 +942,64 @@ func addVerificationMetricsMap(target *map[string]verificationMetrics, addition 
 	}
 }
 
+func addDownstreamQualityMetrics(target *downstreamQualityMetrics, addition downstreamQualityMetrics) {
+	target.Deliveries += addition.Deliveries
+	target.DeliveriesWithPreTests += addition.DeliveriesWithPreTests
+	target.DeliveriesWithFailure += addition.DeliveriesWithFailure
+	target.FailedDeliveriesWithPreTests += addition.FailedDeliveriesWithPreTests
+	target.FailureRuns += addition.FailureRuns
+	target.FollowUpEditCycles += addition.FollowUpEditCycles
+	target.RedeliveryAttempts += addition.RedeliveryAttempts
+	target.RecoveredDeliveries += addition.RecoveredDeliveries
+	target.Reverts += addition.Reverts
+	target.Sessions += addition.Sessions
+	if target.FailureChecks == nil {
+		target.FailureChecks = map[string]int{}
+	}
+	for check, count := range addition.FailureChecks {
+		target.FailureChecks[check] += count
+	}
+	if target.PreDeliveryChecks == nil {
+		target.PreDeliveryChecks = map[string]downstreamCheckMetrics{}
+	}
+	for check, metrics := range addition.PreDeliveryChecks {
+		current := target.PreDeliveryChecks[check]
+		current.Deliveries += metrics.Deliveries
+		current.DeliveriesWithFailure += metrics.DeliveriesWithFailure
+		target.PreDeliveryChecks[check] = current
+	}
+	if target.Cohorts == nil {
+		target.Cohorts = map[string]downstreamCohortMetrics{}
+	}
+	for cohort, metrics := range addition.Cohorts {
+		current := target.Cohorts[cohort]
+		current.Deliveries += metrics.Deliveries
+		current.DeliveriesWithPreTests += metrics.DeliveriesWithPreTests
+		current.DeliveriesWithFailure += metrics.DeliveriesWithFailure
+		current.FailedDeliveriesWithPreTests += metrics.FailedDeliveriesWithPreTests
+		current.FailureRuns += metrics.FailureRuns
+		current.FollowUpEditCycles += metrics.FollowUpEditCycles
+		current.RedeliveryAttempts += metrics.RedeliveryAttempts
+		current.RecoveredDeliveries += metrics.RecoveredDeliveries
+		current.Reverts += metrics.Reverts
+		target.Cohorts[cohort] = current
+	}
+	target.timeToFailureSecondsObservations = append(
+		target.timeToFailureSecondsObservations,
+		addition.timeToFailureSecondsObservations...,
+	)
+	target.timeToRecoverySecondsObservations = append(
+		target.timeToRecoverySecondsObservations,
+		addition.timeToRecoverySecondsObservations...,
+	)
+	finalizeDownstreamQualityMetrics(target)
+}
+
+func finalizeDownstreamQualityMetrics(metrics *downstreamQualityMetrics) {
+	metrics.TimeToFailureSeconds = summarizeOutcomeDistribution(metrics.timeToFailureSecondsObservations)
+	metrics.TimeToRecoverySeconds = summarizeOutcomeDistribution(metrics.timeToRecoverySecondsObservations)
+}
+
 func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncrement codexTokenUsage, operations []string) {
 	if episode.StartedAt.IsZero() || event.OccurredAt.Before(episode.StartedAt) {
 		episode.StartedAt = event.OccurredAt
@@ -665,6 +1096,10 @@ func (episode *codexTaskEpisode) observePhase(
 		if event.Failed && !event.OperationContinues {
 			metrics.FailedCalls++
 		}
+		if event.Failed && !event.OperationContinues && episode.delivered &&
+			len(downstreamCheckIDs(event, operations)) > 0 {
+			episode.reworkActive = true
+		}
 		if !event.Failed && !event.OperationContinues && deliveryOperation(event, operations) {
 			episode.delivered = true
 			episode.reworkActive = false
@@ -681,6 +1116,9 @@ func (episode *codexTaskEpisode) phaseForToolCall(
 ) string {
 	if deliveryOperation(event, operations) {
 		return "delivery"
+	}
+	if episode.delivered && revertOperation(event) {
+		episode.reworkActive = true
 	}
 	if episode.delivered && reviewStart(event, operations) {
 		episode.reworkActive = true
@@ -707,7 +1145,7 @@ func (episode codexTaskEpisode) phaseForToolOutput(
 	if deliveryOperation(event, operations) {
 		return "delivery"
 	}
-	if episode.reworkActive {
+	if episode.reworkActive || episode.delivered && revertOperation(event) {
 		return "rework"
 	}
 	if verificationOperation(event, operations) {
@@ -993,13 +1431,90 @@ func analyzeTaskCostTailDrivers(episodes []codexTaskEpisode) taskCostTailDrivers
 	drivers.OwnedOperations = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
 		return episode.OwnedOperations
 	})
-	drivers.Targets = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
-		return episode.Targets
-	})
 	drivers.TargetCohorts = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
 		return episode.TargetCohorts
 	})
+	drivers.Targets = taskCostTailTargetContributors(tail, ordinary, drivers.TargetCohorts)
 	return drivers
+}
+
+func taskCostTailTargetContributors(
+	tail,
+	ordinary []codexTaskEpisode,
+	cohorts []taskCostTailDriver,
+) []taskCostTailDriver {
+	allowedCohorts := map[string]struct{}{}
+	for _, cohort := range cohorts {
+		allowedCohorts[cohort.Name] = struct{}{}
+	}
+	if len(allowedCohorts) == 0 {
+		return nil
+	}
+	type counts struct {
+		tailEpisodes     int
+		ordinaryEpisodes int
+		tailCalls        int
+		ordinaryCalls    int
+	}
+	byName := map[string]counts{}
+	collect := func(episodes []codexTaskEpisode, tailCohort bool) {
+		for _, episode := range episodes {
+			seen := map[string]struct{}{}
+			for target, calls := range episode.Targets {
+				if _, allowed := allowedCohorts[deliveryTargetCohort(target)]; !allowed {
+					continue
+				}
+				name := deliveryTargetLabel(target)
+				current := byName[name]
+				if tailCohort {
+					current.tailCalls += calls
+					if _, exists := seen[name]; !exists {
+						current.tailEpisodes++
+					}
+				} else {
+					current.ordinaryCalls += calls
+					if _, exists := seen[name]; !exists {
+						current.ordinaryEpisodes++
+					}
+				}
+				seen[name] = struct{}{}
+				byName[name] = current
+			}
+		}
+	}
+	collect(tail, true)
+	collect(ordinary, false)
+
+	var targets []taskCostTailDriver
+	for name, current := range byName {
+		if current.tailEpisodes < 2 {
+			continue
+		}
+		tailRate := ratio(float64(current.tailEpisodes), float64(len(tail)))
+		ordinaryRate := ratio(float64(current.ordinaryEpisodes), float64(len(ordinary)))
+		targets = append(targets, taskCostTailDriver{
+			Name:             name,
+			TailEpisodes:     current.tailEpisodes,
+			OrdinaryEpisodes: current.ordinaryEpisodes,
+			TailCalls:        current.tailCalls,
+			OrdinaryCalls:    current.ordinaryCalls,
+			PrevalenceDelta:  tailRate - ordinaryRate,
+			PrevalenceLift:   tailRate / math.Max(ordinaryRate, 1/float64(max(1, len(ordinary)))),
+		})
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].TailEpisodes != targets[j].TailEpisodes {
+			return targets[i].TailEpisodes > targets[j].TailEpisodes
+		}
+		if targets[i].TailCalls != targets[j].TailCalls {
+			return targets[i].TailCalls > targets[j].TailCalls
+		}
+		return targets[i].Name < targets[j].Name
+	})
+	if len(targets) > 3 {
+		targets = targets[:3]
+	}
+	return targets
 }
 
 func taskCostTailDimension(
@@ -1211,11 +1726,23 @@ func formatTaskPhaseTailAssociations(associations []taskPhaseTailAssociation, li
 
 func formatTaskCostTailDrivers(drivers taskCostTailDrivers) string {
 	var parts []string
+	if len(drivers.Targets) > 0 {
+		rendered := make([]string, 0, len(drivers.Targets))
+		for _, target := range drivers.Targets {
+			rendered = append(rendered, fmt.Sprintf(
+				"%s %s calls across %s tail episodes (%s ordinary episodes)",
+				target.Name,
+				formatCodexCount(int64(target.TailCalls)),
+				formatCodexCount(int64(target.TailEpisodes)),
+				formatCodexCount(int64(target.OrdinaryEpisodes)),
+			))
+		}
+		parts = append(parts, "cohort targets "+strings.Join(rendered, ", "))
+	}
 	for _, dimension := range []struct {
 		label   string
 		drivers []taskCostTailDriver
 	}{
-		{label: "targets", drivers: drivers.Targets},
 		{label: "cohorts", drivers: drivers.TargetCohorts},
 		{label: "operations", drivers: drivers.OwnedOperations},
 		{label: "families", drivers: drivers.Families},
@@ -1248,7 +1775,6 @@ func dominantTaskCostTailDriver(drivers taskCostTailDrivers) (kind string, drive
 		drivers []taskCostTailDriver
 	}{
 		{kind: "operation", drivers: drivers.OwnedOperations},
-		{kind: "target", drivers: drivers.Targets},
 		{kind: "cohort", drivers: drivers.TargetCohorts},
 		{kind: "family", drivers: drivers.Families},
 	} {
