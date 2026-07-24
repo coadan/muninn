@@ -122,6 +122,44 @@ func TestSessionStoreSavesPrivacySafeCheckpoint(t *testing.T) {
 	}
 }
 
+func TestSessionStoreMigrationReindexesCanonicalRepositoryTargets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "muninn.db")
+	store, err := openSessionStore(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO sources(provider, source_path, size_bytes, mtime_ns, indexed_at_ns)
+		VALUES('codex', '/private/session.jsonl', 1, 1, 1)`); err != nil {
+		t.Fatalf("insert stale source: %v", err)
+	}
+	if _, err := store.db.Exec(`UPDATE metadata SET value = '5' WHERE key = 'schema_version'`); err != nil {
+		t.Fatalf("set old schema version: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close old store: %v", err)
+	}
+
+	migrated, err := openSessionStore(path)
+	if err != nil {
+		t.Fatalf("reopen migrated store: %v", err)
+	}
+	defer migrated.Close()
+	var sources int
+	if err := migrated.db.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&sources); err != nil {
+		t.Fatalf("count sources: %v", err)
+	}
+	if sources != 0 {
+		t.Fatalf("expected stale target index to be invalidated, got %d sources", sources)
+	}
+	var version string
+	if err := migrated.db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
+		t.Fatalf("read schema version: %v", err)
+	}
+	if version != "6" {
+		t.Fatalf("expected schema version 6, got %q", version)
+	}
+}
+
 func containsAny(value string, candidates ...string) bool {
 	for _, candidate := range candidates {
 		if candidate != "" && strings.Contains(value, candidate) {

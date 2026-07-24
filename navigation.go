@@ -73,9 +73,27 @@ func normalizeRepositoryTargets(candidates []string, cwd, repositoryRoot string)
 		if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
 			continue
 		}
-		targets = appendUniqueString(targets, filepath.ToSlash(relative))
+		targets = appendUniqueString(targets, canonicalRepositoryTarget(repositoryRoot, relative))
 	}
 	return targets
+}
+
+func canonicalRepositoryTarget(repositoryRoot, relative string) string {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(relative)), "/")
+	repo := ""
+	remainder := []string(nil)
+	switch {
+	case len(parts) >= 4 && parts[0] == ".worktrees":
+		repo = parts[2]
+		remainder = parts[3:]
+	case len(parts) >= 5 && parts[0] == ".workbench" && parts[1] == "worktrees":
+		repo = parts[3]
+		remainder = parts[4:]
+	}
+	if repo != "" && dirExists(filepath.Join(repositoryRoot, ".workbench", "repos", repo)) {
+		return strings.Join(append([]string{".workbench", "repos", repo}, remainder...), "/")
+	}
+	return strings.Join(parts, "/")
 }
 
 func codexInlineOrchestrationBytes(toolName, arguments, input string) int64 {
