@@ -1132,6 +1132,9 @@ func (episode *codexTaskEpisode) phaseForToolCall(
 	if episode.reworkActive {
 		return "rework"
 	}
+	if delegationOperation(event) {
+		return "delegation"
+	}
 	if event.ToolName == "apply_patch" {
 		return "editing"
 	}
@@ -1153,6 +1156,9 @@ func (episode codexTaskEpisode) phaseForToolOutput(
 	}
 	if episode.reworkActive || episode.delivered && revertOperation(event) {
 		return "rework"
+	}
+	if delegationOperation(event) {
+		return "delegation"
 	}
 	if verificationOperation(event, operations) {
 		return "verification"
@@ -1178,6 +1184,10 @@ func verificationOperation(event normalizedSessionEvent, operations []string) bo
 		}
 	}
 	return false
+}
+
+func delegationOperation(event normalizedSessionEvent) bool {
+	return delegationToolName(event.ToolName)
 }
 
 func discoveryOperation(event normalizedSessionEvent, operations []string) bool {
@@ -1690,7 +1700,7 @@ func printCompletionEpisodeAnalysis(analysis completionEpisodeAnalysis) {
 }
 
 func formatTaskPhaseAnalysis(phases map[string]taskPhaseAnalysis) string {
-	order := []string{"discovery", "editing", "verification", "delivery", "rework"}
+	order := []string{"discovery", "editing", "verification", "delivery", "rework", "delegation"}
 	var parts []string
 	for _, phase := range order {
 		metrics, ok := phases[phase]

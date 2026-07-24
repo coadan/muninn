@@ -1,0 +1,158 @@
+package main
+
+import (
+	"testing"
+	"time"
+)
+
+func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
+	at := func(second int) time.Time { return time.Unix(int64(second), 0) }
+	completedEpisode := func(start, end int, fresh int64) codexTaskEpisode {
+		return codexTaskEpisode{
+			StartedAt: at(start),
+			EndedAt:   at(end),
+			Completed: true,
+			ToolCalls: 2,
+			Tokens: codexTokenUsage{
+				UncachedInputTokens: fresh,
+			},
+		}
+	}
+	records := []codexSessionRecord{
+		{
+			Model:           "gpt-5.6-sol",
+			ReasoningEffort: "xhigh",
+			AgentKind:       "root",
+			LineageKey:      "parent",
+			StartedAt:       at(0),
+			EndedAt:         at(40),
+			Completed:       true,
+			Tokens:          codexTokenUsage{UncachedInputTokens: 100, OutputTokens: 20},
+			ToolCalls:       8,
+			ToolCallsByName: map[string]int{"spawn_agent": 2, "wait_agent": 2},
+			EditTargets:     map[string]int{"src/shared.go": 1},
+			ReadTargets:     map[string]codexTargetMetrics{"src/owner.go": {Reads: 1}},
+			TaskEpisodes: []codexTaskEpisode{{
+				StartedAt: at(0),
+				EndedAt:   at(40),
+				Completed: true,
+				ToolCalls: 8,
+				Phases: map[string]taskPhaseCost{
+					"delegation": {
+						Tokens:          codexTokenUsage{UncachedInputTokens: 10, OutputTokens: 5},
+						ToolCalls:       4,
+						ToolOutputBytes: 400,
+					},
+				},
+			}},
+		},
+		{
+			Model:            "gpt-5.6-luna",
+			ReasoningEffort:  "max",
+			AgentKind:        "subagent",
+			LineageKey:       "child-1",
+			ParentLineageKey: "parent",
+			SpawnStatus:      "completed",
+			StartedAt:        at(10),
+			EndedAt:          at(30),
+			Completed:        true,
+			Tokens:           codexTokenUsage{UncachedInputTokens: 70, OutputTokens: 10},
+			ToolCalls:        4,
+			EditTargets:      map[string]int{"src/shared.go": 1, "src/child.go": 1},
+			ReadTargets:      map[string]codexTargetMetrics{"src/owner.go": {Reads: 1}},
+			TaskEpisodes:     []codexTaskEpisode{completedEpisode(10, 30, 80)},
+		},
+		{
+			Model:            "gpt-5.6-luna",
+			ReasoningEffort:  "max",
+			AgentKind:        "subagent",
+			LineageKey:       "child-2",
+			ParentLineageKey: "parent",
+			StartedAt:        at(15),
+			EndedAt:          at(25),
+			Tokens:           codexTokenUsage{UncachedInputTokens: 45, OutputTokens: 5},
+			ToolCalls:        2,
+			TaskEpisodes:     []codexTaskEpisode{completedEpisode(15, 25, 50)},
+		},
+	}
+
+	profiles := analyzeModelEffortProfiles(records)
+	if !profiles.Available || len(profiles.Profiles) != 2 {
+		t.Fatalf("model profiles mismatch: %#v", profiles)
+	}
+	var luna modelEffortProfile
+	for _, profile := range profiles.Profiles {
+		if profile.Model == "gpt-5.6-luna" {
+			luna = profile
+		}
+	}
+	if luna.Sessions != 2 || luna.CompletedToolTasks != 2 ||
+		luna.FreshTokens != 130 || luna.CompletedTaskFreshTokens != 130 ||
+		luna.FreshTokensPerCompletedTask != 65 ||
+		luna.CompletedTaskDurationSeconds.P50 != 10 {
+		t.Fatalf("luna profile mismatch: %#v", luna)
+	}
+
+	delegation := analyzeDelegation(records)
+	if !delegation.Available || delegation.SubagentSessions != 2 ||
+		delegation.LinkedSubagents != 2 || delegation.DelegatingParents != 1 ||
+		delegation.CoordinationCalls != 4 || delegation.CoordinationFreshTokens != 15 ||
+		delegation.CoordinationOutputTokens != 100 {
+		t.Fatalf("delegation totals mismatch: %#v", delegation)
+	}
+	if delegation.ChildrenWithUniqueEdits != 1 ||
+		delegation.ChildrenWithEditOverlap != 1 ||
+		delegation.EditOverlapTargets != 1 ||
+		delegation.ChildrenWithReadOverlap != 1 ||
+		delegation.NoObservableContributionSubagents != 1 ||
+		delegation.NoObservableContributionFreshTokens != 50 {
+		t.Fatalf("delegation attribution mismatch: %#v", delegation)
+	}
+	if delegation.SummedSubagentDurationSeconds != 30 ||
+		delegation.DelegatedWallSeconds != 20 ||
+		delegation.SubagentConcurrencyFactor != 1.5 {
+		t.Fatalf("delegation concurrency mismatch: %#v", delegation)
+	}
+}
+
+func TestAnalyzeDelegationDoesNotTreatUnattributedResearchAsWaste(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Delegation = delegationAnalysis{
+		Available:                           true,
+		SubagentSessions:                    8,
+		DelegatingParents:                   2,
+		SubagentFreshTokens:                 800_000,
+		ParentFreshTokens:                   200_000,
+		SubagentFreshTokenShare:             0.8,
+		NoObservableContributionSubagents:   8,
+		NoObservableContributionFreshTokens: 800_000,
+		SubagentConcurrencyFactor:           2,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	for _, finding := range findings {
+		if finding.Category == "delegation-cost" {
+			t.Fatalf("unattributed research alone produced a delegation finding: %#v", finding)
+		}
+	}
+}
+
+func TestBuildSessionFindingsFlagsMaterialDelegationCoordination(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Delegation = delegationAnalysis{
+		Available:                 true,
+		SubagentSessions:          4,
+		DelegatingParents:         2,
+		ParentFreshTokens:         250_000,
+		SubagentFreshTokens:       200_000,
+		SubagentFreshTokenShare:   0.44,
+		CoordinationCalls:         16,
+		CoordinationFreshTokens:   60_000,
+		CoordinationCallsByAction: map[string]int{"wait_agent": 10, "send_message": 6},
+		SubagentConcurrencyFactor: 2,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "delegation-cost" ||
+		findings[0].Lever != "instructions/docs" {
+		t.Fatalf("delegation coordination finding mismatch: %#v", findings)
+	}
+}

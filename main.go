@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 26
+const codexSessionInsightsSchemaVersion = 27
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -177,23 +177,33 @@ type codexSessionInsightsSummary struct {
 }
 
 type codexSessionInsightsReport struct {
-	SchemaVersion int                         `json:"schemaVersion"`
-	Provider      string                      `json:"provider"`
-	GeneratedAt   string                      `json:"generatedAt"`
-	Since         string                      `json:"since"`
-	WorkspaceRoot string                      `json:"-"`
-	SessionDirs   []string                    `json:"-"`
-	Summary       codexSessionInsightsSummary `json:"summary"`
-	Tasks         []codexTaskInsights         `json:"tasks"`
-	Feedback      []agentFeedbackAggregate    `json:"feedback,omitempty"`
-	Findings      []sessionFinding            `json:"findings"`
-	Outcomes      completionEpisodeAnalysis   `json:"outcomes"`
-	taskEpisodes  []codexTaskEpisode
+	SchemaVersion  int                         `json:"schemaVersion"`
+	Provider       string                      `json:"provider"`
+	GeneratedAt    string                      `json:"generatedAt"`
+	Since          string                      `json:"since"`
+	WorkspaceRoot  string                      `json:"-"`
+	SessionDirs    []string                    `json:"-"`
+	Summary        codexSessionInsightsSummary `json:"summary"`
+	Tasks          []codexTaskInsights         `json:"tasks"`
+	Feedback       []agentFeedbackAggregate    `json:"feedback,omitempty"`
+	Findings       []sessionFinding            `json:"findings"`
+	Outcomes       completionEpisodeAnalysis   `json:"outcomes"`
+	Profiles       modelEffortAnalysis         `json:"profiles"`
+	Delegation     delegationAnalysis          `json:"delegation"`
+	taskEpisodes   []codexTaskEpisode
+	sessionRecords []codexSessionRecord
 }
 
 type codexSessionRecord struct {
+	SourcePath                   string
 	CWD                          string
 	Task                         string
+	Model                        string
+	ReasoningEffort              string
+	AgentKind                    string
+	LineageKey                   string
+	ParentLineageKey             string
+	SpawnStatus                  string
 	StartedAt                    time.Time
 	EndedAt                      time.Time
 	Completed                    bool
@@ -213,6 +223,7 @@ type codexSessionRecord struct {
 	OwnedOperationAmbiguous      map[string]codexToolMetrics
 	OwnedOperationFailureReasons map[string]map[string]int
 	ReadTargets                  map[string]codexTargetMetrics
+	EditTargets                  map[string]int
 	InlineOrchestrationCalls     int
 	InlineOrchestrationBytes     int64
 	InlineOrchestrationMaxBytes  int64
@@ -364,7 +375,7 @@ func normalizeSuppressedSignals(signals []string) ([]string, error) {
 type sessionSource interface {
 	Name() string
 	SessionDirs(explicit string, includeArchived bool) ([]string, error)
-	Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog) (codexSessionInsightsReport, error)
+	Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, metadata map[string]normalizedSessionMetadata) (codexSessionInsightsReport, error)
 }
 
 type codexSessionSource struct{}
@@ -388,8 +399,8 @@ func (codexSessionSource) SessionDirs(explicit string, includeArchived bool) ([]
 	return dirs, nil
 }
 
-func (codexSessionSource) Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog) (codexSessionInsightsReport, error) {
-	return analyzeCodexSessionsFilteredWithOwnership(sessionDirs, repoRoot, since, generatedAt, taskFilter, ownership)
+func (codexSessionSource) Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, metadata map[string]normalizedSessionMetadata) (codexSessionInsightsReport, error) {
+	return analyzeCodexSessionsFilteredWithMetadata(sessionDirs, repoRoot, since, generatedAt, taskFilter, ownership, metadata)
 }
 
 func resolveSessionSource(name string) (sessionSource, error) {
@@ -601,6 +612,7 @@ func cmdCodexSessions(root string, args []string) error {
 	if err != nil {
 		return err
 	}
+	sessionMetadata := loadProviderSessionMetadata(source.Name(), sessionDirs)
 	resolvedRepoRoot, err := filepath.Abs(strings.TrimSpace(repoRoot))
 	if err != nil {
 		return fmt.Errorf("resolve --repo: %w", err)
@@ -627,7 +639,7 @@ func cmdCodexSessions(root string, args []string) error {
 	var report codexSessionInsightsReport
 	var store *sessionStore
 	if *noCache {
-		report, err = source.Analyze(sessionDirs, resolvedRepoRoot, since, now, strings.TrimSpace(*taskFilter), ownership)
+		report, err = source.Analyze(sessionDirs, resolvedRepoRoot, since, now, strings.TrimSpace(*taskFilter), ownership, sessionMetadata)
 		if err != nil {
 			return err
 		}
@@ -661,6 +673,7 @@ func cmdCodexSessions(root string, args []string) error {
 			strings.TrimSpace(*taskFilter),
 			ownership,
 			stats,
+			sessionMetadata,
 		)
 		if err != nil {
 			return err
@@ -785,6 +798,10 @@ func analyzeCodexSessionsFiltered(sessionDirs []string, workspaceRoot string, si
 }
 
 func analyzeCodexSessionsFilteredWithOwnership(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog) (codexSessionInsightsReport, error) {
+	return analyzeCodexSessionsFilteredWithMetadata(sessionDirs, workspaceRoot, since, generatedAt, taskFilter, ownership, nil)
+}
+
+func analyzeCodexSessionsFilteredWithMetadata(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, metadata map[string]normalizedSessionMetadata) (codexSessionInsightsReport, error) {
 	report := newSessionInsightsReport("codex", sessionDirs, workspaceRoot, since, generatedAt)
 	taskMap := map[string]*codexTaskInsights{}
 	for _, sessionDir := range sessionDirs {
@@ -797,7 +814,13 @@ func analyzeCodexSessionsFilteredWithOwnership(sessionDirs []string, workspaceRo
 				return nil
 			}
 			report.Summary.FilesScanned++
-			record, err := parseCodexSessionWithOwnership(path, workspaceRoot, since, generatedAt, ownership)
+			session, err := parseCodexNormalizedSession(path)
+			if err != nil {
+				report.Summary.FilesUnreadable++
+				return nil
+			}
+			enrichNormalizedSession(&session, metadata)
+			record, err := sessionRecordFromNormalized(session, workspaceRoot, since, generatedAt, ownership)
 			if err != nil {
 				report.Summary.FilesUnreadable++
 				return nil
@@ -863,6 +886,8 @@ func finishSessionInsightsReport(report *codexSessionInsightsReport, taskMap map
 		return report.Tasks[i].Task < report.Tasks[j].Task
 	})
 	report.Outcomes = analyzeCompletionEpisodes(report.taskEpisodes)
+	report.Profiles = analyzeModelEffortProfiles(report.sessionRecords)
+	report.Delegation = analyzeDelegation(report.sessionRecords)
 }
 
 func parseCodexSession(path, workspaceRoot string, since, generatedAt time.Time) (codexSessionRecord, error) {
@@ -1697,6 +1722,7 @@ func addCodexFailureContext(contexts map[string]map[string]int, reason, context 
 }
 
 func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[string]*codexTaskInsights, record codexSessionRecord) {
+	report.sessionRecords = append(report.sessionRecords, record)
 	summary := &report.Summary
 	summary.Sessions++
 	if record.Completed {
@@ -1984,6 +2010,8 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		formatCodexCount(summary.ToolOutputTokens),
 	)
 	printCompletionEpisodeAnalysis(report.Outcomes)
+	printModelEffortAnalysis(report.Profiles)
+	printDelegationAnalysis(report.Delegation)
 	printDeliveryReworkAnalysis(summary.DeliveryRework)
 	printDownstreamQualityAnalysis(summary.DownstreamQuality)
 	if summary.FilesUnreadable > 0 {

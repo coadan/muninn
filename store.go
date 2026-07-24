@@ -462,7 +462,7 @@ func boolInt(value bool) int {
 	return 0
 }
 
-func (store *sessionStore) analyze(ctx context.Context, provider string, sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, stats sessionRefreshStats) (codexSessionInsightsReport, error) {
+func (store *sessionStore) analyze(ctx context.Context, provider string, sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, stats sessionRefreshStats, metadata ...map[string]normalizedSessionMetadata) (codexSessionInsightsReport, error) {
 	report := newSessionInsightsReport(provider, sessionDirs, workspaceRoot, since, generatedAt)
 	report.Summary.FilesScanned = stats.FilesScanned
 	report.Summary.FilesUnreadable = stats.FilesUnreadable
@@ -585,7 +585,11 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 	sort.Slice(sessionOrder, func(i, j int) bool { return sessionOrder[i] < sessionOrder[j] })
 	taskMap := map[string]*codexTaskInsights{}
 	for _, sessionID := range sessionOrder {
-		record, err := sessionRecordFromNormalized(*sessions[sessionID], workspaceRoot, since, generatedAt, ownership)
+		session := sessions[sessionID]
+		if len(metadata) > 0 {
+			enrichNormalizedSession(session, metadata[0])
+		}
+		record, err := sessionRecordFromNormalized(*session, workspaceRoot, since, generatedAt, ownership)
 		if err != nil || record.CWD == "" || record.StartedAt.IsZero() {
 			continue
 		}

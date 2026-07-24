@@ -141,6 +141,28 @@ func TestTaskPhaseSequencingTracksDeliveryAndRework(t *testing.T) {
 	}
 }
 
+func TestTaskPhaseSequencingTracksDelegation(t *testing.T) {
+	episode := codexTaskEpisode{}
+	episode.observe(normalizedSessionEvent{
+		Kind:       sessionEventToolCall,
+		ToolName:   "spawn_agent",
+		OccurredAt: time.Unix(0, 0),
+	}, codexTokenUsage{}, nil)
+	episode.observe(normalizedSessionEvent{
+		Kind:       sessionEventToken,
+		OccurredAt: time.Unix(2, 0),
+		Tokens: codexTokenUsage{
+			UncachedInputTokens: 20,
+			OutputTokens:        5,
+		},
+	}, codexTokenUsage{UncachedInputTokens: 20, OutputTokens: 5}, nil)
+	phase := episode.Phases["delegation"]
+	if phase.ToolCalls != 1 || phaseFreshTokens(phase) != 25 ||
+		phase.DurationSeconds != 2 {
+		t.Fatalf("delegation phase mismatch: %#v", phase)
+	}
+}
+
 func TestTaskPhaseKeepsNewPostDeliveryWorkOutOfDownstreamRework(t *testing.T) {
 	episode := codexTaskEpisode{}
 	at := func(second int) time.Time { return time.Unix(int64(second), 0) }
