@@ -58,9 +58,12 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		if metrics.Sessions < 2 {
 			continue
 		}
-		actionableFailures, expectedFailures := ownedOperationFailureCounts(summary.OwnedOperationFailureReasons[operation])
-		if actionableFailures < 2 && metrics.TruncatedCalls < 3 &&
-			metrics.EstimatedOutputTokens < 10_000 && metrics.Calls < 20 {
+		reasons := summary.OwnedOperationFailureReasons[operation]
+		actionableFailures, expectedFailures := ownedOperationFailureCounts(operation, reasons)
+		outputThreshold := max(int64(25_000), summary.ToolOutputTokens/100)
+		outputHeavy := metrics.EstimatedOutputTokens >= outputThreshold &&
+			ratio(float64(metrics.EstimatedOutputTokens), float64(metrics.Calls)) >= 500
+		if actionableFailures < 2 && metrics.TruncatedCalls < 3 && !outputHeavy {
 			continue
 		}
 		toolID, _, _ := strings.Cut(operation, "/")
@@ -84,8 +87,8 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			formatCodexCount(metrics.EstimatedOutputTokens),
 			formatCodexCount(metrics.EstimatedAmbiguousOutputTokens),
 		)
-		if reasons := formatOwnedOperationActionableReasons(summary.OwnedOperationFailureReasons[operation]); reasons != "" {
-			evidence += "; actionable reasons: " + reasons
+		if formatted := formatOwnedOperationActionableReasons(operation, reasons); formatted != "" {
+			evidence += "; actionable reasons: " + formatted
 		}
 		findings = append(findings, sessionFinding{
 			Category: "owned-operation",
@@ -1124,19 +1127,26 @@ func inlineToolEvidence(metrics map[string]codexInlineMetrics) string {
 	return strings.Join(parts, ", ")
 }
 
-func ownedOperationFailureCounts(reasons map[string]codexOccurrenceMetrics) (actionable int, expected int) {
+func ownedOperationFailureCounts(operation string, reasons map[string]codexOccurrenceMetrics) (actionable int, expected int) {
 	for reason, metrics := range reasons {
-		switch reason {
-		case "test failure", "search no match":
+		if ownedOperationExpectedFailure(operation, reason) {
 			expected += metrics.Count
-		default:
+		} else {
 			actionable += metrics.Count
 		}
 	}
 	return actionable, expected
 }
 
-func formatOwnedOperationActionableReasons(reasons map[string]codexOccurrenceMetrics) string {
+func ownedOperationExpectedFailure(operation, reason string) bool {
+	if reason == "test failure" || reason == "search no match" {
+		return true
+	}
+	name := strings.ToLower(operation[strings.LastIndex(operation, "/")+1:])
+	return reason == "other non-zero exit" && downstreamCheckName(name)
+}
+
+func formatOwnedOperationActionableReasons(operation string, reasons map[string]codexOccurrenceMetrics) string {
 	type row struct {
 		reason   string
 		count    int
@@ -1144,7 +1154,7 @@ func formatOwnedOperationActionableReasons(reasons map[string]codexOccurrenceMet
 	}
 	rows := make([]row, 0, len(reasons))
 	for reason, metrics := range reasons {
-		if reason == "test failure" || reason == "search no match" || metrics.Count <= 0 {
+		if ownedOperationExpectedFailure(operation, reason) || metrics.Count <= 0 {
 			continue
 		}
 		rows = append(rows, row{

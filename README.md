@@ -191,6 +191,10 @@ configured operations remain attributable without claiming every invocation of
 the launcher as owned tooling.
 When an outer tool call bundles several commands, output and failures are
 reported as ambiguous instead of being charged to every matched operation.
+Owned-operation findings require recurring actionable failures, truncation, or
+material absolute and per-call output; frequent successful use alone is demand,
+not friction. Generic test/build/check/verify nonzero exits remain product
+evidence unless a more specific tooling failure reason is observed.
 Use `--refresh` after changing operation patterns so cached source events are
 reclassified.
 Findings that do not map to an owned tool can instead recommend repository

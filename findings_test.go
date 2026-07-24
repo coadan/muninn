@@ -69,13 +69,13 @@ func TestBuildSessionFindingsFlagsOneVeryLongInlineToolCall(t *testing.T) {
 
 func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
-	report.Summary.OwnedOperations["bwb/test"] = codexOwnedOperationMetrics{
+	report.Summary.OwnedOperations["bwb/run"] = codexOwnedOperationMetrics{
 		Calls:       30,
 		Sessions:    4,
 		FailedCalls: 19,
 		OutputBytes: 8_000,
 	}
-	report.Summary.OwnedOperationFailureReasons["bwb/test"] = map[string]codexOccurrenceMetrics{
+	report.Summary.OwnedOperationFailureReasons["bwb/run"] = map[string]codexOccurrenceMetrics{
 		"timeout":                 {Count: 5, Sessions: 4},
 		"other non-zero exit":     {Count: 4, Sessions: 3},
 		"missing path or fixture": {Count: 3, Sessions: 1},
@@ -98,6 +98,45 @@ func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing
 	}
 	if strings.Contains(evidence, "port collision") || strings.Contains(evidence, "test failure 5") {
 		t.Fatalf("evidence should contain only the top three actionable reasons: %q", evidence)
+	}
+}
+
+func TestBuildSessionFindingsDoesNotConfuseOperationDemandWithFriction(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.ToolOutputTokens = 2_000_000
+	report.Summary.OwnedOperations["repo/publish"] = codexOwnedOperationMetrics{
+		Calls:                 80,
+		Sessions:              4,
+		EstimatedOutputTokens: 8_000,
+	}
+	report.Summary.OwnedOperations["repo/verify"] = codexOwnedOperationMetrics{
+		Calls:                 40,
+		Sessions:              3,
+		FailedCalls:           6,
+		EstimatedOutputTokens: 12_000,
+	}
+	report.Summary.OwnedOperationFailureReasons["repo/verify"] = map[string]codexOccurrenceMetrics{
+		"other non-zero exit": {Count: 6, Sessions: 3},
+	}
+
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("ordinary demand or expected verification failures became friction: %#v", findings)
+	}
+}
+
+func TestBuildSessionFindingsFlagsMaterialOwnedOperationOutput(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.ToolOutputTokens = 2_000_000
+	report.Summary.OwnedOperations["repo/inspect"] = codexOwnedOperationMetrics{
+		Calls:                 30,
+		Sessions:              3,
+		EstimatedOutputTokens: 30_000,
+	}
+
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Target != "repo/inspect" ||
+		!strings.Contains(findings[0].Title, "high-cost") {
+		t.Fatalf("material operation output finding mismatch: %#v", findings)
 	}
 }
 
