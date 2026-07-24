@@ -21,23 +21,26 @@ type normalizedSession struct {
 }
 
 type normalizedSessionEvent struct {
-	Sequence        int
-	OccurredAt      time.Time
-	Kind            string
-	ToolName        string
-	Family          string
-	Shape           string
-	FirstFamily     string
-	LastFamily      string
-	ToolRound       int
-	CallOccurredAt  time.Time
-	Failed          bool
-	Truncated       bool
-	OutputBytes     int64
-	FailureReason   string
-	FailureContext  string
-	Tokens          codexTokenUsage
-	SelectorDigests []string
+	Sequence         int
+	OccurredAt       time.Time
+	Kind             string
+	ToolName         string
+	Family           string
+	Shape            string
+	FirstFamily      string
+	LastFamily       string
+	ToolRound        int
+	CallOccurredAt   time.Time
+	Failed           bool
+	Truncated        bool
+	OutputBytes      int64
+	FailureReason    string
+	FailureContext   string
+	Tokens           codexTokenUsage
+	SelectorDigests  []string
+	TargetCandidates []string
+	Targets          []string
+	InlineBytes      int64
 }
 
 func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string, since, generatedAt time.Time, ownership ownershipCatalog) (codexSessionRecord, error) {
@@ -75,6 +78,10 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 		case sessionEventToolCall:
 			record.ToolCalls++
+			if event.InlineBytes > 0 {
+				record.InlineOrchestrationCalls++
+				record.InlineOrchestrationBytes += event.InlineBytes
+			}
 			record.ToolCallsByName[event.ToolName]++
 			addCodexToolMetrics(record.ToolMetricsByName, event.ToolName, 1, false, false, 0)
 			if event.Family != "" {
@@ -85,6 +92,18 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 1, false, false, 0)
+			}
+			targets := event.Targets
+			if len(targets) == 0 {
+				targets = normalizeRepositoryTargets(event.TargetCandidates, session.CWD, workspaceRoot)
+			}
+			for _, target := range targets {
+				metrics := record.ReadTargets[target]
+				metrics.Reads++
+				if previousCommand.LastFamily == "search" && previousCommandRound == event.ToolRound-1 {
+					metrics.SearchReadLoops++
+				}
+				record.ReadTargets[target] = metrics
 			}
 			if event.FirstFamily != "" {
 				if previousCommand.LastFamily != "" && previousCommandRound == event.ToolRound-1 {
@@ -137,6 +156,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		MixedShellShapes:      map[string]codexToolMetrics{},
 		CrossCallTransitions:  map[string]int{},
 		OwnedTooling:          map[string]codexToolMetrics{},
+		ReadTargets:           map[string]codexTargetMetrics{},
 		FailureReasons:        map[string]int{},
 		FailureContexts:       map[string]map[string]int{},
 	}

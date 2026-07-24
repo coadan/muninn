@@ -1,0 +1,52 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestBuildSessionFindingsUsesCurrentRepoRelativeSourceState(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "src", "large-owner.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	if err := os.WriteFile(target, []byte(strings.Repeat("x", 16*1024)), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
+	report.Summary.ReadTargets["src/large-owner.go"] = codexTargetMetrics{
+		Reads:           12,
+		SearchReadLoops: 4,
+		Sessions:        3,
+	}
+	report.Summary.ReadTargets["src/no-longer-exists.go"] = codexTargetMetrics{
+		Reads:           40,
+		SearchReadLoops: 20,
+		Sessions:        8,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "code-structure" || findings[0].Target != "src/large-owner.go" {
+		t.Fatalf("current-state source finding mismatch: %#v", findings)
+	}
+}
+
+func TestCodexInlineOrchestrationExcludesEdits(t *testing.T) {
+	large := strings.Repeat("x", 5000)
+	if got := codexInlineOrchestrationBytes("exec", "", large); got != int64(len(large)) {
+		t.Fatalf("large exec input not classified: %d", got)
+	}
+	if got := codexInlineOrchestrationBytes("apply_patch", "", large); got != 0 {
+		t.Fatalf("large edit was misclassified as inline orchestration: %d", got)
+	}
+	if got := codexInlineOrchestrationBytes("exec_command", `{"cmd":"go test ./..."}`, ""); got != 0 {
+		t.Fatalf("small shell command was misclassified: %d", got)
+	}
+}
+
+func zeroTime() time.Time {
+	return time.Time{}
+}

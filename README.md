@@ -39,17 +39,25 @@ muninn analyze --repo . --since 14d --include-archived
 muninn analyze --repo . --json
 muninn analyze --repo . --checkpoint before-tooling-change
 muninn analyze --repo . --compare before-tooling-change
+muninn analyze --repo . --overview
+muninn analyze --repo . --details
 ```
 
 `muninn sessions` is a compatibility alias for `muninn analyze`.
 
-The default human report highlights:
+The default human report is findings-first. Use `--overview` for compact
+family totals and `--details` for command, transition, source-target, failure,
+and output rankings.
+
+Muninn highlights:
 
 - fresh-token and visible tool-output volume
 - privacy-safe tool and command-family attribution
 - mixed commands bundled into one outer tool call
 - substantive command-family transitions across separate tool calls
 - fixed failure reasons and their privacy-safe command context
+- repeated safe repository-relative read targets and current file size
+- large inline orchestration payloads without retaining their content
 
 Muninn includes recent tool events from sessions that started before the
 lookback boundary. This avoids losing active work simply because a session is
