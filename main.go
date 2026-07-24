@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -39,25 +40,25 @@ type codexTokenUsage struct {
 }
 
 type codexTaskInsights struct {
-	Task                  string                            `json:"task"`
-	Sessions              int                               `json:"sessions"`
-	CompletedSessions     int                               `json:"completedSessions"`
-	IncompleteSessions    int                               `json:"incompleteSessions"`
-	DurationSeconds       int64                             `json:"durationSeconds"`
-	Compactions           int                               `json:"compactions"`
-	Tokens                codexTokenUsage                   `json:"tokens"`
-	FreshTokens           int64                             `json:"freshTokens"`
-	ToolCalls             int                               `json:"toolCalls"`
-	FailedToolCalls       int                               `json:"failedToolCalls"`
-	TruncatedToolCalls    int                               `json:"truncatedToolCalls"`
-	ToolOutputBytes       int64                             `json:"toolOutputBytes"`
-	ToolOutputTokens      int64                             `json:"toolOutputTokens"`
-	ShellCommandsByFamily map[string]codexToolMetrics       `json:"shellCommandsByFamily"`
-	MixedShellShapes      map[string]codexToolMetrics       `json:"mixedShellShapes"`
-	CrossCallTransitions  map[string]codexTransitionMetrics `json:"crossCallTransitions"`
-	OwnedTooling          map[string]codexToolMetrics       `json:"ownedTooling"`
-	FailureReasons        map[string]int                    `json:"failureReasons"`
-	FailureContexts       map[string]map[string]int         `json:"failureContexts"`
+	Task                  string                                       `json:"task"`
+	Sessions              int                                          `json:"sessions"`
+	CompletedSessions     int                                          `json:"completedSessions"`
+	IncompleteSessions    int                                          `json:"incompleteSessions"`
+	DurationSeconds       int64                                        `json:"durationSeconds"`
+	Compactions           int                                          `json:"compactions"`
+	Tokens                codexTokenUsage                              `json:"tokens"`
+	FreshTokens           int64                                        `json:"freshTokens"`
+	ToolCalls             int                                          `json:"toolCalls"`
+	FailedToolCalls       int                                          `json:"failedToolCalls"`
+	TruncatedToolCalls    int                                          `json:"truncatedToolCalls"`
+	ToolOutputBytes       int64                                        `json:"toolOutputBytes"`
+	ToolOutputTokens      int64                                        `json:"toolOutputTokens"`
+	ShellCommandsByFamily map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
+	MixedShellShapes      map[string]codexToolMetrics                  `json:"mixedShellShapes"`
+	CrossCallTransitions  map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
+	OwnedTooling          map[string]codexToolMetrics                  `json:"ownedTooling"`
+	FailureReasons        map[string]int                               `json:"failureReasons"`
+	FailureContexts       map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 }
 
 type codexToolMetrics struct {
@@ -73,29 +74,34 @@ type codexTransitionMetrics struct {
 	Sessions int `json:"sessions"`
 }
 
+type codexOccurrenceMetrics struct {
+	Count    int `json:"count"`
+	Sessions int `json:"sessions"`
+}
+
 type codexSessionInsightsSummary struct {
-	FilesScanned          int                               `json:"filesScanned"`
-	FilesUnreadable       int                               `json:"filesUnreadable"`
-	Sessions              int                               `json:"sessions"`
-	CompletedSessions     int                               `json:"completedSessions"`
-	IncompleteSessions    int                               `json:"incompleteSessions"`
-	DurationSeconds       int64                             `json:"durationSeconds"`
-	Compactions           int                               `json:"compactions"`
-	Tokens                codexTokenUsage                   `json:"tokens"`
-	FreshTokens           int64                             `json:"freshTokens"`
-	ToolCalls             int                               `json:"toolCalls"`
-	FailedToolCalls       int                               `json:"failedToolCalls"`
-	TruncatedToolCalls    int                               `json:"truncatedToolCalls"`
-	ToolOutputBytes       int64                             `json:"toolOutputBytes"`
-	ToolOutputTokens      int64                             `json:"toolOutputTokens"`
-	ToolCallsByName       map[string]int                    `json:"toolCallsByName"`
-	ToolMetricsByName     map[string]codexToolMetrics       `json:"toolMetricsByName"`
-	ShellCommandsByFamily map[string]codexToolMetrics       `json:"shellCommandsByFamily"`
-	MixedShellShapes      map[string]codexToolMetrics       `json:"mixedShellShapes"`
-	CrossCallTransitions  map[string]codexTransitionMetrics `json:"crossCallTransitions"`
-	OwnedTooling          map[string]codexToolMetrics       `json:"ownedTooling"`
-	FailureReasons        map[string]int                    `json:"failureReasons"`
-	FailureContexts       map[string]map[string]int         `json:"failureContexts"`
+	FilesScanned          int                                          `json:"filesScanned"`
+	FilesUnreadable       int                                          `json:"filesUnreadable"`
+	Sessions              int                                          `json:"sessions"`
+	CompletedSessions     int                                          `json:"completedSessions"`
+	IncompleteSessions    int                                          `json:"incompleteSessions"`
+	DurationSeconds       int64                                        `json:"durationSeconds"`
+	Compactions           int                                          `json:"compactions"`
+	Tokens                codexTokenUsage                              `json:"tokens"`
+	FreshTokens           int64                                        `json:"freshTokens"`
+	ToolCalls             int                                          `json:"toolCalls"`
+	FailedToolCalls       int                                          `json:"failedToolCalls"`
+	TruncatedToolCalls    int                                          `json:"truncatedToolCalls"`
+	ToolOutputBytes       int64                                        `json:"toolOutputBytes"`
+	ToolOutputTokens      int64                                        `json:"toolOutputTokens"`
+	ToolCallsByName       map[string]int                               `json:"toolCallsByName"`
+	ToolMetricsByName     map[string]codexToolMetrics                  `json:"toolMetricsByName"`
+	ShellCommandsByFamily map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
+	MixedShellShapes      map[string]codexToolMetrics                  `json:"mixedShellShapes"`
+	CrossCallTransitions  map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
+	OwnedTooling          map[string]codexToolMetrics                  `json:"ownedTooling"`
+	FailureReasons        map[string]int                               `json:"failureReasons"`
+	FailureContexts       map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 }
 
 type codexSessionInsightsReport struct {
@@ -103,8 +109,8 @@ type codexSessionInsightsReport struct {
 	Provider      string                      `json:"provider"`
 	GeneratedAt   string                      `json:"generatedAt"`
 	Since         string                      `json:"since"`
-	WorkspaceRoot string                      `json:"workspaceRoot"`
-	SessionDirs   []string                    `json:"sessionDirs"`
+	WorkspaceRoot string                      `json:"-"`
+	SessionDirs   []string                    `json:"-"`
 	Summary       codexSessionInsightsSummary `json:"summary"`
 	Tasks         []codexTaskInsights         `json:"tasks"`
 }
@@ -347,6 +353,8 @@ Examples:
   muninn analyze --repo /path/to/repository --since 24h
   muninn analyze --repo . --task my-worktree
   muninn analyze --repo . --since 14d --include-archived
+  muninn analyze --repo . --checkpoint before-tooling-change
+  muninn analyze --repo . --compare before-tooling-change
   muninn analyze --repo . --json
 `)
 }
@@ -363,6 +371,15 @@ func cmdCodexSessions(root string, args []string) error {
 	taskFilter := fs.String("task", "", "only include sessions attributed to this exact worktree/task ID")
 	configPath := fs.String("config", "", "repository config path (default: <repo>/.muninn.json when present)")
 	includeArchived := fs.Bool("include-archived", false, "also scan the sibling archived_sessions directory")
+	defaultStorePath, err := defaultSessionStorePath()
+	if err != nil {
+		return err
+	}
+	storePath := fs.String("db", defaultStorePath, "local privacy-safe SQLite index path")
+	noCache := fs.Bool("no-cache", false, "scan provider files directly without the SQLite index")
+	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
+	checkpointName := fs.String("checkpoint", "", "save this analysis as a named trend checkpoint")
+	compareName := fs.String("compare", "", "compare this analysis with a named checkpoint")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(
@@ -386,6 +403,12 @@ func cmdCodexSessions(root string, args []string) error {
 	if *limit < 0 {
 		return errors.New("--limit must be 0 or greater")
 	}
+	if *noCache && (*forceRefresh || strings.TrimSpace(*checkpointName) != "" || strings.TrimSpace(*compareName) != "") {
+		return errors.New("--no-cache cannot be combined with --refresh, --checkpoint, or --compare")
+	}
+	if *jsonOutput && strings.TrimSpace(*compareName) != "" {
+		return errors.New("--compare currently requires human output")
+	}
 	lookback, err := parseCodexLookback(*sinceRaw)
 	if err != nil {
 		return fmt.Errorf("invalid --since value %q: %w", *sinceRaw, err)
@@ -407,17 +430,73 @@ func cmdCodexSessions(root string, args []string) error {
 		return err
 	}
 	now := time.Now().UTC()
-	report, err := source.Analyze(sessionDirs, resolvedRepoRoot, now.Add(-lookback), now, strings.TrimSpace(*taskFilter), newOwnershipCatalog(config.OwnedTools))
-	if err != nil {
-		return err
+	ownership := newOwnershipCatalog(config.OwnedTools)
+	var report codexSessionInsightsReport
+	var store *sessionStore
+	if *noCache {
+		report, err = source.Analyze(sessionDirs, resolvedRepoRoot, now.Add(-lookback), now, strings.TrimSpace(*taskFilter), ownership)
+		if err != nil {
+			return err
+		}
+	} else {
+		normalizer, ok := source.(sessionNormalizer)
+		if !ok {
+			return fmt.Errorf("session provider %q does not support indexed analysis; use --no-cache", source.Name())
+		}
+		store, err = openSessionStore(*storePath)
+		if err != nil {
+			return fmt.Errorf("%w (use --no-cache to bypass the index)", err)
+		}
+		defer store.Close()
+		stats, err := store.refresh(context.Background(), source.Name(), sessionDirs, resolvedRepoRoot, normalizer, *forceRefresh)
+		if err != nil {
+			return err
+		}
+		report, err = store.analyze(
+			context.Background(),
+			source.Name(),
+			sessionDirs,
+			resolvedRepoRoot,
+			now.Add(-lookback),
+			now,
+			strings.TrimSpace(*taskFilter),
+			ownership,
+			stats,
+		)
+		if err != nil {
+			return err
+		}
 	}
 	report.Provider = source.Name()
+	repositoryKey := ownershipSelectorDigest("repo", resolvedRepoRoot)
+	var baseline *codexSessionInsightsReport
+	if name := strings.TrimSpace(*compareName); name != "" {
+		loaded, err := store.loadCheckpoint(context.Background(), name, source.Name(), repositoryKey)
+		if err != nil {
+			return err
+		}
+		baseline = &loaded
+	}
+	if name := strings.TrimSpace(*checkpointName); name != "" {
+		if err := store.saveCheckpoint(context.Background(), name, source.Name(), repositoryKey, report); err != nil {
+			return err
+		}
+		if *jsonOutput {
+			fmt.Fprintf(os.Stderr, "saved Muninn checkpoint %q\n", name)
+		}
+	}
 	if *jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	}
 	printCodexSessionInsights(report, config, *limit)
+	if baseline != nil {
+		printSessionTrend(*baseline, report, strings.TrimSpace(*compareName))
+	}
+	if name := strings.TrimSpace(*checkpointName); name != "" {
+		fmt.Printf("\nSaved checkpoint %q.\n", name)
+	}
 	return nil
 }
 
@@ -486,23 +565,7 @@ func analyzeCodexSessionsFiltered(sessionDirs []string, workspaceRoot string, si
 }
 
 func analyzeCodexSessionsFilteredWithOwnership(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog) (codexSessionInsightsReport, error) {
-	report := codexSessionInsightsReport{
-		SchemaVersion: codexSessionInsightsSchemaVersion,
-		GeneratedAt:   generatedAt.Format(time.RFC3339),
-		Since:         since.Format(time.RFC3339),
-		WorkspaceRoot: workspaceRoot,
-		SessionDirs:   append([]string(nil), sessionDirs...),
-		Summary: codexSessionInsightsSummary{
-			ToolCallsByName:       map[string]int{},
-			ToolMetricsByName:     map[string]codexToolMetrics{},
-			ShellCommandsByFamily: map[string]codexToolMetrics{},
-			MixedShellShapes:      map[string]codexToolMetrics{},
-			CrossCallTransitions:  map[string]codexTransitionMetrics{},
-			OwnedTooling:          map[string]codexToolMetrics{},
-			FailureReasons:        map[string]int{},
-			FailureContexts:       map[string]map[string]int{},
-		},
-	}
+	report := newSessionInsightsReport("codex", sessionDirs, workspaceRoot, since, generatedAt)
 	taskMap := map[string]*codexTaskInsights{}
 	for _, sessionDir := range sessionDirs {
 		err := filepath.WalkDir(sessionDir, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -532,6 +595,32 @@ func analyzeCodexSessionsFilteredWithOwnership(sessionDirs []string, workspaceRo
 			return report, fmt.Errorf("scan Codex sessions in %s: %w", sessionDir, err)
 		}
 	}
+	finishSessionInsightsReport(&report, taskMap)
+	return report, nil
+}
+
+func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRoot string, since, generatedAt time.Time) codexSessionInsightsReport {
+	return codexSessionInsightsReport{
+		SchemaVersion: codexSessionInsightsSchemaVersion,
+		Provider:      provider,
+		GeneratedAt:   generatedAt.Format(time.RFC3339),
+		Since:         since.Format(time.RFC3339),
+		WorkspaceRoot: workspaceRoot,
+		SessionDirs:   append([]string(nil), sessionDirs...),
+		Summary: codexSessionInsightsSummary{
+			ToolCallsByName:       map[string]int{},
+			ToolMetricsByName:     map[string]codexToolMetrics{},
+			ShellCommandsByFamily: map[string]codexToolMetrics{},
+			MixedShellShapes:      map[string]codexToolMetrics{},
+			CrossCallTransitions:  map[string]codexTransitionMetrics{},
+			OwnedTooling:          map[string]codexToolMetrics{},
+			FailureReasons:        map[string]int{},
+			FailureContexts:       map[string]map[string]codexOccurrenceMetrics{},
+		},
+	}
+}
+
+func finishSessionInsightsReport(report *codexSessionInsightsReport, taskMap map[string]*codexTaskInsights) {
 	report.Tasks = make([]codexTaskInsights, 0, len(taskMap))
 	for _, task := range taskMap {
 		report.Tasks = append(report.Tasks, *task)
@@ -545,7 +634,6 @@ func analyzeCodexSessionsFilteredWithOwnership(sessionDirs []string, workspaceRo
 		}
 		return report.Tasks[i].Task < report.Tasks[j].Task
 	})
-	return report, nil
 }
 
 func parseCodexSession(path, workspaceRoot string, since, generatedAt time.Time) (codexSessionRecord, error) {
@@ -1356,7 +1444,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			CrossCallTransitions:  map[string]codexTransitionMetrics{},
 			OwnedTooling:          map[string]codexToolMetrics{},
 			FailureReasons:        map[string]int{},
-			FailureContexts:       map[string]map[string]int{},
+			FailureContexts:       map[string]map[string]codexOccurrenceMetrics{},
 		}
 		taskMap[record.Task] = task
 	}
@@ -1400,13 +1488,16 @@ func addCodexTransitionMetrics(target map[string]codexTransitionMetrics, additio
 	}
 }
 
-func addCodexFailureContexts(target, additions map[string]map[string]int) {
+func addCodexFailureContexts(target map[string]map[string]codexOccurrenceMetrics, additions map[string]map[string]int) {
 	for reason, contexts := range additions {
 		for context, count := range contexts {
 			if target[reason] == nil {
-				target[reason] = map[string]int{}
+				target[reason] = map[string]codexOccurrenceMetrics{}
 			}
-			target[reason][context] += count
+			metrics := target[reason][context]
+			metrics.Count += count
+			metrics.Sessions++
+			target[reason][context] = metrics
 		}
 	}
 }
@@ -1448,7 +1539,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	summary := report.Summary
 	fmt.Printf("Muninn session insights since %s\n", report.Since)
 	fmt.Printf("Provider: %s\n", report.Provider)
-	fmt.Printf("Repository: %s\n", report.WorkspaceRoot)
+	fmt.Printf("Repository: %s\n", filepath.Base(report.WorkspaceRoot))
 	fmt.Printf("Sessions: %s (%s complete, %s incomplete)\n",
 		formatCodexCount(int64(summary.Sessions)),
 		formatCodexCount(int64(summary.CompletedSessions)),
@@ -1670,21 +1761,24 @@ func printOwnedTooling(metrics map[string]codexToolMetrics, configs []ownedToolC
 	}
 }
 
-func printCodexFailureContexts(contexts map[string]map[string]int, limit int) {
+func printCodexFailureContexts(contexts map[string]map[string]codexOccurrenceMetrics, limit int) {
 	type row struct {
 		Reason  string
 		Context string
-		Count   int
+		Metrics codexOccurrenceMetrics
 	}
 	var rows []row
 	for reason, values := range contexts {
-		for context, count := range values {
-			rows = append(rows, row{Reason: reason, Context: context, Count: count})
+		for context, metrics := range values {
+			rows = append(rows, row{Reason: reason, Context: context, Metrics: metrics})
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Count != rows[j].Count {
-			return rows[i].Count > rows[j].Count
+		if rows[i].Metrics.Sessions != rows[j].Metrics.Sessions {
+			return rows[i].Metrics.Sessions > rows[j].Metrics.Sessions
+		}
+		if rows[i].Metrics.Count != rows[j].Metrics.Count {
+			return rows[i].Metrics.Count > rows[j].Metrics.Count
 		}
 		if rows[i].Reason != rows[j].Reason {
 			return rows[i].Reason < rows[j].Reason
@@ -1698,12 +1792,13 @@ func printCodexFailureContexts(contexts map[string]map[string]int, limit int) {
 		rows = rows[:limit]
 	}
 	fmt.Println("\nFailed calls by reason and privacy-safe context:")
-	fmt.Printf("%-28s %-52s %8s\n", "REASON", "CONTEXT", "CALLS")
+	fmt.Printf("%-28s %-52s %8s %9s\n", "REASON", "CONTEXT", "CALLS", "SESSIONS")
 	for _, row := range rows {
-		fmt.Printf("%-28s %-52s %8s\n",
+		fmt.Printf("%-28s %-52s %8s %9s\n",
 			truncateCodexLabel(row.Reason, 28),
 			truncateCodexLabel(row.Context, 52),
-			formatCodexCount(int64(row.Count)),
+			formatCodexCount(int64(row.Metrics.Count)),
+			formatCodexCount(int64(row.Metrics.Sessions)),
 		)
 	}
 }
