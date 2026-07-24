@@ -555,7 +555,7 @@ func cmdCodexSessions(root string, args []string) error {
 	overviewOutput := fs.Bool("overview", false, "show aggregate family totals only")
 	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
 	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals")
-	focus := fs.String("focus", "", "filter findings: tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
+	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(

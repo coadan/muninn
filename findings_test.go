@@ -597,6 +597,13 @@ func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 	if len(filtered) != 1 || filtered[0].Title != "source" {
 		t.Fatalf("unexpected focused findings: %#v", filtered)
 	}
+	friction, err := filterSessionFindings(findings, "friction")
+	if err != nil {
+		t.Fatalf("friction focus: %v", err)
+	}
+	if len(friction) != len(findings) {
+		t.Fatalf("friction focus should preserve the broad action queue: %#v", friction)
+	}
 	if _, err := filterSessionFindings(findings, "unknown"); err == nil {
 		t.Fatal("unsupported focus did not fail")
 	}
