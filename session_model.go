@@ -234,7 +234,6 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	}
 	record.DeliveryRework = deliveryTracker.metrics
 	if record.DeliveryRework.Deliveries > 0 ||
-		record.DeliveryRework.PreDeliveryReviews > 0 ||
 		record.DeliveryRework.PostDeliveryReviewChecks > 0 {
 		record.DeliveryRework.Sessions = 1
 	}

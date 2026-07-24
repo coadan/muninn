@@ -79,6 +79,8 @@ Muninn highlights:
   unknown, with confidence kept separate from impact
 - post-delivery quality signals: pushes/lands, pre- and post-delivery review,
   review-to-edit cycles, and deliveries that required rework
+- generic repository-relative delivery cohorts, with tests and review counted
+  only when observed after the latest edit and before delivery
 - total, cached, uncached, and per-session input-token cost
 - fresh-token and visible tool-output volume
 - long low-output tool waits, with tests, builds, and review waits reported
@@ -216,6 +218,11 @@ It excludes response-only and left-censored episodes from completed tool-task
 distributions. Delivery rework similarly measures sequence evidence; when it
 cannot distinguish tooling, guidance, and source ownership, it reports
 `unknown` instead of guessing from review text.
+
+Delivery cohorts use bounded repository-relative directory prefixes. They work
+for ordinary repositories and monorepos; nested repository managers are only
+path-normalization inputs. Test/review comparisons are observational and do not
+claim that the executed check covered the edited subsystem.
 
 ## Direction
 

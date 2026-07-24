@@ -37,6 +37,25 @@ func TestAnalyzeCompletionEpisodesUsesDistributionsNotAverages(t *testing.T) {
 
 func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T) {
 	tracker := deliveryReworkTracker{}
+	target := ".workbench/repos/engine/packages/runtime/src/runtime.go"
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{target},
+	}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:   sessionEventToolOutput,
+		Family: "tests",
+	}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "exec",
+		Family:   "review",
+	}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:   sessionEventToolOutput,
+		Family: "review",
+	}, nil)
 	tracker.observe(normalizedSessionEvent{
 		Kind:            sessionEventToolOutput,
 		OwnedOperations: []string{"bwb/pr"},
@@ -55,7 +74,7 @@ func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T
 		tracker.observe(normalizedSessionEvent{
 			Kind:     sessionEventToolCall,
 			ToolName: "apply_patch",
-			Targets:  []string{".workbench/repos/breyta/src/runtime.clj"},
+			Targets:  []string{target},
 		}, nil)
 		tracker.observe(normalizedSessionEvent{
 			Kind:            sessionEventToolCall,
@@ -69,8 +88,79 @@ func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T
 		got.PostDeliveryEditCalls != 2 {
 		t.Fatalf("delivery rework mismatch: %#v", got)
 	}
-	if got.ReworkLevers["source code"] != 2 || got.ReworkScopes["breyta"] != 2 {
+	if got.DeliveriesWithPreTests != 1 || got.DeliveriesWithPreReview != 1 ||
+		got.ReworkedDeliveriesWithPreTests != 1 || got.ReworkedDeliveriesWithPreReview != 1 {
+		t.Fatalf("pre-delivery verification mismatch: %#v", got)
+	}
+	if got.ReworkLevers["source code"] != 2 || got.ReworkScopes["engine"] != 2 {
 		t.Fatalf("delivery rework attribution mismatch: %#v", got)
+	}
+	cohort := got.Cohorts["engine/packages/runtime"]
+	if cohort.Deliveries != 1 || cohort.DeliveriesWithRework != 1 ||
+		cohort.ReviewToEditCycles != 2 || cohort.DeliveriesWithPreTests != 1 ||
+		cohort.DeliveriesWithPreReview != 1 {
+		t.Fatalf("delivery cohort mismatch: %#v", cohort)
+	}
+}
+
+func TestDeliveryVerificationMustFollowLatestEdit(t *testing.T) {
+	tracker := deliveryReworkTracker{}
+	edit := normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"src/parser/token.go"},
+	}
+	tracker.observe(edit, nil)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "tests"}, nil)
+	tracker.observe(edit, nil)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+	if tracker.metrics.DeliveriesWithPreTests != 0 {
+		t.Fatalf("test before latest edit counted as pre-delivery verification: %#v", tracker.metrics)
+	}
+	if got := tracker.metrics.Cohorts["src/parser"]; got.Deliveries != 1 || got.DeliveriesWithPreTests != 0 {
+		t.Fatalf("ordinary repository cohort mismatch: %#v", got)
+	}
+}
+
+func TestDeliveryCohortRateRequiresPreDeliveryMembership(t *testing.T) {
+	tracker := deliveryReworkTracker{}
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"src/parser/token.go"},
+	}, nil)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "exec", Family: "review"}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"docs/parser.md"},
+	}, nil)
+
+	if got := tracker.metrics.Cohorts["docs"]; got.ReviewToEditCycles != 1 ||
+		got.Deliveries != 0 || got.DeliveriesWithRework != 0 {
+		t.Fatalf("new post-delivery cohort inflated a delivery rate: %#v", got)
+	}
+	if got := tracker.metrics.Cohorts["src/parser"]; got.Deliveries != 1 ||
+		got.DeliveriesWithRework != 0 {
+		t.Fatalf("original delivery cohort was misattributed: %#v", got)
+	}
+}
+
+func TestDeliveryTargetCohortIsRepositoryAgnostic(t *testing.T) {
+	tests := map[string]string{
+		"README.md":                                   "(root)",
+		"src/runtime.go":                              "src",
+		"src/parser/token.go":                         "src/parser",
+		"packages/web/src/index.ts":                   "packages/web",
+		"services/account/internal/handler.go":        "services/account",
+		".workbench/repos/engine/modules/ai/model.rs": "engine/modules/ai",
+		".worktrees/task/src/parser/token.go":         "src/parser",
+	}
+	for target, want := range tests {
+		if got := deliveryTargetCohort(target); got != want {
+			t.Fatalf("deliveryTargetCohort(%q)=%q want %q", target, got, want)
+		}
 	}
 }
 
