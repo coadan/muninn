@@ -17,6 +17,7 @@ import (
 )
 
 const sessionStoreSchemaVersion = 10
+const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionNormalizer interface {
 	NormalizeSession(path string) (normalizedSession, error)
@@ -55,6 +56,12 @@ func openSessionStore(path string) (*sessionStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open Muninn SQLite store: %w", err)
 	}
+	// SQLite pragmas such as busy_timeout are connection-local. Keep one
+	// configured connection per Muninn process so concurrent analyses sharing
+	// the cache wait for short writer transactions instead of intermittently
+	// failing with SQLITE_BUSY on an unconfigured pooled connection.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	store := &sessionStore{db: db}
 	if err := store.initialize(context.Background()); err != nil {
 		_ = db.Close()
@@ -75,6 +82,7 @@ func (store *sessionStore) Close() error {
 
 func (store *sessionStore) initialize(ctx context.Context) error {
 	statements := []string{
+		fmt.Sprintf(`PRAGMA busy_timeout = %d`, sessionStoreBusyTimeout.Milliseconds()),
 		`PRAGMA foreign_keys = ON`,
 		`PRAGMA journal_mode = WAL`,
 		`CREATE TABLE IF NOT EXISTS metadata (

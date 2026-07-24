@@ -193,6 +193,61 @@ func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
 	}
 }
 
+func TestSessionStoreWaitsForConcurrentWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "muninn.db")
+	first, err := openSessionStore(path)
+	if err != nil {
+		t.Fatalf("open first store: %v", err)
+	}
+	defer first.Close()
+	second, err := openSessionStore(path)
+	if err != nil {
+		t.Fatalf("open second store: %v", err)
+	}
+	defer second.Close()
+
+	var busyTimeout int64
+	if err := second.db.QueryRow(`PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+		t.Fatalf("read busy timeout: %v", err)
+	}
+	if busyTimeout != sessionStoreBusyTimeout.Milliseconds() {
+		t.Fatalf("busy timeout = %d, want %d", busyTimeout, sessionStoreBusyTimeout.Milliseconds())
+	}
+
+	tx, err := first.db.Begin()
+	if err != nil {
+		t.Fatalf("begin first writer: %v", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO metadata(key, value) VALUES('concurrent-writer', 'first')`); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("acquire first writer lock: %v", err)
+	}
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := second.db.Exec(`INSERT INTO metadata(key, value) VALUES('waited-writer', 'second')`)
+		writeDone <- err
+	}()
+
+	select {
+	case err := <-writeDone:
+		_ = tx.Rollback()
+		t.Fatalf("second writer returned while first held the lock: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit first writer: %v", err)
+	}
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("second writer did not wait for the lock: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second writer did not resume after the lock was released")
+	}
+}
+
 func containsAny(value string, candidates ...string) bool {
 	for _, candidate := range candidates {
 		if candidate != "" && strings.Contains(value, candidate) {
