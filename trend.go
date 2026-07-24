@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"sort"
 )
 
 type trendMetric struct {
@@ -87,6 +88,7 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			direction,
 		)
 	}
+	printFindingTrend(baseline.Findings, current.Findings)
 }
 
 func ratio(numerator, denominator float64) float64 {
@@ -94,4 +96,69 @@ func ratio(numerator, denominator float64) float64 {
 		return 0
 	}
 	return numerator / denominator
+}
+
+func printFindingTrend(baseline, current []sessionFinding) {
+	baselineByKey := map[string]sessionFinding{}
+	currentByKey := map[string]sessionFinding{}
+	for _, finding := range baseline {
+		baselineByKey[findingTrendKey(finding)] = finding
+	}
+	for _, finding := range current {
+		currentByKey[findingTrendKey(finding)] = finding
+	}
+	var resolved, introduced, persistent []sessionFinding
+	for key, finding := range baselineByKey {
+		if _, exists := currentByKey[key]; exists {
+			persistent = append(persistent, finding)
+		} else {
+			resolved = append(resolved, finding)
+		}
+	}
+	for key, finding := range currentByKey {
+		if _, exists := baselineByKey[key]; !exists {
+			introduced = append(introduced, finding)
+		}
+	}
+	fmt.Printf("\nFinding trend: %s resolved, %s persistent, %s new.\n",
+		formatCodexCount(int64(len(resolved))),
+		formatCodexCount(int64(len(persistent))),
+		formatCodexCount(int64(len(introduced))),
+	)
+	printFindingTrendRows("Resolved", resolved, 4)
+	printFindingTrendRows("New", introduced, 4)
+}
+
+func findingTrendKey(finding sessionFinding) string {
+	return finding.Category + "\x00" + finding.Title + "\x00" + finding.Target
+}
+
+func printFindingTrendRows(label string, findings []sessionFinding, limit int) {
+	if len(findings) == 0 {
+		return
+	}
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].Category != findings[j].Category {
+			return findings[i].Category < findings[j].Category
+		}
+		if findings[i].Target != findings[j].Target {
+			return findings[i].Target < findings[j].Target
+		}
+		return findings[i].Title < findings[j].Title
+	})
+	rows := findings
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Printf("%s findings:\n", label)
+	for _, finding := range rows {
+		target := ""
+		if finding.Target != "" {
+			target = " · " + finding.Target
+		}
+		fmt.Printf("- [%s] %s%s\n", finding.Category, finding.Title, target)
+	}
+	if len(rows) < len(findings) {
+		fmt.Printf("- ... %d more\n", len(findings)-len(rows))
+	}
 }

@@ -118,7 +118,32 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			continue
 		}
 		const boundedOwnerBytes = 12 * 1024
-		if info.Size() <= boundedOwnerBytes && metrics.SearchReadLoops < 5 {
+		if info.Size() <= boundedOwnerBytes || filepath.Base(target) == "AGENTS.md" || repositoryManifestTarget(target) {
+			if metrics.SearchReadLoops < 5 {
+				continue
+			}
+			action := "Prefer the repository's bounded context/index surface or clarify the injected guidance so agents do not repeatedly reopen this small owner."
+			if filepath.Base(target) == "AGENTS.md" {
+				action = "AGENTS.md is normally injected into the session; clarify the relevant rule or tooling entry point, then avoid rereading the file."
+			} else if repositoryManifestTarget(target) {
+				action = "Add or use a bounded repository command for dependency/script discovery instead of repeatedly rereading the full manifest."
+			}
+			findings = append(findings, sessionFinding{
+				Category: "instruction-discovery",
+				Control:  "repository",
+				Title:    "a small current owner is repeatedly reread",
+				Evidence: fmt.Sprintf("%s reads and %s search/read loops across %s sessions; current size %s bytes",
+					formatCodexCount(int64(metrics.Reads)),
+					formatCodexCount(int64(metrics.SearchReadLoops)),
+					formatCodexCount(int64(metrics.Sessions)),
+					formatCodexCount(info.Size()),
+				),
+				Action:   action,
+				Count:    metrics.Reads,
+				Sessions: metrics.Sessions,
+				Target:   target,
+				score:    320 + metrics.Sessions*15 + metrics.SearchReadLoops*10 + metrics.Reads,
+			})
 			continue
 		}
 		findings = append(findings, sessionFinding{
@@ -201,6 +226,62 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	return diversifySessionFindings(findings)
 }
 
+func repositoryManifestTarget(target string) bool {
+	switch strings.ToLower(filepath.Base(target)) {
+	case "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+		"go.mod", "go.sum", "cargo.toml", "cargo.lock", "deps.edn",
+		"pyproject.toml", "poetry.lock", "requirements.txt":
+		return true
+	default:
+		return false
+	}
+}
+
+func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFinding, error) {
+	focus = strings.ToLower(strings.TrimSpace(focus))
+	if focus == "" {
+		return findings, nil
+	}
+	allowed := map[string]map[string]bool{
+		"tooling": {
+			"owned-tool":        true,
+			"recurring-failure": true,
+		},
+		"instructions": {
+			"instruction-discovery": true,
+			"session-loop":          true,
+		},
+		"interface": {
+			"agent-interface": true,
+		},
+		"structure": {
+			"code-structure": true,
+		},
+		"discovery": {
+			"discovery":             true,
+			"instruction-discovery": true,
+		},
+		"failures": {
+			"recurring-failure": true,
+		},
+		"loops": {
+			"agent-interface": true,
+			"session-loop":    true,
+		},
+	}
+	categories, ok := allowed[focus]
+	if !ok {
+		return nil, fmt.Errorf("unsupported --focus %q (available: tooling, instructions, interface, structure, discovery, failures, loops)", focus)
+	}
+	filtered := make([]sessionFinding, 0, len(findings))
+	for _, finding := range findings {
+		if categories[finding.Category] {
+			filtered = append(filtered, finding)
+		}
+	}
+	return filtered, nil
+}
+
 func agentInterfaceWorkflow(transition string) string {
 	from, to, ok := strings.Cut(transition, " -> ")
 	if !ok {
@@ -226,10 +307,11 @@ func agentInterfaceWorkflow(transition string) string {
 
 func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 	limits := map[string]int{
-		"agent-interface":   4,
-		"code-structure":    6,
-		"recurring-failure": 4,
-		"owned-tool":        4,
+		"agent-interface":       4,
+		"code-structure":        6,
+		"instruction-discovery": 4,
+		"recurring-failure":     4,
+		"owned-tool":            4,
 	}
 	counts := map[string]int{}
 	result := make([]sessionFinding, 0, len(findings))
