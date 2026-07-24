@@ -288,6 +288,16 @@ func TestBuildSessionFindingsFlagsRepeatedPostDeliveryReviewChecks(t *testing.T)
 
 func TestBuildSessionFindingsLocalizesDeliveryReworkToGenericCohort(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	if err := os.MkdirAll(filepath.Join(report.WorkspaceRoot, "packages/runtime/src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(report.WorkspaceRoot, "packages/runtime/src/engine.go"),
+		[]byte("package runtime\n\nfunc Run() {}\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
 	report.Summary.DeliveryRework = deliveryReworkMetrics{
 		Deliveries:            8,
 		DeliveriesWithRework:  3,
@@ -325,7 +335,7 @@ func TestBuildSessionFindingsLocalizesDeliveryReworkToGenericCohort(t *testing.T
 	if finding.Target != "packages/runtime/src/engine.go" || finding.Lever != "source code" ||
 		!strings.Contains(finding.Action, "exact target") ||
 		!strings.Contains(finding.Evidence, "top cohort packages/runtime") ||
-		!strings.Contains(finding.Evidence, "top exact rework target packages/runtime/src/engine.go: 4 cycles") {
+		!strings.Contains(finding.Evidence, "top exact rework target packages/runtime/src/engine.go: 4 cycles, current file 3 lines") {
 		t.Fatalf("localized delivery finding mismatch: %#v", finding)
 	}
 }

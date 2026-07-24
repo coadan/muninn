@@ -178,7 +178,7 @@ func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSe
 	for _, target := range matchedTargets {
 		levers[reworkTargetLever(target)] = struct{}{}
 		scopes[reworkTargetScope(target)] = struct{}{}
-		tracker.metrics.ReworkTargets[deliveryTargetLabel(target)]++
+		tracker.metrics.ReworkTargets[target]++
 	}
 	if len(levers) == 0 {
 		levers["unknown"] = struct{}{}
@@ -600,9 +600,17 @@ func printDeliveryReworkAnalysis(metrics deliveryReworkMetrics) {
 			fmt.Printf("Top delivery cohorts: %s\n", cohorts)
 		}
 		if len(metrics.ReworkTargets) > 0 {
-			fmt.Printf("Top rework targets: %s\n", formatMetricDimensions(metrics.ReworkTargets))
+			fmt.Printf("Top rework targets: %s\n", formatDeliveryReworkTargets(metrics.ReworkTargets))
 		}
 	}
+}
+
+func formatDeliveryReworkTargets(targets map[string]int) string {
+	labels := make(map[string]int, len(targets))
+	for target, count := range targets {
+		labels[deliveryTargetLabel(target)] += count
+	}
+	return formatMetricDimensions(labels)
 }
 
 func formatDeliveryReworkCohorts(cohorts map[string]deliveryCohortMetrics, limit int) string {

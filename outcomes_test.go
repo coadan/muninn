@@ -95,7 +95,7 @@ func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T
 	if got.ReworkLevers["source code"] != 2 || got.ReworkScopes["engine"] != 2 {
 		t.Fatalf("delivery rework attribution mismatch: %#v", got)
 	}
-	if got.ReworkTargets["engine/packages/runtime/src/runtime.go"] != 2 {
+	if got.ReworkTargets[target] != 2 {
 		t.Fatalf("delivery rework target mismatch: %#v", got.ReworkTargets)
 	}
 	cohort := got.Cohorts["engine/packages/runtime"]

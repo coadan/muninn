@@ -453,12 +453,19 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			}
 		}
 		targetEvidence := ""
-		dominantTarget, dominantTargetCount, targetTotal := dominantMetricDimension(delivery.ReworkTargets)
+		dominantRawTarget, dominantTargetCount, targetTotal := dominantMetricDimension(delivery.ReworkTargets)
+		dominantTarget := deliveryTargetLabel(dominantRawTarget)
 		if dominantTargetCount >= 2 {
 			targetEvidence = fmt.Sprintf("; top exact rework target %s: %s cycles",
 				dominantTarget,
 				formatCodexCount(int64(dominantTargetCount)),
 			)
+			if size, lines, ok := repositoryTargetSize(report.WorkspaceRoot, dominantRawTarget); ok {
+				targetEvidence += fmt.Sprintf(", current file %s lines and %s bytes",
+					formatCodexCount(int64(lines)),
+					formatCodexCount(size),
+				)
+			}
 			dominatesCohort := cohortName != "" &&
 				strings.HasPrefix(dominantTarget, cohortName+"/") &&
 				dominantTargetCount*2 > cohort.ReviewToEditCycles
@@ -549,6 +556,19 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		return findings[i].Title < findings[j].Title
 	})
 	return diversifySessionFindings(findings)
+}
+
+func repositoryTargetSize(repositoryRoot, target string) (size int64, lines int, ok bool) {
+	path := filepath.Join(repositoryRoot, filepath.FromSlash(target))
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return 0, 0, false
+	}
+	lines = strings.Count(string(content), "\n")
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		lines++
+	}
+	return int64(len(content)), lines, true
 }
 
 func dominantDeliveryReworkCohort(cohorts map[string]deliveryCohortMetrics) (string, deliveryCohortMetrics) {
