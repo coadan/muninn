@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 8
+const codexSessionInsightsSchemaVersion = 10
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -40,25 +40,30 @@ type codexTokenUsage struct {
 }
 
 type codexTaskInsights struct {
-	Task                  string                                       `json:"task"`
-	Sessions              int                                          `json:"sessions"`
-	CompletedSessions     int                                          `json:"completedSessions"`
-	IncompleteSessions    int                                          `json:"incompleteSessions"`
-	DurationSeconds       int64                                        `json:"durationSeconds"`
-	Compactions           int                                          `json:"compactions"`
-	Tokens                codexTokenUsage                              `json:"tokens"`
-	FreshTokens           int64                                        `json:"freshTokens"`
-	ToolCalls             int                                          `json:"toolCalls"`
-	FailedToolCalls       int                                          `json:"failedToolCalls"`
-	TruncatedToolCalls    int                                          `json:"truncatedToolCalls"`
-	ToolOutputBytes       int64                                        `json:"toolOutputBytes"`
-	ToolOutputTokens      int64                                        `json:"toolOutputTokens"`
-	ShellCommandsByFamily map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
-	MixedShellShapes      map[string]codexToolMetrics                  `json:"mixedShellShapes"`
-	CrossCallTransitions  map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
-	OwnedTooling          map[string]codexToolMetrics                  `json:"ownedTooling"`
-	FailureReasons        map[string]int                               `json:"failureReasons"`
-	FailureContexts       map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
+	Task                        string                                       `json:"task"`
+	Sessions                    int                                          `json:"sessions"`
+	CompletedSessions           int                                          `json:"completedSessions"`
+	IncompleteSessions          int                                          `json:"incompleteSessions"`
+	DurationSeconds             int64                                        `json:"durationSeconds"`
+	Compactions                 int                                          `json:"compactions"`
+	SessionsWithCompactions     int                                          `json:"sessionsWithCompactions"`
+	Tokens                      codexTokenUsage                              `json:"tokens"`
+	FreshTokens                 int64                                        `json:"freshTokens"`
+	ToolCalls                   int                                          `json:"toolCalls"`
+	FailedToolCalls             int                                          `json:"failedToolCalls"`
+	TruncatedToolCalls          int                                          `json:"truncatedToolCalls"`
+	ToolOutputBytes             int64                                        `json:"toolOutputBytes"`
+	ToolOutputTokens            int64                                        `json:"toolOutputTokens"`
+	ShellCommandsByFamily       map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
+	MixedShellShapes            map[string]codexToolMetrics                  `json:"mixedShellShapes"`
+	CrossCallTransitions        map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
+	OwnedTooling                map[string]codexToolMetrics                  `json:"ownedTooling"`
+	ReadTargets                 map[string]codexTargetMetrics                `json:"readTargets"`
+	InlineOrchestrationCalls    int                                          `json:"inlineOrchestrationCalls"`
+	InlineOrchestrationBytes    int64                                        `json:"inlineOrchestrationBytes"`
+	InlineOrchestrationSessions int                                          `json:"inlineOrchestrationSessions"`
+	FailureReasons              map[string]int                               `json:"failureReasons"`
+	FailureContexts             map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 }
 
 type codexToolMetrics struct {
@@ -79,29 +84,40 @@ type codexOccurrenceMetrics struct {
 	Sessions int `json:"sessions"`
 }
 
+type codexTargetMetrics struct {
+	Reads           int `json:"reads"`
+	SearchReadLoops int `json:"searchReadLoops"`
+	Sessions        int `json:"sessions"`
+}
+
 type codexSessionInsightsSummary struct {
-	FilesScanned          int                                          `json:"filesScanned"`
-	FilesUnreadable       int                                          `json:"filesUnreadable"`
-	Sessions              int                                          `json:"sessions"`
-	CompletedSessions     int                                          `json:"completedSessions"`
-	IncompleteSessions    int                                          `json:"incompleteSessions"`
-	DurationSeconds       int64                                        `json:"durationSeconds"`
-	Compactions           int                                          `json:"compactions"`
-	Tokens                codexTokenUsage                              `json:"tokens"`
-	FreshTokens           int64                                        `json:"freshTokens"`
-	ToolCalls             int                                          `json:"toolCalls"`
-	FailedToolCalls       int                                          `json:"failedToolCalls"`
-	TruncatedToolCalls    int                                          `json:"truncatedToolCalls"`
-	ToolOutputBytes       int64                                        `json:"toolOutputBytes"`
-	ToolOutputTokens      int64                                        `json:"toolOutputTokens"`
-	ToolCallsByName       map[string]int                               `json:"toolCallsByName"`
-	ToolMetricsByName     map[string]codexToolMetrics                  `json:"toolMetricsByName"`
-	ShellCommandsByFamily map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
-	MixedShellShapes      map[string]codexToolMetrics                  `json:"mixedShellShapes"`
-	CrossCallTransitions  map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
-	OwnedTooling          map[string]codexToolMetrics                  `json:"ownedTooling"`
-	FailureReasons        map[string]int                               `json:"failureReasons"`
-	FailureContexts       map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
+	FilesScanned                int                                          `json:"filesScanned"`
+	FilesUnreadable             int                                          `json:"filesUnreadable"`
+	Sessions                    int                                          `json:"sessions"`
+	CompletedSessions           int                                          `json:"completedSessions"`
+	IncompleteSessions          int                                          `json:"incompleteSessions"`
+	DurationSeconds             int64                                        `json:"durationSeconds"`
+	Compactions                 int                                          `json:"compactions"`
+	SessionsWithCompactions     int                                          `json:"sessionsWithCompactions"`
+	Tokens                      codexTokenUsage                              `json:"tokens"`
+	FreshTokens                 int64                                        `json:"freshTokens"`
+	ToolCalls                   int                                          `json:"toolCalls"`
+	FailedToolCalls             int                                          `json:"failedToolCalls"`
+	TruncatedToolCalls          int                                          `json:"truncatedToolCalls"`
+	ToolOutputBytes             int64                                        `json:"toolOutputBytes"`
+	ToolOutputTokens            int64                                        `json:"toolOutputTokens"`
+	ToolCallsByName             map[string]int                               `json:"toolCallsByName"`
+	ToolMetricsByName           map[string]codexToolMetrics                  `json:"toolMetricsByName"`
+	ShellCommandsByFamily       map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
+	MixedShellShapes            map[string]codexToolMetrics                  `json:"mixedShellShapes"`
+	CrossCallTransitions        map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
+	OwnedTooling                map[string]codexToolMetrics                  `json:"ownedTooling"`
+	ReadTargets                 map[string]codexTargetMetrics                `json:"readTargets"`
+	InlineOrchestrationCalls    int                                          `json:"inlineOrchestrationCalls"`
+	InlineOrchestrationBytes    int64                                        `json:"inlineOrchestrationBytes"`
+	InlineOrchestrationSessions int                                          `json:"inlineOrchestrationSessions"`
+	FailureReasons              map[string]int                               `json:"failureReasons"`
+	FailureContexts             map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 }
 
 type codexSessionInsightsReport struct {
@@ -113,28 +129,32 @@ type codexSessionInsightsReport struct {
 	SessionDirs   []string                    `json:"-"`
 	Summary       codexSessionInsightsSummary `json:"summary"`
 	Tasks         []codexTaskInsights         `json:"tasks"`
+	Findings      []sessionFinding            `json:"findings"`
 }
 
 type codexSessionRecord struct {
-	CWD                   string
-	Task                  string
-	StartedAt             time.Time
-	EndedAt               time.Time
-	Completed             bool
-	Compactions           int
-	Tokens                codexTokenUsage
-	ToolCalls             int
-	FailedToolCalls       int
-	TruncatedToolCalls    int
-	ToolOutputBytes       int64
-	ToolCallsByName       map[string]int
-	ToolMetricsByName     map[string]codexToolMetrics
-	ShellCommandsByFamily map[string]codexToolMetrics
-	MixedShellShapes      map[string]codexToolMetrics
-	CrossCallTransitions  map[string]int
-	OwnedTooling          map[string]codexToolMetrics
-	FailureReasons        map[string]int
-	FailureContexts       map[string]map[string]int
+	CWD                      string
+	Task                     string
+	StartedAt                time.Time
+	EndedAt                  time.Time
+	Completed                bool
+	Compactions              int
+	Tokens                   codexTokenUsage
+	ToolCalls                int
+	FailedToolCalls          int
+	TruncatedToolCalls       int
+	ToolOutputBytes          int64
+	ToolCallsByName          map[string]int
+	ToolMetricsByName        map[string]codexToolMetrics
+	ShellCommandsByFamily    map[string]codexToolMetrics
+	MixedShellShapes         map[string]codexToolMetrics
+	CrossCallTransitions     map[string]int
+	OwnedTooling             map[string]codexToolMetrics
+	ReadTargets              map[string]codexTargetMetrics
+	InlineOrchestrationCalls int
+	InlineOrchestrationBytes int64
+	FailureReasons           map[string]int
+	FailureContexts          map[string]map[string]int
 }
 
 type codexToolCallDescriptor struct {
@@ -174,7 +194,12 @@ type codexRolloutPayload struct {
 type repositoryConfig struct {
 	SchemaVersion int `json:"schemaVersion"`
 	Actions       struct {
-		SourceContext string `json:"sourceContext"`
+		SourceContext       string `json:"sourceContext"`
+		RecurringFailure    string `json:"recurringFailure"`
+		AgentInterface      string `json:"agentInterface"`
+		CodeStructure       string `json:"codeStructure"`
+		SessionLoop         string `json:"sessionLoop"`
+		InlineOrchestration string `json:"inlineOrchestration"`
 	} `json:"actions"`
 	OwnedTools []ownedToolConfig `json:"ownedTools"`
 }
@@ -182,6 +207,11 @@ type repositoryConfig struct {
 func defaultRepositoryConfig() repositoryConfig {
 	config := repositoryConfig{SchemaVersion: 1}
 	config.Actions.SourceContext = "Use or add one bounded repository source-context command that combines ranked search pointers with small excerpts."
+	config.Actions.RecurringFailure = "Reproduce the shared failure once, then fix the owned tool/default or add concise repository guidance instead of repeating per-session workarounds."
+	config.Actions.AgentInterface = "Consider one compact agent-facing command that owns bootstrap, state, bounded output, and recovery for this repeated workflow."
+	config.Actions.CodeStructure = "Inspect whether this owner mixes responsibilities; split or add a stable routed entry point when the repeated reads reflect real ownership boundaries."
+	config.Actions.SessionLoop = "Checkpoint progress, start a focused continuation, and remove repeated rediscovery or validation loops from the repository workflow."
+	config.Actions.InlineOrchestration = "Extract the repeated orchestration into a tested repository helper or agent-facing CLI command."
 	return config
 }
 
@@ -210,6 +240,21 @@ func loadRepositoryConfig(repoRoot, explicit string) (repositoryConfig, error) {
 	}
 	if strings.TrimSpace(decoded.Actions.SourceContext) != "" {
 		config.Actions.SourceContext = strings.TrimSpace(decoded.Actions.SourceContext)
+	}
+	if strings.TrimSpace(decoded.Actions.RecurringFailure) != "" {
+		config.Actions.RecurringFailure = strings.TrimSpace(decoded.Actions.RecurringFailure)
+	}
+	if strings.TrimSpace(decoded.Actions.AgentInterface) != "" {
+		config.Actions.AgentInterface = strings.TrimSpace(decoded.Actions.AgentInterface)
+	}
+	if strings.TrimSpace(decoded.Actions.CodeStructure) != "" {
+		config.Actions.CodeStructure = strings.TrimSpace(decoded.Actions.CodeStructure)
+	}
+	if strings.TrimSpace(decoded.Actions.SessionLoop) != "" {
+		config.Actions.SessionLoop = strings.TrimSpace(decoded.Actions.SessionLoop)
+	}
+	if strings.TrimSpace(decoded.Actions.InlineOrchestration) != "" {
+		config.Actions.InlineOrchestration = strings.TrimSpace(decoded.Actions.InlineOrchestration)
 	}
 	if err := validateOwnedToolConfig(decoded.OwnedTools); err != nil {
 		return repositoryConfig{}, fmt.Errorf("parse Muninn config %s: %w", path, err)
@@ -355,6 +400,8 @@ Examples:
   muninn analyze --repo . --since 14d --include-archived
   muninn analyze --repo . --checkpoint before-tooling-change
   muninn analyze --repo . --compare before-tooling-change
+  muninn analyze --repo . --overview
+  muninn analyze --repo . --details
   muninn analyze --repo . --json
 `)
 }
@@ -380,6 +427,9 @@ func cmdCodexSessions(root string, args []string) error {
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
 	checkpointName := fs.String("checkpoint", "", "save this analysis as a named trend checkpoint")
 	compareName := fs.String("compare", "", "compare this analysis with a named checkpoint")
+	overviewOutput := fs.Bool("overview", false, "show aggregate family totals only")
+	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
+	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(
@@ -408,6 +458,21 @@ func cmdCodexSessions(root string, args []string) error {
 	}
 	if *jsonOutput && strings.TrimSpace(*compareName) != "" {
 		return errors.New("--compare currently requires human output")
+	}
+	viewCount := 0
+	for _, selected := range []bool{*overviewOutput, *findingsOutput, *detailsOutput} {
+		if selected {
+			viewCount++
+		}
+	}
+	if viewCount > 1 {
+		return errors.New("--overview, --findings, and --details are mutually exclusive")
+	}
+	view := "findings"
+	if *overviewOutput {
+		view = "overview"
+	} else if *detailsOutput {
+		view = "details"
 	}
 	lookback, err := parseCodexLookback(*sinceRaw)
 	if err != nil {
@@ -468,6 +533,7 @@ func cmdCodexSessions(root string, args []string) error {
 		}
 	}
 	report.Provider = source.Name()
+	report.Findings = buildSessionFindings(report, config)
 	repositoryKey := ownershipSelectorDigest("repo", resolvedRepoRoot)
 	var baseline *codexSessionInsightsReport
 	if name := strings.TrimSpace(*compareName); name != "" {
@@ -490,7 +556,7 @@ func cmdCodexSessions(root string, args []string) error {
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	}
-	printCodexSessionInsights(report, config, *limit)
+	printCodexSessionInsights(report, config, *limit, view)
 	if baseline != nil {
 		printSessionTrend(*baseline, report, strings.TrimSpace(*compareName))
 	}
@@ -614,6 +680,7 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 			MixedShellShapes:      map[string]codexToolMetrics{},
 			CrossCallTransitions:  map[string]codexTransitionMetrics{},
 			OwnedTooling:          map[string]codexToolMetrics{},
+			ReadTargets:           map[string]codexTargetMetrics{},
 			FailureReasons:        map[string]int{},
 			FailureContexts:       map[string]map[string]codexOccurrenceMetrics{},
 		},
@@ -1407,6 +1474,9 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	duration := codexSessionDuration(record)
 	summary.DurationSeconds += duration
 	summary.Compactions += record.Compactions
+	if record.Compactions > 0 {
+		summary.SessionsWithCompactions++
+	}
 	addCodexTokenUsage(&summary.Tokens, record.Tokens)
 	summary.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
 	summary.ToolCalls += record.ToolCalls
@@ -1430,6 +1500,12 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(summary.OwnedTooling, id, metrics)
 	}
+	addCodexTargetMetrics(summary.ReadTargets, record.ReadTargets)
+	summary.InlineOrchestrationCalls += record.InlineOrchestrationCalls
+	summary.InlineOrchestrationBytes += record.InlineOrchestrationBytes
+	if record.InlineOrchestrationCalls > 0 {
+		summary.InlineOrchestrationSessions++
+	}
 	for reason, count := range record.FailureReasons {
 		summary.FailureReasons[reason] += count
 	}
@@ -1443,6 +1519,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			MixedShellShapes:      map[string]codexToolMetrics{},
 			CrossCallTransitions:  map[string]codexTransitionMetrics{},
 			OwnedTooling:          map[string]codexToolMetrics{},
+			ReadTargets:           map[string]codexTargetMetrics{},
 			FailureReasons:        map[string]int{},
 			FailureContexts:       map[string]map[string]codexOccurrenceMetrics{},
 		}
@@ -1456,6 +1533,9 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	}
 	task.DurationSeconds += duration
 	task.Compactions += record.Compactions
+	if record.Compactions > 0 {
+		task.SessionsWithCompactions++
+	}
 	addCodexTokenUsage(&task.Tokens, record.Tokens)
 	task.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
 	task.ToolCalls += record.ToolCalls
@@ -1473,6 +1553,12 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(task.OwnedTooling, id, metrics)
 	}
+	addCodexTargetMetrics(task.ReadTargets, record.ReadTargets)
+	task.InlineOrchestrationCalls += record.InlineOrchestrationCalls
+	task.InlineOrchestrationBytes += record.InlineOrchestrationBytes
+	if record.InlineOrchestrationCalls > 0 {
+		task.InlineOrchestrationSessions++
+	}
 	for reason, count := range record.FailureReasons {
 		task.FailureReasons[reason] += count
 	}
@@ -1485,6 +1571,16 @@ func addCodexTransitionMetrics(target map[string]codexTransitionMetrics, additio
 		value.Count += count
 		value.Sessions++
 		target[transition] = value
+	}
+}
+
+func addCodexTargetMetrics(target, additions map[string]codexTargetMetrics) {
+	for path, addition := range additions {
+		metrics := target[path]
+		metrics.Reads += addition.Reads
+		metrics.SearchReadLoops += addition.SearchReadLoops
+		metrics.Sessions++
+		target[path] = metrics
 	}
 }
 
@@ -1535,7 +1631,7 @@ func estimatedTokens(bytes int64) int64 {
 	return (bytes + 3) / 4
 }
 
-func printCodexSessionInsights(report codexSessionInsightsReport, config repositoryConfig, limit int) {
+func printCodexSessionInsights(report codexSessionInsightsReport, config repositoryConfig, limit int, view string) {
 	summary := report.Summary
 	fmt.Printf("Muninn session insights since %s\n", report.Since)
 	fmt.Printf("Provider: %s\n", report.Provider)
@@ -1566,6 +1662,16 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Println("\nNo matching sessions.")
 		return
 	}
+	if view == "findings" {
+		printSessionFindings(report.Findings, limit)
+		return
+	}
+	if view == "overview" {
+		printCodexToolMetrics("\nShell output by command family:", "FAMILY", summary.ShellCommandsByFamily, limit, 32)
+		printOwnedTooling(summary.OwnedTooling, config.OwnedTools)
+		fmt.Printf("\nCurrent findings: %s. Use --findings for actions or --details for full evidence.\n", formatCodexCount(int64(len(report.Findings))))
+		return
+	}
 
 	rows := report.Tasks
 	if limit > 0 && len(rows) > limit {
@@ -1592,11 +1698,19 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	printCodexToolMetrics("\nShell output by command family:", "FAMILY", summary.ShellCommandsByFamily, 12, 32)
 	printCodexToolMetrics("\nMixed-shell output by family sequence:", "SEQUENCE", summary.MixedShellShapes, 12, 56)
 	printCodexTransitions(summary.CrossCallTransitions, 12)
+	printCodexReadTargets(summary.ReadTargets, 12)
 	printOwnedTooling(summary.OwnedTooling, config.OwnedTools)
 	printCodexFailureReasons(summary.FailureReasons)
 	printCodexFailureContexts(summary.FailureContexts, 12)
 
 	fmt.Println("\nSignals:")
+	if summary.InlineOrchestrationCalls > 0 {
+		fmt.Printf("- %s large inline orchestration calls carried %s input bytes across %s sessions. Extract repeated scripts into a tested helper or compact agent-facing command.\n",
+			formatCodexCount(int64(summary.InlineOrchestrationCalls)),
+			formatCodexCount(summary.InlineOrchestrationBytes),
+			formatCodexCount(int64(summary.InlineOrchestrationSessions)),
+		)
+	}
 	if summary.Compactions > 0 {
 		cachedRatio := float64(0)
 		if summary.Tokens.InputTokens > 0 {
@@ -1758,6 +1872,42 @@ func printOwnedTooling(metrics map[string]codexToolMetrics, configs []ownedToolC
 		if recommendation := strings.TrimSpace(row.Config.Recommendation); recommendation != "" {
 			fmt.Printf("  %s\n", recommendation)
 		}
+	}
+}
+
+func printCodexReadTargets(targets map[string]codexTargetMetrics, limit int) {
+	type row struct {
+		Path    string
+		Metrics codexTargetMetrics
+	}
+	rows := make([]row, 0, len(targets))
+	for path, metrics := range targets {
+		rows = append(rows, row{Path: path, Metrics: metrics})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.SearchReadLoops != rows[j].Metrics.SearchReadLoops {
+			return rows[i].Metrics.SearchReadLoops > rows[j].Metrics.SearchReadLoops
+		}
+		if rows[i].Metrics.Reads != rows[j].Metrics.Reads {
+			return rows[i].Metrics.Reads > rows[j].Metrics.Reads
+		}
+		return rows[i].Path < rows[j].Path
+	})
+	if len(rows) == 0 {
+		return
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println("\nRepository-relative read targets:")
+	fmt.Printf("%-72s %8s %10s %9s\n", "TARGET", "READS", "LOOPS", "SESSIONS")
+	for _, row := range rows {
+		fmt.Printf("%-72s %8s %10s %9s\n",
+			truncateCodexLabel(row.Path, 72),
+			formatCodexCount(int64(row.Metrics.Reads)),
+			formatCodexCount(int64(row.Metrics.SearchReadLoops)),
+			formatCodexCount(int64(row.Metrics.Sessions)),
+		)
 	}
 }
 

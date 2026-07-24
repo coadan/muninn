@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 1
+const sessionStoreSchemaVersion = 2
 
 type sessionNormalizer interface {
 	NormalizeSession(path string) (normalizedSession, error)
@@ -120,6 +120,8 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
 			total_tokens INTEGER NOT NULL DEFAULT 0,
 			selector_digests TEXT NOT NULL DEFAULT '[]',
+			targets TEXT NOT NULL DEFAULT '[]',
+			inline_bytes INTEGER NOT NULL DEFAULT 0,
 			UNIQUE(session_id, sequence)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sources_provider_path ON sources(provider, source_path)`,
@@ -152,6 +154,16 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		}
 	case err != nil:
 		return fmt.Errorf("read Muninn store schema version: %w", err)
+	case existing == "1":
+		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN targets TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("migrate Muninn store targets: %w", err)
+		}
+		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN inline_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("migrate Muninn store inline orchestration: %w", err)
+		}
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
 	case existing != fmt.Sprint(sessionStoreSchemaVersion):
 		return fmt.Errorf("unsupported Muninn store schema version %s (expected %d); remove the local cache to rebuild it", existing, sessionStoreSchemaVersion)
 	}
@@ -199,6 +211,10 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, session
 			}
 			session.Provider = provider
 			session.SourcePath = path
+			for index := range session.Events {
+				session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
+				session.Events[index].TargetCandidates = nil
+			}
 			if err := store.replaceSession(ctx, session, info.Size(), info.ModTime().UnixNano()); err != nil {
 				return err
 			}
@@ -271,8 +287,8 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		first_family, last_family, tool_round, call_occurred_at_ns, failed,
 		truncated, output_bytes, failure_reason, failure_context, input_tokens,
 		cached_input_tokens, uncached_input_tokens, output_tokens,
-		reasoning_tokens, total_tokens, selector_digests
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		reasoning_tokens, total_tokens, selector_digests, targets, inline_bytes
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -281,6 +297,10 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		selectorDigests, err := json.Marshal(event.SelectorDigests)
 		if err != nil {
 			return fmt.Errorf("encode selector digests: %w", err)
+		}
+		targets, err := json.Marshal(event.Targets)
+		if err != nil {
+			return fmt.Errorf("encode repository targets: %w", err)
 		}
 		callOccurredAt := int64(0)
 		if !event.CallOccurredAt.IsZero() {
@@ -311,6 +331,8 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 			event.Tokens.ReasoningTokens,
 			event.Tokens.TotalTokens,
 			string(selectorDigests),
+			string(targets),
+			event.InlineBytes,
 		); err != nil {
 			return fmt.Errorf("insert indexed session event: %w", err)
 		}
@@ -341,7 +363,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.output_bytes, events.failure_reason, events.failure_context,
 		events.input_tokens, events.cached_input_tokens,
 		events.uncached_input_tokens, events.output_tokens,
-		events.reasoning_tokens, events.total_tokens, events.selector_digests
+		events.reasoning_tokens, events.total_tokens, events.selector_digests,
+		events.targets, events.inline_bytes
 		FROM sessions
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
@@ -371,6 +394,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			failed           int
 			truncated        int
 			selectorDigests  string
+			targets          string
 		)
 		err := rows.Scan(
 			&sessionID,
@@ -398,6 +422,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&event.Tokens.ReasoningTokens,
 			&event.Tokens.TotalTokens,
 			&selectorDigests,
+			&targets,
+			&event.InlineBytes,
 		)
 		if err != nil {
 			return report, fmt.Errorf("read indexed session event: %w", err)
@@ -418,6 +444,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		event.Failed = failed != 0
 		event.Truncated = truncated != 0
 		_ = json.Unmarshal([]byte(selectorDigests), &event.SelectorDigests)
+		_ = json.Unmarshal([]byte(targets), &event.Targets)
 		session.Events = append(session.Events, event)
 	}
 	if err := rows.Err(); err != nil {

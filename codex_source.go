@@ -131,16 +131,18 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				}
 				sequence++
 				event := normalizedSessionEvent{
-					Sequence:        sequence,
-					OccurredAt:      timestamp,
-					Kind:            sessionEventToolCall,
-					ToolName:        name,
-					Family:          descriptor.Family,
-					Shape:           descriptor.Shape,
-					FirstFamily:     descriptor.First,
-					LastFamily:      descriptor.Last,
-					ToolRound:       toolRound,
-					SelectorDigests: descriptor.SelectorDigests,
+					Sequence:         sequence,
+					OccurredAt:       timestamp,
+					Kind:             sessionEventToolCall,
+					ToolName:         name,
+					Family:           descriptor.Family,
+					Shape:            descriptor.Shape,
+					FirstFamily:      descriptor.First,
+					LastFamily:       descriptor.Last,
+					ToolRound:        toolRound,
+					SelectorDigests:  descriptor.SelectorDigests,
+					TargetCandidates: codexReadTargetCandidates(name, payload.Arguments, payload.Input),
+					InlineBytes:      codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
 				}
 				if continuation {
 					event.FirstFamily = ""
