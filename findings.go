@@ -24,6 +24,24 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	summary := report.Summary
 	var findings []sessionFinding
 
+	for _, feedback := range report.Feedback {
+		findings = append(findings, sessionFinding{
+			Category: directFeedbackFindingCategory(feedback.Category),
+			Control:  feedback.Control,
+			Title:    "direct feedback: " + feedback.Signal,
+			Evidence: fmt.Sprintf("%s explicitly reported occurrences; category %s; sources %s; last seen %s",
+				formatCodexCount(int64(feedback.Occurrences)),
+				feedback.Category,
+				strings.Join(feedback.Sources, ", "),
+				feedback.LastSeen,
+			),
+			Action: directFeedbackAction(feedback),
+			Count:  feedback.Occurrences,
+			Target: feedback.Target,
+			score:  800 + feedback.Occurrences*10,
+		})
+	}
+
 	ownedConfigByID := map[string]ownedToolConfig{}
 	for _, owned := range config.OwnedTools {
 		ownedConfigByID[owned.ID] = owned
@@ -275,6 +293,36 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		return findings[i].Title < findings[j].Title
 	})
 	return diversifySessionFindings(findings)
+}
+
+func directFeedbackFindingCategory(category string) string {
+	switch category {
+	case "failure":
+		return "recurring-failure"
+	case "structure":
+		return "code-structure"
+	case "instructions":
+		return "instruction-discovery"
+	case "loop":
+		return "session-loop"
+	case "discovery":
+		return "discovery"
+	default:
+		return "agent-interface"
+	}
+}
+
+func directFeedbackAction(feedback agentFeedbackAggregate) string {
+	switch feedback.Control {
+	case "local":
+		return fmt.Sprintf("Improve the locally controlled %s surface, then resolve this feedback with `muninn feedback resolve`.", feedback.Target)
+	case "repository":
+		return fmt.Sprintf("Improve the %s repository interface or guidance, then resolve this feedback with `muninn feedback resolve`.", feedback.Target)
+	case "third-party":
+		return "Prefer a bounded local adapter or workaround and track the longer upstream path separately."
+	default:
+		return "Identify whether this belongs to local tooling, repository structure, or an upstream dependency before choosing the fix path."
+	}
 }
 
 func inlineToolEvidence(metrics map[string]codexInlineMetrics) string {

@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 4
+const sessionStoreSchemaVersion = 5
 
 type sessionNormalizer interface {
 	NormalizeSession(path string) (normalizedSession, error)
@@ -141,6 +141,22 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			UNIQUE(name, provider, repository_key)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_checkpoints_repository ON checkpoints(provider, repository_key, created_at_ns)`,
+		`CREATE TABLE IF NOT EXISTS feedback (
+			id INTEGER PRIMARY KEY,
+			repository_key TEXT NOT NULL,
+			source TEXT NOT NULL,
+			control TEXT NOT NULL,
+			category TEXT NOT NULL,
+			target TEXT NOT NULL,
+			signal TEXT NOT NULL,
+			occurrences INTEGER NOT NULL DEFAULT 1,
+			status TEXT NOT NULL DEFAULT 'open',
+			first_seen_ns INTEGER NOT NULL,
+			last_seen_ns INTEGER NOT NULL,
+			resolved_at_ns INTEGER NOT NULL DEFAULT 0,
+			UNIQUE(repository_key, source, control, category, target, signal)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_feedback_repository_status ON feedback(repository_key, status, last_seen_ns)`,
 	}
 	for _, statement := range statements {
 		if _, err := store.db.ExecContext(ctx, statement); err != nil {
@@ -186,6 +202,10 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("migrate Muninn store operation attribution: %w", err)
 		}
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
+	case existing == "4":
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}

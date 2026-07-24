@@ -43,6 +43,16 @@ muninn analyze --repo . --compare before-tooling-change
 muninn analyze --repo . --overview
 muninn analyze --repo . --focus structure
 muninn analyze --repo . --details
+muninn feedback add \
+  --category roundtrip \
+  --target bwb/pr \
+  --signal existing-pr-create-failed \
+  --source codex
+muninn feedback list --repo .
+muninn feedback resolve \
+  --category roundtrip \
+  --target bwb/pr \
+  --signal existing-pr-create-failed
 ```
 
 `muninn sessions` is a compatibility alias for `muninn analyze`.
@@ -63,6 +73,8 @@ Muninn highlights:
 - repeated safe repository-relative read targets and current file size
 - repeated or individually long inline code/orchestration payloads without
   retaining their content
+- normalized friction reported directly by Codex, Claude, OpenCode, humans,
+  or a provider-neutral agent
 
 Muninn includes recent tool events from sessions that started before the
 lookback boundary. This avoids losing active work simply because a session is
@@ -77,6 +89,15 @@ different local store, or `--no-cache` for a direct scan.
 Named checkpoints support before/after measurement. Trend output compares
 normalized rates such as calls and compactions per session, output per call,
 completion ratio, and failures/truncations per 1,000 calls.
+
+`muninn feedback` captures friction while it is fresh. It accepts only fixed
+categories plus bounded logical target/signal labels; it cannot store prose,
+commands, output, paths, URLs, prompts, session IDs, or secrets. Use
+`--control local` for tooling you can change directly, `repository` for
+repository interfaces or guidance, `third-party` for upstream dependencies,
+and `unknown` when ownership still needs triage. Repeated reports from
+different agent sources aggregate into one finding. Resolve the signal after
+its improvement lands so checkpoint comparisons can show it disappearing.
 
 ## Repository guidance
 
