@@ -56,14 +56,14 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	}
 	defer store.Close()
 	ctx := context.Background()
-	first, err := store.refresh(ctx, "codex", []string{sessionsDir}, repositoryRoot, codexSessionSource{}, false)
+	first, err := store.refresh(ctx, "codex", []string{sessionsDir}, repositoryRoot, codexSessionSource{}, ownershipCatalog{}, false)
 	if err != nil {
 		t.Fatalf("first refresh: %v", err)
 	}
 	if first.FilesIndexed != 1 || first.FilesReused != 0 {
 		t.Fatalf("unexpected first refresh: %#v", first)
 	}
-	second, err := store.refresh(ctx, "codex", []string{sessionsDir}, repositoryRoot, codexSessionSource{}, false)
+	second, err := store.refresh(ctx, "codex", []string{sessionsDir}, repositoryRoot, codexSessionSource{}, ownershipCatalog{}, false)
 	if err != nil {
 		t.Fatalf("second refresh: %v", err)
 	}

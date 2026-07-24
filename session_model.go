@@ -21,26 +21,28 @@ type normalizedSession struct {
 }
 
 type normalizedSessionEvent struct {
-	Sequence         int
-	OccurredAt       time.Time
-	Kind             string
-	ToolName         string
-	Family           string
-	Shape            string
-	FirstFamily      string
-	LastFamily       string
-	ToolRound        int
-	CallOccurredAt   time.Time
-	Failed           bool
-	Truncated        bool
-	OutputBytes      int64
-	FailureReason    string
-	FailureContext   string
-	Tokens           codexTokenUsage
-	SelectorDigests  []string
-	TargetCandidates []string
-	Targets          []string
-	InlineBytes      int64
+	Sequence          int
+	OccurredAt        time.Time
+	Kind              string
+	ToolName          string
+	Family            string
+	Shape             string
+	FirstFamily       string
+	LastFamily        string
+	ToolRound         int
+	CallOccurredAt    time.Time
+	Failed            bool
+	Truncated         bool
+	OutputBytes       int64
+	FailureReason     string
+	FailureContext    string
+	Tokens            codexTokenUsage
+	SelectorDigests   []string
+	CommandCandidates []ownedCommandInvocation
+	OwnedOperations   []string
+	TargetCandidates  []string
+	Targets           []string
+	InlineBytes       int64
 }
 
 func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string, since, generatedAt time.Time, ownership ownershipCatalog) (codexSessionRecord, error) {
@@ -81,6 +83,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			if event.InlineBytes > 0 {
 				record.InlineOrchestrationCalls++
 				record.InlineOrchestrationBytes += event.InlineBytes
+				record.InlineOrchestrationMaxBytes = max(record.InlineOrchestrationMaxBytes, event.InlineBytes)
 			}
 			record.ToolCallsByName[event.ToolName]++
 			addCodexToolMetrics(record.ToolMetricsByName, event.ToolName, 1, false, false, 0)
@@ -92,6 +95,13 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 1, false, false, 0)
+			}
+			ownedOperations := event.OwnedOperations
+			if len(ownedOperations) == 0 {
+				ownedOperations = ownership.classifyOperations(event.CommandCandidates)
+			}
+			for _, operation := range ownedOperations {
+				addCodexToolMetrics(record.OwnedOperations, operation, 1, false, false, 0)
 			}
 			targets := event.Targets
 			if len(targets) == 0 {
@@ -139,6 +149,22 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 0, event.Failed, event.Truncated, event.OutputBytes)
 			}
+			ownedOperations := event.OwnedOperations
+			if len(ownedOperations) == 0 {
+				ownedOperations = ownership.classifyOperations(event.CommandCandidates)
+			}
+			for _, operation := range ownedOperations {
+				definiteFailure := event.Failed && len(ownedOperations) == 1
+				addCodexToolMetrics(record.OwnedOperations, operation, 0, definiteFailure, event.Truncated, event.OutputBytes)
+				if !event.Failed {
+					continue
+				}
+				if len(ownedOperations) == 1 {
+					addCodexFailureContext(record.OwnedOperationFailureReasons, operation, event.FailureReason)
+				} else {
+					record.OwnedOperationAmbiguousFailures[operation]++
+				}
+			}
 		}
 	}
 	if record.StartedAt.IsZero() {
@@ -150,14 +176,17 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 
 func newCodexSessionRecord() codexSessionRecord {
 	return codexSessionRecord{
-		ToolCallsByName:       map[string]int{},
-		ToolMetricsByName:     map[string]codexToolMetrics{},
-		ShellCommandsByFamily: map[string]codexToolMetrics{},
-		MixedShellShapes:      map[string]codexToolMetrics{},
-		CrossCallTransitions:  map[string]int{},
-		OwnedTooling:          map[string]codexToolMetrics{},
-		ReadTargets:           map[string]codexTargetMetrics{},
-		FailureReasons:        map[string]int{},
-		FailureContexts:       map[string]map[string]int{},
+		ToolCallsByName:                 map[string]int{},
+		ToolMetricsByName:               map[string]codexToolMetrics{},
+		ShellCommandsByFamily:           map[string]codexToolMetrics{},
+		MixedShellShapes:                map[string]codexToolMetrics{},
+		CrossCallTransitions:            map[string]int{},
+		OwnedTooling:                    map[string]codexToolMetrics{},
+		OwnedOperations:                 map[string]codexToolMetrics{},
+		OwnedOperationAmbiguousFailures: map[string]int{},
+		OwnedOperationFailureReasons:    map[string]map[string]int{},
+		ReadTargets:                     map[string]codexTargetMetrics{},
+		FailureReasons:                  map[string]int{},
+		FailureContexts:                 map[string]map[string]int{},
 	}
 }

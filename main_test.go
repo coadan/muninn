@@ -377,15 +377,105 @@ func TestCodexSelectorDigestsRecognizeOwnedCommandSubstitution(t *testing.T) {
 	catalog := newOwnershipCatalog([]ownedToolConfig{{
 		ID:          "bwb",
 		Executables: []string{"bwb"},
+		Operations: []ownedOperationConfig{{
+			ID:   "status",
+			Args: []string{"task", "*", "status"},
+		}},
 	}})
+	arguments := `{"cmd":"eval \"$(bwb task example status --env-only --env-format shell)\"\nbreyta flows list"}`
 	digests := codexSelectorDigests(
 		"exec_command",
-		`{"cmd":"eval \"$(bwb task example status --env-only --env-format shell)\"\nbreyta flows list"}`,
+		arguments,
 		"",
 	)
 	matches := catalog.match(digests)
 	if len(matches) != 1 || matches[0] != "bwb" {
 		t.Fatalf("owned executable in command substitution was not recognized: %#v", matches)
+	}
+	operations := catalog.classifyOperations(codexCommandInvocations("exec_command", arguments, ""))
+	if len(operations) != 1 || operations[0] != "bwb/status" {
+		t.Fatalf("owned operation in command substitution was not classified: %#v", operations)
+	}
+}
+
+func TestOwnedOperationFailuresAreDefiniteOnlyForOneMatchedOperation(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      workspaceRoot,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt:      generatedAt.Add(-time.Minute),
+				Kind:            sessionEventToolCall,
+				ToolName:        "exec_command",
+				OwnedOperations: []string{"bwb/git", "bwb/test"},
+			},
+			{
+				OccurredAt:      generatedAt,
+				CallOccurredAt:  generatedAt.Add(-time.Minute),
+				Kind:            sessionEventToolOutput,
+				ToolName:        "exec_command",
+				Failed:          true,
+				FailureReason:   "test failure",
+				OutputBytes:     100,
+				OwnedOperations: []string{"bwb/git", "bwb/test"},
+			},
+		},
+	}
+	record, err := sessionRecordFromNormalized(session, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt, ownershipCatalog{})
+	if err != nil {
+		t.Fatalf("normalize session: %v", err)
+	}
+	for _, operation := range []string{"bwb/git", "bwb/test"} {
+		if got := record.OwnedOperations[operation].FailedCalls; got != 0 {
+			t.Fatalf("%s received ambiguous failure as definite: %d", operation, got)
+		}
+		if got := record.OwnedOperationAmbiguousFailures[operation]; got != 1 {
+			t.Fatalf("%s ambiguous failures=%d want 1", operation, got)
+		}
+	}
+}
+
+func TestOwnedOperationFailureReasonsSeparateExpectedFailures(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      workspaceRoot,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt:      generatedAt.Add(-time.Minute),
+				Kind:            sessionEventToolCall,
+				ToolName:        "exec_command",
+				OwnedOperations: []string{"bwb/test"},
+			},
+			{
+				OccurredAt:      generatedAt,
+				CallOccurredAt:  generatedAt.Add(-time.Minute),
+				Kind:            sessionEventToolOutput,
+				ToolName:        "exec_command",
+				Failed:          true,
+				FailureReason:   "test failure",
+				OwnedOperations: []string{"bwb/test"},
+			},
+		},
+	}
+	record, err := sessionRecordFromNormalized(session, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt, ownershipCatalog{})
+	if err != nil {
+		t.Fatalf("normalize session: %v", err)
+	}
+	if got := record.OwnedOperations["bwb/test"].FailedCalls; got != 1 {
+		t.Fatalf("definite failures=%d want 1", got)
+	}
+	if got := record.OwnedOperationFailureReasons["bwb/test"]["test failure"]; got != 1 {
+		t.Fatalf("test failure reasons=%d want 1", got)
+	}
+	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)
+	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
+	actionable, expected := ownedOperationFailureCounts(report.Summary.OwnedOperationFailureReasons["bwb/test"])
+	if actionable != 0 || expected != 1 {
+		t.Fatalf("failure split=(%d,%d) want (0,1)", actionable, expected)
 	}
 }
 
