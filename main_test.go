@@ -424,6 +424,17 @@ func TestCodexShellCommandClassifiesPushAsDelivery(t *testing.T) {
 	}
 }
 
+func TestCodexShellCommandClassifiesRevertAsDownstreamOutcome(t *testing.T) {
+	family, shape := codexShellCommandAnalysis(
+		"exec_command",
+		`{"cmd":"git -C repository revert --no-edit HEAD"}`,
+		"",
+	)
+	if family != "revert" || shape != "" {
+		t.Fatalf("git revert should establish a downstream outcome: (%q, %q)", family, shape)
+	}
+}
+
 func TestOperationsOnlyDoesNotClaimSharedLauncher(t *testing.T) {
 	catalog := newOwnershipCatalog([]ownedToolConfig{{
 		ID:             "void-cli",

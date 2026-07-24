@@ -54,6 +54,19 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			Current:       ratio(float64(now.Compactions), float64(now.Sessions)),
 			LowerIsBetter: true,
 		},
+		{
+			Name:              "downstream delivery failures",
+			Baseline:          ratio(float64(base.DownstreamQuality.DeliveriesWithFailure), float64(base.DownstreamQuality.Deliveries)),
+			Current:           ratio(float64(now.DownstreamQuality.DeliveriesWithFailure), float64(now.DownstreamQuality.Deliveries)),
+			LowerIsBetter:     true,
+			PercentageDisplay: true,
+		},
+		{
+			Name:              "successful recovery redeliveries",
+			Baseline:          ratio(float64(base.DownstreamQuality.RecoveredDeliveries), float64(base.DownstreamQuality.RedeliveryAttempts)),
+			Current:           ratio(float64(now.DownstreamQuality.RecoveredDeliveries), float64(now.DownstreamQuality.RedeliveryAttempts)),
+			PercentageDisplay: true,
+		},
 	}
 	fmt.Printf("\nTrend from checkpoint %q:\n", checkpointName)
 	fmt.Printf("%-32s %12s %12s %12s\n", "RATE", "BASELINE", "CURRENT", "CHANGE")

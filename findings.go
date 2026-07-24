@@ -595,6 +595,79 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	downstream := summary.DownstreamQuality
+	if downstream.Deliveries >= 2 &&
+		(downstream.DeliveriesWithFailure >= 2 || downstream.Reverts > 0) {
+		lever := "source code"
+		confidence := "medium"
+		action := "Strengthen the focused source boundary and check that should prevent this failure before delivery, then compare the downstream failure rate."
+		if downstream.FailedDeliveriesWithPreTests*2 < downstream.DeliveriesWithFailure {
+			lever = "tooling"
+			confidence = "high"
+			action = "Run the relevant fresh verification after the latest edit and before delivery, then compare the downstream failure rate."
+		}
+		cohortName, cohort := dominantDownstreamCohort(downstream.Cohorts)
+		target := cohortName
+		cohortEvidence := ""
+		if cohortName != "" {
+			cohortEvidence = fmt.Sprintf(
+				"; top cohort %s: %s/%s deliveries failed downstream, %s failure runs, %s recovery redeliveries, and fresh tests before %s/%s failures",
+				cohortName,
+				formatCodexCount(int64(cohort.DeliveriesWithFailure)),
+				formatCodexCount(int64(cohort.Deliveries)),
+				formatCodexCount(int64(cohort.FailureRuns)),
+				formatCodexCount(int64(cohort.RecoveredDeliveries)),
+				formatCodexCount(int64(cohort.FailedDeliveriesWithPreTests)),
+				formatCodexCount(int64(cohort.DeliveriesWithFailure)),
+			)
+		}
+		check, checkCount, _ := dominantMetricDimension(downstream.FailureChecks)
+		checkEvidence := ""
+		if check != "" {
+			checkEvidence = fmt.Sprintf(
+				"; top downstream check %s: %s failures",
+				check,
+				formatCodexCount(int64(checkCount)),
+			)
+		}
+		if downstream.RedeliveryAttempts > downstream.RecoveredDeliveries {
+			action = "Fix the recurring downstream failure at its owning source or verification boundary and require the failed check to pass before redelivery."
+		}
+		lastSeen := sessionFindingLastSeen(report, "downstream-failure", "")
+		if lastSeen == "" {
+			lastSeen = sessionFindingLastSeen(report, "downstream-revert", "")
+		}
+		findings = append(findings, sessionFinding{
+			Category: "delivery-quality",
+			Control:  "repository",
+			Title:    "delivered changes repeatedly fail downstream checks",
+			Evidence: fmt.Sprintf(
+				"%s/%s deliveries failed downstream across %s sessions, with %s failure runs, %s follow-up edit cycles, %s/%s recovery redeliveries, %s reverts, and fresh tests before %s/%s failures%s%s",
+				formatCodexCount(int64(downstream.DeliveriesWithFailure)),
+				formatCodexCount(int64(downstream.Deliveries)),
+				formatCodexCount(int64(downstream.Sessions)),
+				formatCodexCount(int64(downstream.FailureRuns)),
+				formatCodexCount(int64(downstream.FollowUpEditCycles)),
+				formatCodexCount(int64(downstream.RecoveredDeliveries)),
+				formatCodexCount(int64(downstream.RedeliveryAttempts)),
+				formatCodexCount(int64(downstream.Reverts)),
+				formatCodexCount(int64(downstream.FailedDeliveriesWithPreTests)),
+				formatCodexCount(int64(downstream.DeliveriesWithFailure)),
+				cohortEvidence,
+				checkEvidence,
+			),
+			Action:     action,
+			Count:      downstream.DeliveriesWithFailure,
+			Sessions:   downstream.Sessions,
+			Target:     target,
+			LastSeen:   lastSeen,
+			Lever:      lever,
+			Confidence: confidence,
+			score: 760 + downstream.DeliveriesWithFailure*40 +
+				downstream.Reverts*80 + downstream.FollowUpEditCycles*20,
+		})
+	}
+
 	searchRead := codexMixedSearchReadMetrics(summary.MixedShellShapes)
 	if searchRead.Calls >= 10 && searchRead.EstimatedOutputTokens >= 50_000 {
 		findings = append(findings, sessionFinding{
@@ -663,6 +736,25 @@ func dominantDeliveryReworkCohort(cohorts map[string]deliveryCohortMetrics) (str
 			(value.ReviewToEditCycles == metrics.ReviewToEditCycles &&
 				(value.DeliveriesWithRework > metrics.DeliveriesWithRework ||
 					(value.DeliveriesWithRework == metrics.DeliveriesWithRework && candidate < name))) {
+			name = candidate
+			metrics = value
+		}
+	}
+	return name, metrics
+}
+
+func dominantDownstreamCohort(cohorts map[string]downstreamCohortMetrics) (string, downstreamCohortMetrics) {
+	name := ""
+	metrics := downstreamCohortMetrics{}
+	for candidate, value := range cohorts {
+		if candidate == "(unknown)" || value.DeliveriesWithFailure == 0 {
+			continue
+		}
+		if value.DeliveriesWithFailure > metrics.DeliveriesWithFailure ||
+			(value.DeliveriesWithFailure == metrics.DeliveriesWithFailure &&
+				value.FailureRuns > metrics.FailureRuns) ||
+			(value.DeliveriesWithFailure == metrics.DeliveriesWithFailure &&
+				value.FailureRuns == metrics.FailureRuns && (name == "" || candidate < name)) {
 			name = candidate
 			metrics = value
 		}

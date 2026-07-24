@@ -86,6 +86,9 @@ Muninn highlights:
 - verification effectiveness by configured test operation or generic test
   family, including failed runs, fail-fix-pass deliveries, and rework rates
   with versus without each check
+- downstream delivery outcomes kept separate from review cleanup: terminal
+  test/build/check failures, explicit reverts, exact-target fix cycles,
+  checked redeliveries, recovery, and time-to-failure/recovery by cohort
 - total, cached, uncached, and per-session input-token cost
 - fresh-token and visible tool-output volume
 - long low-output tool waits, with tests, builds, and review waits reported
@@ -235,6 +238,12 @@ path-normalization inputs. Test/review comparisons are observational and do not
 claim that the executed check covered the edited subsystem. Long-running tool
 outputs count verification or delivery only at the terminal continuation, so
 polling does not create duplicate check outcomes.
+
+Downstream failures count only after a successful delivery and before unrelated
+editing. Recovery requires an edit to an exact delivered target, the same
+failed check passing, and another successful delivery. This deliberately
+excludes ordinary review-driven cleanup and unrelated work in a long-lived
+session.
 
 Phase boundaries come from typed tool families, configured operations, edits,
 terminal delivery, and post-delivery review. Token deltas belong to the latest

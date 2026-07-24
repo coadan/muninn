@@ -12,24 +12,25 @@ import (
 // A completion episode is the privacy-safe analytical proxy for one task. It
 // starts after the previous completion marker and ends at the next marker.
 type codexTaskEpisode struct {
-	StartedAt       time.Time
-	EndedAt         time.Time
-	Completed       bool
-	LeftCensored    bool
-	Tokens          codexTokenUsage
-	ToolCalls       int
-	FailedCalls     int
-	Compactions     int
-	ToolOutputBytes int64
-	Families        map[string]int
-	OwnedOperations map[string]int
-	Targets         map[string]int
-	TargetCohorts   map[string]int
-	Phases          map[string]taskPhaseCost
-	currentPhase    string
-	lastObservedAt  time.Time
-	delivered       bool
-	reworkActive    bool
+	StartedAt         time.Time
+	EndedAt           time.Time
+	Completed         bool
+	LeftCensored      bool
+	Tokens            codexTokenUsage
+	ToolCalls         int
+	FailedCalls       int
+	Compactions       int
+	ToolOutputBytes   int64
+	Families          map[string]int
+	OwnedOperations   map[string]int
+	Targets           map[string]int
+	TargetCohorts     map[string]int
+	Phases            map[string]taskPhaseCost
+	currentPhase      string
+	lastObservedAt    time.Time
+	delivered         bool
+	reworkActive      bool
+	editSinceDelivery bool
 }
 
 type taskPhaseCost struct {
@@ -1097,12 +1098,14 @@ func (episode *codexTaskEpisode) observePhase(
 			metrics.FailedCalls++
 		}
 		if event.Failed && !event.OperationContinues && episode.delivered &&
+			!episode.editSinceDelivery &&
 			len(downstreamCheckIDs(event, operations)) > 0 {
 			episode.reworkActive = true
 		}
 		if !event.Failed && !event.OperationContinues && deliveryOperation(event, operations) {
 			episode.delivered = true
 			episode.reworkActive = false
+			episode.editSinceDelivery = false
 		}
 	case sessionEventCompaction:
 		metrics.Compactions++
@@ -1122,6 +1125,9 @@ func (episode *codexTaskEpisode) phaseForToolCall(
 	}
 	if episode.delivered && reviewStart(event, operations) {
 		episode.reworkActive = true
+	}
+	if episode.delivered && event.ToolName == "apply_patch" && !episode.reworkActive {
+		episode.editSinceDelivery = true
 	}
 	if episode.reworkActive {
 		return "rework"
@@ -1828,6 +1834,131 @@ func printDeliveryReworkAnalysis(metrics deliveryReworkMetrics) {
 	); checks != "" {
 		fmt.Printf("Verification effectiveness: %s\n", checks)
 	}
+}
+
+func printDownstreamQualityAnalysis(metrics downstreamQualityMetrics) {
+	if metrics.Deliveries == 0 && metrics.DeliveriesWithFailure == 0 && metrics.Reverts == 0 {
+		return
+	}
+	fmt.Printf(
+		"Downstream quality: %s deliveries, %s failed downstream (%.0f%%), %s failure runs, %s follow-up edit cycles, %s/%s recovery redeliveries, %s reverts\n",
+		formatCodexCount(int64(metrics.Deliveries)),
+		formatCodexCount(int64(metrics.DeliveriesWithFailure)),
+		100*ratio(float64(metrics.DeliveriesWithFailure), float64(metrics.Deliveries)),
+		formatCodexCount(int64(metrics.FailureRuns)),
+		formatCodexCount(int64(metrics.FollowUpEditCycles)),
+		formatCodexCount(int64(metrics.RecoveredDeliveries)),
+		formatCodexCount(int64(metrics.RedeliveryAttempts)),
+		formatCodexCount(int64(metrics.Reverts)),
+	)
+	if metrics.DeliveriesWithFailure > 0 {
+		fmt.Printf(
+			"Fresh verification before downstream failure: %s/%s affected deliveries; failure checks %s\n",
+			formatCodexCount(int64(metrics.FailedDeliveriesWithPreTests)),
+			formatCodexCount(int64(metrics.DeliveriesWithFailure)),
+			formatMetricDimensions(metrics.FailureChecks),
+		)
+	}
+	var timings []string
+	if metrics.TimeToFailureSeconds.Count > 0 {
+		timings = append(timings, fmt.Sprintf(
+			"failure p50/p90 %s/%s",
+			formatDurationSeconds(metrics.TimeToFailureSeconds.P50),
+			formatDurationSeconds(metrics.TimeToFailureSeconds.P90),
+		))
+	}
+	if metrics.TimeToRecoverySeconds.Count > 0 {
+		timings = append(timings, fmt.Sprintf(
+			"recovery p50/p90 %s/%s",
+			formatDurationSeconds(metrics.TimeToRecoverySeconds.P50),
+			formatDurationSeconds(metrics.TimeToRecoverySeconds.P90),
+		))
+	}
+	if len(timings) > 0 {
+		fmt.Printf("Downstream timing: %s\n", strings.Join(timings, "; "))
+	}
+	if checks := formatDownstreamPreDeliveryChecks(metrics); checks != "" {
+		fmt.Printf("Downstream rate by pre-delivery check: %s\n", checks)
+	}
+	if cohorts := formatDownstreamCohorts(metrics.Cohorts, 3); cohorts != "" {
+		fmt.Printf("Downstream rate by cohort: %s\n", cohorts)
+	}
+}
+
+func formatDownstreamPreDeliveryChecks(metrics downstreamQualityMetrics) string {
+	type row struct {
+		name    string
+		metrics downstreamCheckMetrics
+	}
+	rows := make([]row, 0, len(metrics.PreDeliveryChecks))
+	for name, check := range metrics.PreDeliveryChecks {
+		if check.Deliveries == 0 {
+			continue
+		}
+		rows = append(rows, row{name: name, metrics: check})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].metrics.Deliveries != rows[j].metrics.Deliveries {
+			return rows[i].metrics.Deliveries > rows[j].metrics.Deliveries
+		}
+		return rows[i].name < rows[j].name
+	})
+	if len(rows) > 3 {
+		rows = rows[:3]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		withoutDeliveries := metrics.Deliveries - row.metrics.Deliveries
+		withoutFailures := metrics.DeliveriesWithFailure - row.metrics.DeliveriesWithFailure
+		parts = append(parts, fmt.Sprintf(
+			"%s %s/%s with failure vs %s/%s without",
+			row.name,
+			formatCodexCount(int64(row.metrics.DeliveriesWithFailure)),
+			formatCodexCount(int64(row.metrics.Deliveries)),
+			formatCodexCount(int64(withoutFailures)),
+			formatCodexCount(int64(withoutDeliveries)),
+		))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func formatDownstreamCohorts(cohorts map[string]downstreamCohortMetrics, limit int) string {
+	type row struct {
+		name    string
+		metrics downstreamCohortMetrics
+	}
+	rows := make([]row, 0, len(cohorts))
+	for name, metrics := range cohorts {
+		if metrics.DeliveriesWithFailure == 0 || name == "(unknown)" {
+			continue
+		}
+		rows = append(rows, row{name: name, metrics: metrics})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].metrics.DeliveriesWithFailure != rows[j].metrics.DeliveriesWithFailure {
+			return rows[i].metrics.DeliveriesWithFailure > rows[j].metrics.DeliveriesWithFailure
+		}
+		if rows[i].metrics.Deliveries != rows[j].metrics.Deliveries {
+			return rows[i].metrics.Deliveries > rows[j].metrics.Deliveries
+		}
+		return rows[i].name < rows[j].name
+	})
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		parts = append(parts, fmt.Sprintf(
+			"%s %s/%s failed, %s recovered, tests before %s/%s failures",
+			row.name,
+			formatCodexCount(int64(row.metrics.DeliveriesWithFailure)),
+			formatCodexCount(int64(row.metrics.Deliveries)),
+			formatCodexCount(int64(row.metrics.RecoveredDeliveries)),
+			formatCodexCount(int64(row.metrics.FailedDeliveriesWithPreTests)),
+			formatCodexCount(int64(row.metrics.DeliveriesWithFailure)),
+		))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func formatVerificationChecks(

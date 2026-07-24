@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 10
+const sessionStoreSchemaVersion = 11
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionNormalizer interface {
@@ -236,6 +236,10 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
 	case existing == "9":
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
+	case existing == "10":
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
