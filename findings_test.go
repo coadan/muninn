@@ -124,7 +124,14 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 		Seconds:  300,
 		Sessions: 3,
 	}
-	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	report.Summary.ProgressStalls["mixed shell"] = codexWaitMetrics{
+		Calls:    20,
+		Seconds:  900,
+		Sessions: 4,
+	}
+	config := defaultRepositoryConfig()
+	config.OwnedTools = []ownedToolConfig{{ID: "bwb"}}
+	findings := buildSessionFindings(report, config)
 	bySignal := map[string]sessionFinding{}
 	for _, finding := range findings {
 		bySignal[finding.Signal] = finding
@@ -143,6 +150,9 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 	if _, exists := bySignal["session-loop/progress-stall/tests"]; exists {
 		t.Fatalf("expected test waits should not produce a finding: %#v", findings)
 	}
+	if _, exists := bySignal["session-loop/progress-stall/mixed-shell"]; exists {
+		t.Fatalf("unattributed waits should remain metrics, not actionable findings: %#v", findings)
+	}
 }
 
 func TestBuildSessionFindingsSuppressesOnlyExactSignal(t *testing.T) {
@@ -150,6 +160,7 @@ func TestBuildSessionFindingsSuppressesOnlyExactSignal(t *testing.T) {
 	report.Summary.ProgressStalls["bwb/api-start"] = codexWaitMetrics{Calls: 2, Seconds: 60, Sessions: 2}
 	report.Summary.ProgressStalls["bwb/fixture"] = codexWaitMetrics{Calls: 2, Seconds: 60, Sessions: 2}
 	config := defaultRepositoryConfig()
+	config.OwnedTools = []ownedToolConfig{{ID: "bwb"}}
 	config.SuppressSignals = []string{"session-loop/progress-stall/bwb/api-start"}
 	findings := buildSessionFindings(report, config)
 	if len(findings) != 1 {
@@ -228,22 +239,24 @@ func TestSessionFindingSignalIsPrivacySafeAndBounded(t *testing.T) {
 
 func TestBuildSessionFindingsRanksRecentSignalsFirst(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
-	report.Summary.ProgressStalls["older-high-count"] = codexWaitMetrics{
+	report.Summary.ProgressStalls["bwb/older-high-count"] = codexWaitMetrics{
 		Calls: 20, Seconds: 600, Sessions: 5,
 	}
-	report.Summary.ProgressStalls["recent-low-count"] = codexWaitMetrics{
+	report.Summary.ProgressStalls["bwb/recent-low-count"] = codexWaitMetrics{
 		Calls: 2, Seconds: 40, Sessions: 2,
 	}
 	older := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
 	recent := older.Add(24 * time.Hour)
-	touchSessionActivity(report.Summary.Activity, "progress-stall", "older-high-count", older)
-	touchSessionActivity(report.Summary.Activity, "progress-stall", "recent-low-count", recent)
+	touchSessionActivity(report.Summary.Activity, "progress-stall", "bwb/older-high-count", older)
+	touchSessionActivity(report.Summary.Activity, "progress-stall", "bwb/recent-low-count", recent)
 
-	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	config := defaultRepositoryConfig()
+	config.OwnedTools = []ownedToolConfig{{ID: "bwb"}}
+	findings := buildSessionFindings(report, config)
 	if len(findings) != 2 {
 		t.Fatalf("expected two progress findings, got %#v", findings)
 	}
-	if findings[0].Target != "recent-low-count" {
+	if findings[0].Target != "bwb/recent-low-count" {
 		t.Fatalf("freshness should outrank cumulative score: %#v", findings)
 	}
 	if findings[0].LastSeen != "2026-07-24T08:00:00Z" ||

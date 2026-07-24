@@ -437,12 +437,14 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	}
 
 	for context, metrics := range summary.ProgressStalls {
-		if metrics.Calls < 2 || metrics.Seconds < 40 {
+		if metrics.Calls < 2 ||
+			metrics.Seconds < 40 ||
+			!locallyControlledOutputContext(context, config.OwnedTools) {
 			continue
 		}
 		findings = append(findings, sessionFinding{
 			Category: "session-loop",
-			Control:  "repository",
+			Control:  "local",
 			Title:    "progress stalls while waiting on: " + context,
 			Evidence: fmt.Sprintf("%s low-output waits consumed %s across %s sessions; waits for tests, builds, local reviews, and remote GitHub review were classified separately",
 				formatCodexCount(int64(metrics.Calls)),
