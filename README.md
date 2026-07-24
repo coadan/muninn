@@ -215,9 +215,12 @@ must remain private.
 Completion episodes are observational task proxies, not semantic claims about
 user intent. Muninn starts a new episode after each provider completion marker.
 It excludes response-only and left-censored episodes from completed tool-task
-distributions. Delivery rework similarly measures sequence evidence; when it
-cannot distinguish tooling, guidance, and source ownership, it reports
-`unknown` instead of guessing from review text.
+distributions. Fresh-token tail associations compare operation, command-family,
+and source-cohort prevalence in the highest-cost 10% with ordinary completed
+tasks. They identify useful comparison cohorts, not causal overhead; one-call
+associations may only mark a harder task class. Delivery rework similarly
+measures sequence evidence; when it cannot distinguish tooling, guidance, and
+source ownership, it reports `unknown` instead of guessing from review text.
 
 Delivery cohorts use bounded repository-relative directory prefixes. Exact
 rework hotspots are shown only for files that both belonged to the preceding

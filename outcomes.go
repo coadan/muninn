@@ -441,7 +441,13 @@ func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncr
 			if episode.TargetCohorts == nil {
 				episode.TargetCohorts = map[string]int{}
 			}
-			for cohort := range eventTargetCohorts(event.Targets) {
+			var sourceTargets []string
+			for _, target := range event.Targets {
+				if taskCostSourceTarget(target) {
+					sourceTargets = append(sourceTargets, target)
+				}
+			}
+			for cohort := range eventTargetCohorts(sourceTargets) {
 				if cohort != "(unknown)" {
 					episode.TargetCohorts[cohort]++
 				}
@@ -498,6 +504,7 @@ type taskCostTailDriver struct {
 	OrdinaryEpisodes int     `json:"ordinaryEpisodes"`
 	TailCalls        int     `json:"tailCalls"`
 	OrdinaryCalls    int     `json:"ordinaryCalls"`
+	PrevalenceDelta  float64 `json:"prevalenceDelta"`
 	PrevalenceLift   float64 `json:"prevalenceLift"`
 }
 
@@ -615,15 +622,16 @@ func taskCostTailDimension(
 			OrdinaryEpisodes: current.ordinaryEpisodes,
 			TailCalls:        current.tailCalls,
 			OrdinaryCalls:    current.ordinaryCalls,
+			PrevalenceDelta:  tailRate - ordinaryRate,
 			PrevalenceLift:   lift,
 		})
 	}
 	sort.Slice(drivers, func(i, j int) bool {
+		if drivers[i].PrevalenceDelta != drivers[j].PrevalenceDelta {
+			return drivers[i].PrevalenceDelta > drivers[j].PrevalenceDelta
+		}
 		if drivers[i].PrevalenceLift != drivers[j].PrevalenceLift {
 			return drivers[i].PrevalenceLift > drivers[j].PrevalenceLift
-		}
-		if drivers[i].TailEpisodes != drivers[j].TailEpisodes {
-			return drivers[i].TailEpisodes > drivers[j].TailEpisodes
 		}
 		return drivers[i].Name < drivers[j].Name
 	})
@@ -631,6 +639,20 @@ func taskCostTailDimension(
 		drivers = drivers[:3]
 	}
 	return drivers
+}
+
+func taskCostSourceTarget(target string) bool {
+	if reworkTargetLever(target) != "source code" {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(target)) {
+	case ".clj", ".cljc", ".cljs", ".go", ".java", ".kt", ".kts", ".py",
+		".rb", ".rs", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte",
+		".css", ".scss", ".sql":
+		return true
+	default:
+		return false
+	}
 }
 
 func summarizeOutcomeDistribution(values []int64) outcomeDistribution {
@@ -708,7 +730,7 @@ func printCompletionEpisodeAnalysis(analysis completionEpisodeAnalysis) {
 		formatDurationSeconds(analysis.DurationSeconds.P90),
 	)
 	if drivers := formatTaskCostTailDrivers(analysis.TailDrivers); drivers != "" {
-		fmt.Printf("Fresh-token tail drivers: %s\n", drivers)
+		fmt.Printf("Fresh-token tail associations: %s\n", drivers)
 	}
 }
 
@@ -728,13 +750,15 @@ func formatTaskCostTailDrivers(drivers taskCostTailDrivers) string {
 		rendered := make([]string, 0, len(dimension.drivers))
 		for _, driver := range dimension.drivers {
 			rendered = append(rendered, fmt.Sprintf(
-				"%s %s/%s tail vs %s/%s ordinary (%.1fx)",
+				"%s %s/%s tail vs %s/%s ordinary (+%.0fpp, %.1fx; %s tail calls)",
 				driver.Name,
 				formatCodexCount(int64(driver.TailEpisodes)),
 				formatCodexCount(int64(drivers.TailEpisodes)),
 				formatCodexCount(int64(driver.OrdinaryEpisodes)),
 				formatCodexCount(int64(drivers.OrdinaryEpisodes)),
+				100*driver.PrevalenceDelta,
 				driver.PrevalenceLift,
+				formatCodexCount(int64(driver.TailCalls)),
 			))
 		}
 		parts = append(parts, dimension.label+" "+strings.Join(rendered, ", "))
@@ -747,20 +771,15 @@ func dominantTaskCostTailDriver(drivers taskCostTailDrivers) (kind string, drive
 		kind    string
 		drivers []taskCostTailDriver
 	}{
-		{kind: "cohort", drivers: drivers.TargetCohorts},
 		{kind: "operation", drivers: drivers.OwnedOperations},
+		{kind: "cohort", drivers: drivers.TargetCohorts},
 		{kind: "family", drivers: drivers.Families},
 	} {
-		for _, candidate := range dimension.drivers {
-			if candidate.PrevalenceLift > driver.PrevalenceLift ||
-				(candidate.PrevalenceLift == driver.PrevalenceLift &&
-					candidate.TailEpisodes > driver.TailEpisodes) {
-				kind = dimension.kind
-				driver = candidate
-			}
+		if len(dimension.drivers) > 0 {
+			return dimension.kind, dimension.drivers[0]
 		}
 	}
-	return kind, driver
+	return "", taskCostTailDriver{}
 }
 
 func printDeliveryReworkAnalysis(metrics deliveryReworkMetrics) {

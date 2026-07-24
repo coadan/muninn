@@ -377,6 +377,7 @@ func TestBuildSessionFindingsLocalizesCompletedTaskCostTail(t *testing.T) {
 				Name:             "packages/runtime",
 				TailEpisodes:     4,
 				OrdinaryEpisodes: 6,
+				PrevalenceDelta:  0.83,
 				PrevalenceLift:   6,
 			}},
 		},
@@ -387,7 +388,7 @@ func TestBuildSessionFindingsLocalizesCompletedTaskCostTail(t *testing.T) {
 	}
 	finding := findings[0]
 	if finding.Target != "packages/runtime" ||
-		!strings.Contains(finding.Evidence, "strongest observed cohort driver packages/runtime") ||
+		!strings.Contains(finding.Evidence, "strongest observed cohort association packages/runtime") ||
 		!strings.Contains(finding.Action, "repository cohort") {
 		t.Fatalf("localized task-cost finding mismatch: %#v", finding)
 	}
