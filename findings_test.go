@@ -67,6 +67,35 @@ func TestBuildSessionFindingsFlagsOneVeryLongInlineToolCall(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsShowsDominantWorkflowTransitions(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.CrossCallTransitions = map[string]codexTransitionMetrics{
+		"tests -> tests":                                     {Count: 7, Sessions: 4},
+		"tests -> build, lint, or install":                   {Count: 6, Sessions: 3},
+		"build, lint, or install -> tests":                   {Count: 5, Sessions: 3},
+		"build, lint, or install -> build, lint, or install": {Count: 4, Sessions: 2},
+	}
+
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "agent-interface" {
+		t.Fatalf("workflow finding mismatch: %#v", findings)
+	}
+	evidence := findings[0].Evidence
+	for _, want := range []string{
+		"22 transitions across at least 4 sessions",
+		"tests -> tests: 7 transitions/4 sessions",
+		"tests -> build, lint, or install: 6 transitions/3 sessions",
+		"build, lint, or install -> tests: 5 transitions/3 sessions",
+	} {
+		if !strings.Contains(evidence, want) {
+			t.Fatalf("evidence %q missing %q", evidence, want)
+		}
+	}
+	if strings.Contains(evidence, "build, lint, or install -> build, lint, or install") {
+		t.Fatalf("evidence should contain only the top three transitions: %q", evidence)
+	}
+}
+
 func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	latestCall := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
