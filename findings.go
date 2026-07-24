@@ -1425,9 +1425,20 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"delegation-cost":       3,
 		"task-cost":             2,
 	}
+	codeStructureSelections := selectRepositoryScopedCodeStructureFindings(
+		findings,
+		limits["code-structure"],
+	)
 	counts := map[string]int{}
 	result := make([]sessionFinding, 0, len(findings))
-	for _, finding := range findings {
+	for index, finding := range findings {
+		if finding.Category == "code-structure" {
+			if !codeStructureSelections[index] {
+				continue
+			}
+			result = append(result, finding)
+			continue
+		}
 		if limit := limits[finding.Category]; limit > 0 && counts[finding.Category] >= limit {
 			continue
 		}
@@ -1435,6 +1446,82 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		result = append(result, finding)
 	}
 	return result
+}
+
+func selectRepositoryScopedCodeStructureFindings(findings []sessionFinding, limit int) map[int]bool {
+	selected := map[int]bool{}
+	if limit <= 0 {
+		return selected
+	}
+
+	bestByScope := map[string]int{}
+	for index, finding := range findings {
+		if finding.Category != "code-structure" {
+			continue
+		}
+		scope := sessionFindingRepositoryScope(finding.Target)
+		best, exists := bestByScope[scope]
+		if !exists || sessionFindingHigherImpact(finding, findings[best]) {
+			bestByScope[scope] = index
+		}
+	}
+
+	representatives := make([]int, 0, len(bestByScope))
+	for _, index := range bestByScope {
+		representatives = append(representatives, index)
+	}
+	sort.Slice(representatives, func(i, j int) bool {
+		left := findings[representatives[i]]
+		right := findings[representatives[j]]
+		if sessionFindingHigherImpact(left, right) {
+			return true
+		}
+		if sessionFindingHigherImpact(right, left) {
+			return false
+		}
+		return representatives[i] < representatives[j]
+	})
+	if len(representatives) > limit {
+		representatives = representatives[:limit]
+	}
+	for _, index := range representatives {
+		selected[index] = true
+	}
+
+	for index, finding := range findings {
+		if len(selected) >= limit {
+			break
+		}
+		if finding.Category == "code-structure" {
+			selected[index] = true
+		}
+	}
+	return selected
+}
+
+func sessionFindingHigherImpact(left, right sessionFinding) bool {
+	if left.score != right.score {
+		return left.score > right.score
+	}
+	if left.Sessions != right.Sessions {
+		return left.Sessions > right.Sessions
+	}
+	if left.Count != right.Count {
+		return left.Count > right.Count
+	}
+	return left.LastSeen > right.LastSeen
+}
+
+func sessionFindingRepositoryScope(target string) string {
+	target = strings.TrimPrefix(filepath.ToSlash(filepath.Clean(target)), "./")
+	parts := strings.Split(target, "/")
+	if len(parts) >= 3 && parts[0] == ".workbench" && parts[1] == "repos" {
+		return parts[2]
+	}
+	if len(parts) >= 3 && parts[0] == ".worktrees" {
+		return parts[2]
+	}
+	return "workspace"
 }
 
 func printSessionFindings(findings []sessionFinding, limit int) {

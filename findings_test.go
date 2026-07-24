@@ -340,6 +340,54 @@ func TestBuildSessionFindingsRanksRecentSignalsFirst(t *testing.T) {
 	}
 }
 
+func TestDiversifySessionFindingsPreservesHighImpactRepositoryScopes(t *testing.T) {
+	findings := []sessionFinding{
+		{Category: "code-structure", Target: "bwb-src/recent.go", LastSeen: "2026-07-24T12:00:00Z", score: 400},
+		{Category: "code-structure", Target: "bwb-src/second.go", LastSeen: "2026-07-24T11:00:00Z", score: 410},
+		{Category: "code-structure", Target: "bwb-src/dominant.go", LastSeen: "2026-07-24T10:00:00Z", score: 700},
+		{Category: "code-structure", Target: "bwb-src/fourth.go", LastSeen: "2026-07-24T09:00:00Z", score: 390},
+		{Category: "code-structure", Target: "bwb-src/fifth.go", LastSeen: "2026-07-24T08:00:00Z", score: 380},
+		{Category: "code-structure", Target: "bwb-src/sixth.go", LastSeen: "2026-07-24T07:00:00Z", score: 370},
+		{Category: "code-structure", Target: ".workbench/repos/breyta/src/installations.clj", LastSeen: "2026-07-20T12:00:00Z", score: 1600},
+		{Category: "code-structure", Target: ".workbench/repos/breyta-cli/internal/cli/flows_lint.go", LastSeen: "2026-07-19T12:00:00Z", score: 900},
+	}
+
+	got := diversifySessionFindings(findings)
+	if len(got) != 6 {
+		t.Fatalf("code-structure findings should remain capped at six: %#v", got)
+	}
+	targets := map[string]bool{}
+	for _, finding := range got {
+		targets[finding.Target] = true
+	}
+	for _, target := range []string{
+		"bwb-src/dominant.go",
+		".workbench/repos/breyta/src/installations.clj",
+		".workbench/repos/breyta-cli/internal/cli/flows_lint.go",
+	} {
+		if !targets[target] {
+			t.Fatalf("repository-scope representative %q was crowded out: %#v", target, got)
+		}
+	}
+	if targets["bwb-src/sixth.go"] {
+		t.Fatalf("lower-impact same-scope finding should make room for another repository: %#v", got)
+	}
+}
+
+func TestSessionFindingRepositoryScopeRecognizesWorkbenchSources(t *testing.T) {
+	tests := map[string]string{
+		"bwb-src/task.go":                                      "workspace",
+		".workbench/repos/breyta/src/runtime.clj":              "breyta",
+		".workbench/repos/breyta-cli/internal/cli/flows_v1.go": "breyta-cli",
+		".worktrees/my-task/breyta/src/runtime.clj":            "breyta",
+	}
+	for target, want := range tests {
+		if got := sessionFindingRepositoryScope(target); got != want {
+			t.Fatalf("scope for %q=%q want %q", target, got, want)
+		}
+	}
+}
+
 func TestBuildSessionFindingsAttributesDeliveryReworkToMissingGate(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.DeliveryRework = deliveryReworkMetrics{
