@@ -198,7 +198,7 @@ func codexCommandInvocations(toolName, arguments, input string) []ownedCommandIn
 			}
 		}
 	}
-	return deduplicateCommandInvocations(invocations)
+	return invocations
 }
 
 func commandInvocations(command string) []ownedCommandInvocation {
@@ -209,6 +209,11 @@ func commandInvocations(command string) []ownedCommandInvocation {
 			continue
 		}
 		executable := strings.ToLower(filepath.Base(tokens[0]))
+		if executable == "eval" || executable == "cd" || executable == "export" ||
+			executable == "source" || executable == "." || executable == "unset" ||
+			executable == "set" || executable == "true" {
+			continue
+		}
 		if executable == "bash" || executable == "zsh" || executable == "sh" {
 			for index := 1; index < len(tokens); index++ {
 				if !strings.HasPrefix(tokens[index], "-") {
@@ -227,20 +232,6 @@ func commandInvocations(command string) []ownedCommandInvocation {
 		})
 	}
 	return invocations
-}
-
-func deduplicateCommandInvocations(invocations []ownedCommandInvocation) []ownedCommandInvocation {
-	var result []ownedCommandInvocation
-	seen := map[string]struct{}{}
-	for _, invocation := range invocations {
-		key := invocation.Executable + "\x00" + strings.Join(invocation.Args, "\x00")
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		result = append(result, invocation)
-	}
-	return result
 }
 
 func codexShellExecutables(tokens []string) []string {

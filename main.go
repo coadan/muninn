@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 11
+const codexSessionInsightsSchemaVersion = 12
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -78,13 +78,17 @@ type codexToolMetrics struct {
 }
 
 type codexOwnedOperationMetrics struct {
-	Calls                 int   `json:"calls"`
-	Sessions              int   `json:"sessions"`
-	FailedCalls           int   `json:"failedCalls"`
-	AmbiguousFailedCalls  int   `json:"ambiguousFailedCalls"`
-	TruncatedCalls        int   `json:"truncatedCalls"`
-	OutputBytes           int64 `json:"outputBytes"`
-	EstimatedOutputTokens int64 `json:"estimatedOutputTokens"`
+	Calls                          int   `json:"calls"`
+	AmbiguousCalls                 int   `json:"ambiguousCalls"`
+	Sessions                       int   `json:"sessions"`
+	FailedCalls                    int   `json:"failedCalls"`
+	AmbiguousFailedCalls           int   `json:"ambiguousFailedCalls"`
+	TruncatedCalls                 int   `json:"truncatedCalls"`
+	AmbiguousTruncatedCalls        int   `json:"ambiguousTruncatedCalls"`
+	OutputBytes                    int64 `json:"outputBytes"`
+	AmbiguousOutputBytes           int64 `json:"ambiguousOutputBytes"`
+	EstimatedOutputTokens          int64 `json:"estimatedOutputTokens"`
+	EstimatedAmbiguousOutputTokens int64 `json:"estimatedAmbiguousOutputTokens"`
 }
 
 type codexTransitionMetrics struct {
@@ -149,32 +153,32 @@ type codexSessionInsightsReport struct {
 }
 
 type codexSessionRecord struct {
-	CWD                             string
-	Task                            string
-	StartedAt                       time.Time
-	EndedAt                         time.Time
-	Completed                       bool
-	Compactions                     int
-	Tokens                          codexTokenUsage
-	ToolCalls                       int
-	FailedToolCalls                 int
-	TruncatedToolCalls              int
-	ToolOutputBytes                 int64
-	ToolCallsByName                 map[string]int
-	ToolMetricsByName               map[string]codexToolMetrics
-	ShellCommandsByFamily           map[string]codexToolMetrics
-	MixedShellShapes                map[string]codexToolMetrics
-	CrossCallTransitions            map[string]int
-	OwnedTooling                    map[string]codexToolMetrics
-	OwnedOperations                 map[string]codexToolMetrics
-	OwnedOperationAmbiguousFailures map[string]int
-	OwnedOperationFailureReasons    map[string]map[string]int
-	ReadTargets                     map[string]codexTargetMetrics
-	InlineOrchestrationCalls        int
-	InlineOrchestrationBytes        int64
-	InlineOrchestrationMaxBytes     int64
-	FailureReasons                  map[string]int
-	FailureContexts                 map[string]map[string]int
+	CWD                          string
+	Task                         string
+	StartedAt                    time.Time
+	EndedAt                      time.Time
+	Completed                    bool
+	Compactions                  int
+	Tokens                       codexTokenUsage
+	ToolCalls                    int
+	FailedToolCalls              int
+	TruncatedToolCalls           int
+	ToolOutputBytes              int64
+	ToolCallsByName              map[string]int
+	ToolMetricsByName            map[string]codexToolMetrics
+	ShellCommandsByFamily        map[string]codexToolMetrics
+	MixedShellShapes             map[string]codexToolMetrics
+	CrossCallTransitions         map[string]int
+	OwnedTooling                 map[string]codexToolMetrics
+	OwnedOperations              map[string]codexToolMetrics
+	OwnedOperationAmbiguous      map[string]codexToolMetrics
+	OwnedOperationFailureReasons map[string]map[string]int
+	ReadTargets                  map[string]codexTargetMetrics
+	InlineOrchestrationCalls     int
+	InlineOrchestrationBytes     int64
+	InlineOrchestrationMaxBytes  int64
+	FailureReasons               map[string]int
+	FailureContexts              map[string]map[string]int
 }
 
 type codexToolCallDescriptor struct {
@@ -1551,7 +1555,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(summary.OwnedTooling, id, metrics)
 	}
-	addCodexOwnedOperationMetrics(summary.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguousFailures)
+	addCodexOwnedOperationMetrics(summary.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguous)
 	addCodexFailureContexts(summary.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
 	addCodexTargetMetrics(summary.ReadTargets, record.ReadTargets)
 	summary.InlineOrchestrationCalls += record.InlineOrchestrationCalls
@@ -1609,7 +1613,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(task.OwnedTooling, id, metrics)
 	}
-	addCodexOwnedOperationMetrics(task.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguousFailures)
+	addCodexOwnedOperationMetrics(task.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguous)
 	addCodexFailureContexts(task.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
 	addCodexTargetMetrics(task.ReadTargets, record.ReadTargets)
 	task.InlineOrchestrationCalls += record.InlineOrchestrationCalls
@@ -1667,18 +1671,31 @@ func addCodexToolMetricsValue(target map[string]codexToolMetrics, key string, ad
 	target[key] = value
 }
 
-func addCodexOwnedOperationMetrics(target map[string]codexOwnedOperationMetrics, additions map[string]codexToolMetrics, ambiguousFailures map[string]int) {
-	for operation, addition := range additions {
+func addCodexOwnedOperationMetrics(target map[string]codexOwnedOperationMetrics, additions, ambiguous map[string]codexToolMetrics) {
+	operations := map[string]struct{}{}
+	for operation := range additions {
+		operations[operation] = struct{}{}
+	}
+	for operation := range ambiguous {
+		operations[operation] = struct{}{}
+	}
+	for operation := range operations {
+		addition := additions[operation]
+		ambiguousAddition := ambiguous[operation]
 		metrics := target[operation]
-		metrics.Calls += addition.Calls
-		if addition.Calls > 0 {
+		metrics.Calls += addition.Calls + ambiguousAddition.Calls
+		metrics.AmbiguousCalls += ambiguousAddition.Calls
+		if addition.Calls > 0 || ambiguousAddition.Calls > 0 {
 			metrics.Sessions++
 		}
 		metrics.FailedCalls += addition.FailedCalls
-		metrics.AmbiguousFailedCalls += ambiguousFailures[operation]
+		metrics.AmbiguousFailedCalls += ambiguousAddition.FailedCalls
 		metrics.TruncatedCalls += addition.TruncatedCalls
+		metrics.AmbiguousTruncatedCalls += ambiguousAddition.TruncatedCalls
 		metrics.OutputBytes += addition.OutputBytes
+		metrics.AmbiguousOutputBytes += ambiguousAddition.OutputBytes
 		metrics.EstimatedOutputTokens = estimatedTokens(metrics.OutputBytes)
+		metrics.EstimatedAmbiguousOutputTokens = estimatedTokens(metrics.AmbiguousOutputBytes)
 		target[operation] = metrics
 	}
 }
@@ -1980,14 +1997,14 @@ func printOwnedOperations(metrics map[string]codexOwnedOperationMetrics, limit i
 		rows = rows[:limit]
 	}
 	fmt.Println("\nLocally controlled operations:")
-	fmt.Printf("%-36s %9s %9s %10s %10s %10s %10s\n", "OPERATION", "CALLS", "SESSIONS", "OUTPUT", "TRUNC", "FAILED", "AMBIG")
+	fmt.Printf("%-32s %8s %8s %10s %10s %8s %8s\n", "OPERATION", "CALLS", "SESSIONS", "OUTPUT", "AMBIG OUT", "FAILED", "AMBIG")
 	for _, row := range rows {
-		fmt.Printf("%-36s %9s %9s %10s %10s %10s %10s\n",
-			truncateCodexLabel(row.Operation, 36),
+		fmt.Printf("%-32s %8s %8s %10s %10s %8s %8s\n",
+			truncateCodexLabel(row.Operation, 32),
 			formatCodexCount(int64(row.Metrics.Calls)),
 			formatCodexCount(int64(row.Metrics.Sessions)),
 			"~"+formatCodexCount(row.Metrics.EstimatedOutputTokens),
-			formatCodexCount(int64(row.Metrics.TruncatedCalls)),
+			"~"+formatCodexCount(row.Metrics.EstimatedAmbiguousOutputTokens),
 			formatCodexCount(int64(row.Metrics.FailedCalls)),
 			formatCodexCount(int64(row.Metrics.AmbiguousFailedCalls)),
 		)
