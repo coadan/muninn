@@ -76,6 +76,12 @@ Muninn highlights:
 - normalized friction reported directly by Codex, Claude, OpenCode, humans,
   or a provider-neutral agent
 
+For repositories with BWB's `.worktrees/<task>/<repo>` plus
+`.workbench/repos/<repo>` layout, Muninn canonicalizes task-worktree reads to
+the cached repo owner. Identical source files therefore aggregate across tasks
+instead of appearing as unrelated task-specific targets. Other repositories'
+`.worktrees` paths are preserved unless that BWB layout is present.
+
 Muninn includes recent tool events from sessions that started before the
 lookback boundary. This avoids losing active work simply because a session is
 long-lived.
