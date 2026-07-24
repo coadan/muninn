@@ -56,11 +56,13 @@ type deliveryReworkTracker struct {
 	deliveryHadRework        bool
 	reviewAwaitingEdit       bool
 	pendingEditCohorts       map[string]struct{}
+	pendingEditTargets       map[string]struct{}
 	testsAfterLatestEdit     bool
 	reviewAfterLatestEdit    bool
 	currentDeliveryPreTests  bool
 	currentDeliveryPreReview bool
 	currentDeliveryCohorts   map[string]struct{}
+	currentDeliveryTargets   map[string]struct{}
 	reworkedDeliveryCohorts  map[string]struct{}
 }
 
@@ -97,13 +99,19 @@ func (tracker *deliveryReworkTracker) observe(event normalizedSessionEvent, oper
 func (tracker *deliveryReworkTracker) observeEdit(event normalizedSessionEvent) {
 	cohorts := eventTargetCohorts(event.Targets)
 	if tracker.delivered && tracker.reviewAwaitingEdit {
-		tracker.observeReviewDrivenEdit(event, cohorts)
+		tracker.observeReviewDrivenEdit(event)
 	}
 	if tracker.pendingEditCohorts == nil {
 		tracker.pendingEditCohorts = map[string]struct{}{}
 	}
 	for cohort := range cohorts {
 		tracker.pendingEditCohorts[cohort] = struct{}{}
+	}
+	if tracker.pendingEditTargets == nil {
+		tracker.pendingEditTargets = map[string]struct{}{}
+	}
+	for _, target := range event.Targets {
+		tracker.pendingEditTargets[target] = struct{}{}
 	}
 	tracker.testsAfterLatestEdit = false
 	tracker.reviewAfterLatestEdit = false
@@ -134,13 +142,26 @@ func (tracker *deliveryReworkTracker) observeDelivery() {
 	tracker.currentDeliveryPreTests = tracker.testsAfterLatestEdit
 	tracker.currentDeliveryPreReview = tracker.reviewAfterLatestEdit
 	tracker.currentDeliveryCohorts = cloneStringSet(tracker.pendingEditCohorts)
+	tracker.currentDeliveryTargets = cloneStringSet(tracker.pendingEditTargets)
 	tracker.reworkedDeliveryCohorts = map[string]struct{}{}
 	tracker.pendingEditCohorts = nil
+	tracker.pendingEditTargets = nil
 	tracker.testsAfterLatestEdit = false
 	tracker.reviewAfterLatestEdit = false
 }
 
-func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSessionEvent, cohorts map[string]struct{}) {
+func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSessionEvent) {
+	matchedTargets := make([]string, 0, len(event.Targets))
+	for _, target := range event.Targets {
+		if _, delivered := tracker.currentDeliveryTargets[target]; delivered {
+			matchedTargets = append(matchedTargets, target)
+		}
+	}
+	tracker.reviewAwaitingEdit = false
+	if len(matchedTargets) == 0 {
+		return
+	}
+	cohorts := eventTargetCohorts(matchedTargets)
 	tracker.metrics.PostDeliveryEditCalls++
 	if tracker.metrics.ReworkLevers == nil {
 		tracker.metrics.ReworkLevers = map[string]int{}
@@ -150,7 +171,7 @@ func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSe
 	}
 	levers := map[string]struct{}{}
 	scopes := map[string]struct{}{}
-	for _, target := range event.Targets {
+	for _, target := range matchedTargets {
 		levers[reworkTargetLever(target)] = struct{}{}
 		scopes[reworkTargetScope(target)] = struct{}{}
 	}
@@ -193,7 +214,6 @@ func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSe
 		tracker.metrics.Cohorts[cohort] = metrics
 	}
 	tracker.metrics.ReviewToEditCycles++
-	tracker.reviewAwaitingEdit = false
 }
 
 func cloneStringSet(values map[string]struct{}) map[string]struct{} {

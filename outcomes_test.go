@@ -122,7 +122,35 @@ func TestDeliveryVerificationMustFollowLatestEdit(t *testing.T) {
 	}
 }
 
-func TestDeliveryCohortRateRequiresPreDeliveryMembership(t *testing.T) {
+func TestDeliveryReworkIgnoresEditOutsideDeliveredTargets(t *testing.T) {
+	tracker := deliveryReworkTracker{}
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"packages/web/src/resource_ui.ts"},
+	}, nil)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "exec",
+		Family:   "review",
+	}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"packages/web/src/billing.ts"},
+	}, nil)
+
+	got := tracker.metrics
+	if got.PostDeliveryReviewChecks != 1 {
+		t.Fatalf("review check missing: %#v", got)
+	}
+	if got.ReviewToEditCycles != 0 || got.DeliveriesWithRework != 0 || got.PostDeliveryEditCalls != 0 {
+		t.Fatalf("unrelated feature edit counted as review-driven rework: %#v", got)
+	}
+}
+
+func TestDeliveryCohortIgnoresPostReviewEditWithoutDeliveredTarget(t *testing.T) {
 	tracker := deliveryReworkTracker{}
 	tracker.observe(normalizedSessionEvent{
 		Kind:     sessionEventToolCall,
@@ -137,9 +165,8 @@ func TestDeliveryCohortRateRequiresPreDeliveryMembership(t *testing.T) {
 		Targets:  []string{"docs/parser.md"},
 	}, nil)
 
-	if got := tracker.metrics.Cohorts["docs"]; got.ReviewToEditCycles != 1 ||
-		got.Deliveries != 0 || got.DeliveriesWithRework != 0 {
-		t.Fatalf("new post-delivery cohort inflated a delivery rate: %#v", got)
+	if _, exists := tracker.metrics.Cohorts["docs"]; exists {
+		t.Fatalf("unrelated post-review cohort was attributed: %#v", tracker.metrics.Cohorts)
 	}
 	if got := tracker.metrics.Cohorts["src/parser"]; got.Deliveries != 1 ||
 		got.DeliveriesWithRework != 0 {
