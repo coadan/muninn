@@ -149,6 +149,68 @@ func TestDeliveryReworkTrackerCountsReviewToEditCyclesAfterDelivery(t *testing.T
 		cohort.DeliveriesWithPreReview != 1 {
 		t.Fatalf("delivery cohort mismatch: %#v", cohort)
 	}
+	if check := got.VerificationChecks["tests"]; check.Deliveries != 1 ||
+		check.DeliveriesWithRework != 1 {
+		t.Fatalf("global verification effectiveness mismatch: %#v", check)
+	}
+	if check := cohort.VerificationChecks["tests"]; check.Deliveries != 1 ||
+		check.DeliveriesWithRework != 1 {
+		t.Fatalf("cohort verification effectiveness mismatch: %#v", check)
+	}
+}
+
+func TestDeliveryVerificationTracksFailFixPassByConfiguredCheck(t *testing.T) {
+	tracker := deliveryReworkTracker{}
+	target := "packages/runtime/src/runtime.go"
+	edit := normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{target},
+	}
+	check := normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "tests"}
+	operations := []string{"repo/test-unit"}
+
+	tracker.observe(edit, nil)
+	check.Failed = true
+	check.OperationContinues = true
+	tracker.observe(check, operations)
+	check.OperationContinues = false
+	tracker.observe(check, operations)
+	tracker.observe(edit, nil)
+	check.Failed = false
+	tracker.observe(check, operations)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+
+	got := tracker.metrics.VerificationChecks["repo/test-unit"]
+	if got.Deliveries != 1 || got.FailedRuns != 1 || got.FailFixPassDeliveries != 1 ||
+		got.DeliveriesWithRework != 0 {
+		t.Fatalf("fail-fix-pass verification mismatch: %#v", got)
+	}
+	cohort := tracker.metrics.Cohorts["packages/runtime"].VerificationChecks["repo/test-unit"]
+	if cohort != got {
+		t.Fatalf("cohort verification mismatch: got %#v want %#v", cohort, got)
+	}
+}
+
+func TestDeliveryVerificationDoesNotCallRetryWithoutEditAFix(t *testing.T) {
+	tracker := deliveryReworkTracker{}
+	edit := normalizedSessionEvent{
+		Kind:     sessionEventToolCall,
+		ToolName: "apply_patch",
+		Targets:  []string{"src/runtime.go"},
+	}
+	check := normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "tests", Failed: true}
+	operations := []string{"repo/test-unit"}
+	tracker.observe(edit, nil)
+	tracker.observe(check, operations)
+	check.Failed = false
+	tracker.observe(check, operations)
+	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
+
+	if got := tracker.metrics.VerificationChecks["repo/test-unit"]; got.FailedRuns != 1 ||
+		got.Deliveries != 1 || got.FailFixPassDeliveries != 0 {
+		t.Fatalf("retry without edit was classified as fail-fix-pass: %#v", got)
+	}
 }
 
 func TestDeliveryVerificationMustFollowLatestEdit(t *testing.T) {
@@ -164,6 +226,9 @@ func TestDeliveryVerificationMustFollowLatestEdit(t *testing.T) {
 	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
 	if tracker.metrics.DeliveriesWithPreTests != 0 {
 		t.Fatalf("test before latest edit counted as pre-delivery verification: %#v", tracker.metrics)
+	}
+	if len(tracker.metrics.VerificationChecks) != 0 {
+		t.Fatalf("stale check was attached to delivery: %#v", tracker.metrics.VerificationChecks)
 	}
 	if got := tracker.metrics.Cohorts["src/parser"]; got.Deliveries != 1 || got.DeliveriesWithPreTests != 0 {
 		t.Fatalf("ordinary repository cohort mismatch: %#v", got)

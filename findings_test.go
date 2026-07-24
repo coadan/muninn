@@ -340,6 +340,42 @@ func TestBuildSessionFindingsLocalizesDeliveryReworkToGenericCohort(t *testing.T
 	}
 }
 
+func TestBuildSessionFindingsIdentifiesEffectiveConfiguredCheck(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries:           8,
+		DeliveriesWithRework: 4,
+		ReviewToEditCycles:   6,
+		Sessions:             4,
+		ReworkLevers:         map[string]int{"source code": 6},
+		ReworkScopes:         map[string]int{"(root)": 6},
+		Cohorts: map[string]deliveryCohortMetrics{
+			"packages/runtime": {
+				Deliveries:           8,
+				DeliveriesWithRework: 4,
+				ReviewToEditCycles:   6,
+				VerificationChecks: map[string]verificationMetrics{
+					"repo/test-unit": {
+						Deliveries:            4,
+						DeliveriesWithRework:  1,
+						FailedRuns:            2,
+						FailFixPassDeliveries: 1,
+					},
+				},
+			},
+		},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 {
+		t.Fatalf("expected one verification finding: %#v", findings)
+	}
+	finding := findings[0]
+	if !strings.Contains(finding.Evidence, "check repo/test-unit: 1/4 verified deliveries reworked versus 3/4 without it") ||
+		!strings.Contains(finding.Action, "Run repo/test-unit after the latest edit") {
+		t.Fatalf("configured check effectiveness mismatch: %#v", finding)
+	}
+}
+
 func TestBuildSessionFindingsFlagsCompletedTaskCostTail(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Outcomes = completionEpisodeAnalysis{

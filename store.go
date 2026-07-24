@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 9
+const sessionStoreSchemaVersion = 10
 
 type sessionNormalizer interface {
 	NormalizeSession(path string) (normalizedSession, error)
@@ -122,6 +122,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			selector_digests TEXT NOT NULL DEFAULT '[]',
 			owned_operations TEXT NOT NULL DEFAULT '[]',
 			operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0,
+			operation_continues INTEGER NOT NULL DEFAULT 0,
 			targets TEXT NOT NULL DEFAULT '[]',
 			inline_bytes INTEGER NOT NULL DEFAULT 0,
 			UNIQUE(session_id, sequence)
@@ -226,10 +227,27 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
+	case existing == "9":
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
 	case existing != fmt.Sprint(sessionStoreSchemaVersion):
 		return fmt.Errorf("unsupported Muninn store schema version %s (expected %d); remove the local cache to rebuild it", existing, sessionStoreSchemaVersion)
 	}
 	if reindexSources {
+		var continuationColumn int
+		if err := store.db.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'operation_continues'`,
+		).Scan(&continuationColumn); err != nil {
+			return fmt.Errorf("inspect Muninn operation continuation state: %w", err)
+		}
+		if continuationColumn == 0 {
+			_, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_continues INTEGER NOT NULL DEFAULT 0`)
+			if err != nil {
+				return fmt.Errorf("migrate Muninn operation continuation state: %w", err)
+			}
+		}
 		if _, err := store.db.ExecContext(ctx, `DELETE FROM sources`); err != nil {
 			return fmt.Errorf("invalidate Muninn sources for normalizer update: %w", err)
 		}
@@ -362,8 +380,8 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		cached_input_tokens, uncached_input_tokens, output_tokens,
 		reasoning_tokens, total_tokens, selector_digests, owned_operations,
 		operation_attribution_ambiguous,
-		targets, inline_bytes
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		operation_continues, targets, inline_bytes
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -412,6 +430,7 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 			string(selectorDigests),
 			string(ownedOperations),
 			boolInt(event.OperationAttributionAmbiguous),
+			boolInt(event.OperationContinues),
 			string(targets),
 			event.InlineBytes,
 		); err != nil {
@@ -446,7 +465,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.uncached_input_tokens, events.output_tokens,
 		events.reasoning_tokens, events.total_tokens, events.selector_digests,
 		events.owned_operations, events.operation_attribution_ambiguous,
-		events.targets, events.inline_bytes
+		events.operation_continues, events.targets, events.inline_bytes
 		FROM sessions
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
@@ -478,6 +497,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			selectorDigests               string
 			ownedOperations               string
 			operationAttributionAmbiguous int
+			operationContinues            int
 			targets                       string
 		)
 		err := rows.Scan(
@@ -508,6 +528,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&selectorDigests,
 			&ownedOperations,
 			&operationAttributionAmbiguous,
+			&operationContinues,
 			&targets,
 			&event.InlineBytes,
 		)
@@ -530,6 +551,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		event.Failed = failed != 0
 		event.Truncated = truncated != 0
 		event.OperationAttributionAmbiguous = operationAttributionAmbiguous != 0
+		event.OperationContinues = operationContinues != 0
 		_ = json.Unmarshal([]byte(selectorDigests), &event.SelectorDigests)
 		_ = json.Unmarshal([]byte(ownedOperations), &event.OwnedOperations)
 		_ = json.Unmarshal([]byte(targets), &event.Targets)

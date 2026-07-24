@@ -476,10 +476,22 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			if comparison := deliveryTestComparison(cohort); comparison != "" {
 				cohortEvidence += "; " + comparison
 			}
+			checkName, check := dominantVerificationCheck(cohort.VerificationChecks)
+			if checkName != "" {
+				cohortEvidence += "; check " + checkName + ": " +
+					verificationCheckComparison(cohort.Deliveries, cohort.DeliveriesWithRework, check)
+				if check.Deliveries < cohort.Deliveries &&
+					check.DeliveriesWithRework*cohort.Deliveries <
+						cohort.DeliveriesWithRework*check.Deliveries {
+					action = "Run " + checkName + " after the latest edit for this cohort before delivery, then compare its rework rate."
+				} else if check.DeliveriesWithRework >= 2 {
+					action = "Deliveries verified by " + checkName + " still required repeated rework; strengthen that check or the source boundary it should protect."
+				}
+			}
 			if lever == "source code" && cohort.Deliveries >= 2 {
-				if cohort.DeliveriesWithPreTests*2 < cohort.Deliveries {
+				if checkName == "" && cohort.DeliveriesWithPreTests*2 < cohort.Deliveries {
 					action = "Add a focused test for this cohort and require it after its latest edit before delivery, then compare its rework rate."
-				} else if cohort.ReworkedDeliveriesWithPreTests > 0 {
+				} else if checkName == "" && cohort.ReworkedDeliveriesWithPreTests > 0 {
 					action = "Tests already ran after edits on reworked deliveries in this cohort; strengthen their assertions or the source boundary they should protect."
 				}
 			}
@@ -637,6 +649,51 @@ func deliveryTestComparison(metrics deliveryCohortMetrics) string {
 		formatCodexCount(int64(untestedRework)),
 		formatCodexCount(int64(untestedDeliveries)),
 	)
+}
+
+func dominantVerificationCheck(checks map[string]verificationMetrics) (string, verificationMetrics) {
+	name := ""
+	metrics := verificationMetrics{}
+	for candidate, value := range checks {
+		if value.Deliveries > metrics.Deliveries ||
+			(value.Deliveries == metrics.Deliveries &&
+				(value.FailFixPassDeliveries > metrics.FailFixPassDeliveries ||
+					(value.FailFixPassDeliveries == metrics.FailFixPassDeliveries && candidate < name))) {
+			name = candidate
+			metrics = value
+		}
+	}
+	return name, metrics
+}
+
+func verificationCheckComparison(totalDeliveries, totalRework int, check verificationMetrics) string {
+	withoutDeliveries := totalDeliveries - check.Deliveries
+	withoutRework := totalRework - check.DeliveriesWithRework
+	comparison := fmt.Sprintf(
+		"%s/%s verified deliveries reworked",
+		formatCodexCount(int64(check.DeliveriesWithRework)),
+		formatCodexCount(int64(check.Deliveries)),
+	)
+	if withoutDeliveries > 0 && withoutRework >= 0 {
+		comparison += fmt.Sprintf(
+			" versus %s/%s without it",
+			formatCodexCount(int64(withoutRework)),
+			formatCodexCount(int64(withoutDeliveries)),
+		)
+	}
+	if check.FailFixPassDeliveries > 0 {
+		comparison += fmt.Sprintf(
+			"; %s fail-fix-pass deliveries",
+			formatCodexCount(int64(check.FailFixPassDeliveries)),
+		)
+	}
+	if check.FailedRuns > 0 {
+		comparison += fmt.Sprintf(
+			"; %s failed runs",
+			formatCodexCount(int64(check.FailedRuns)),
+		)
+	}
+	return comparison
 }
 
 func dominantMetricDimension(values map[string]int) (name string, count, total int) {

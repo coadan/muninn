@@ -182,6 +182,15 @@ func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
 	if version != fmt.Sprint(sessionStoreSchemaVersion) {
 		t.Fatalf("expected schema version %d, got %q", sessionStoreSchemaVersion, version)
 	}
+	var continuationColumn int
+	if err := migrated.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'operation_continues'`,
+	).Scan(&continuationColumn); err != nil {
+		t.Fatalf("inspect continuation column: %v", err)
+	}
+	if continuationColumn != 1 {
+		t.Fatalf("expected operation continuation column, got %d", continuationColumn)
+	}
 }
 
 func containsAny(value string, candidates ...string) bool {
