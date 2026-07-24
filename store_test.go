@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -155,8 +156,8 @@ func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
 	if err := migrated.db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != "7" {
-		t.Fatalf("expected schema version 7, got %q", version)
+	if version != fmt.Sprint(sessionStoreSchemaVersion) {
+		t.Fatalf("expected schema version %d, got %q", sessionStoreSchemaVersion, version)
 	}
 }
 

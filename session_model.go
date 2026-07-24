@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	sessionEventToolCall   = "tool_call"
@@ -163,6 +166,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			if len(ownedOperations) == 0 {
 				ownedOperations = ownership.classifyOperations(event.CommandCandidates)
 			}
+			recordProgressWait(record, event, ownedOperations)
 			for _, operation := range ownedOperations {
 				target := record.OwnedOperations
 				if event.OperationAttributionAmbiguous {
@@ -200,5 +204,61 @@ func newCodexSessionRecord() codexSessionRecord {
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		FailureReasons:               map[string]int{},
 		FailureContexts:              map[string]map[string]int{},
+		ProgressStalls:               map[string]codexWaitMetrics{},
+		ExpectedWaits:                map[string]codexWaitMetrics{},
 	}
+}
+
+const progressStallMinimum = 20 * time.Second
+const progressStallMaximumOutputBytes = 256
+
+func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent, ownedOperations []string) {
+	if event.CallOccurredAt.IsZero() || !event.OccurredAt.After(event.CallOccurredAt) {
+		return
+	}
+	duration := event.OccurredAt.Sub(event.CallOccurredAt)
+	if duration < progressStallMinimum || event.OutputBytes > progressStallMaximumOutputBytes {
+		return
+	}
+	context := progressWaitContext(event, ownedOperations)
+	target := record.ProgressStalls
+	if expectedProgressWait(event, ownedOperations) {
+		target = record.ExpectedWaits
+	}
+	metrics := target[context]
+	metrics.Calls++
+	metrics.Seconds += int64(duration.Seconds())
+	target[context] = metrics
+}
+
+func progressWaitContext(event normalizedSessionEvent, ownedOperations []string) string {
+	specific := ""
+	for _, operation := range ownedOperations {
+		if len(operation) > len(specific) {
+			specific = operation
+		}
+	}
+	if specific != "" {
+		return specific
+	}
+	if event.Family != "" {
+		return event.Family
+	}
+	if event.ToolName != "" {
+		return "tool " + event.ToolName
+	}
+	return "(unknown)"
+}
+
+func expectedProgressWait(event normalizedSessionEvent, ownedOperations []string) bool {
+	switch event.Family {
+	case "tests", "build, lint, or install", "review":
+		return true
+	}
+	for _, operation := range ownedOperations {
+		if operation == "bwb/comments" || operation == "bwb/test" || strings.HasPrefix(operation, "bwb/test-") {
+			return true
+		}
+	}
+	return false
 }

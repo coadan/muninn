@@ -101,6 +101,83 @@ func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing
 	}
 }
 
+func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Tasks = []codexTaskInsights{{
+		Task:     "expensive-task",
+		Sessions: 4,
+		Tokens: codexTokenUsage{
+			InputTokens:         1_200_000,
+			CachedInputTokens:   400_000,
+			UncachedInputTokens: 800_000,
+		},
+		FreshTokens: 900_000,
+		Compactions: 2,
+	}}
+	report.Summary.ProgressStalls["bwb/api-start"] = codexWaitMetrics{
+		Calls:    3,
+		Seconds:  95,
+		Sessions: 2,
+	}
+	report.Summary.ExpectedWaits["tests"] = codexWaitMetrics{
+		Calls:    9,
+		Seconds:  300,
+		Sessions: 3,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	bySignal := map[string]sessionFinding{}
+	for _, finding := range findings {
+		bySignal[finding.Signal] = finding
+	}
+	inputSignal := "session-loop/input-cost/expensive-task"
+	if finding, ok := bySignal[inputSignal]; !ok ||
+		!strings.Contains(finding.Evidence, "800,000 uncached") ||
+		!strings.Contains(finding.Evidence, "200,000 uncached input") {
+		t.Fatalf("input-cost finding mismatch: %#v", finding)
+	}
+	stallSignal := "session-loop/progress-stall/bwb/api-start"
+	if finding, ok := bySignal[stallSignal]; !ok ||
+		!strings.Contains(finding.Evidence, "1m35s") {
+		t.Fatalf("progress-stall finding mismatch: %#v", finding)
+	}
+	if _, exists := bySignal["session-loop/progress-stall/tests"]; exists {
+		t.Fatalf("expected test waits should not produce a finding: %#v", findings)
+	}
+}
+
+func TestBuildSessionFindingsSuppressesOnlyExactSignal(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.ProgressStalls["bwb/api-start"] = codexWaitMetrics{Calls: 2, Seconds: 60, Sessions: 2}
+	report.Summary.ProgressStalls["bwb/fixture"] = codexWaitMetrics{Calls: 2, Seconds: 60, Sessions: 2}
+	config := defaultRepositoryConfig()
+	config.SuppressSignals = []string{"session-loop/progress-stall/bwb/api-start"}
+	findings := buildSessionFindings(report, config)
+	if len(findings) != 1 {
+		t.Fatalf("exact suppression should preserve the other finding: %#v", findings)
+	}
+	if findings[0].Signal != "session-loop/progress-stall/bwb/fixture" {
+		t.Fatalf("unexpected remaining signal: %#v", findings[0])
+	}
+	if report.Summary.ProgressStalls["bwb/api-start"].Calls != 2 {
+		t.Fatalf("suppression mutated source metrics: %#v", report.Summary.ProgressStalls)
+	}
+}
+
+func TestSessionFindingSignalIsPrivacySafeAndBounded(t *testing.T) {
+	finding := sessionFinding{
+		Category: "session-loop",
+		Title:    "progress stalls while waiting on: private",
+		Target:   "BWB/API Start (Local)",
+	}
+	signal := sessionFindingSignal(finding)
+	if signal != "session-loop/progress-stall/bwb/api-start-local" {
+		t.Fatalf("unexpected signal ID: %q", signal)
+	}
+	if got := len(signalID("category", strings.Repeat("long target ", 100))); got > 200 {
+		t.Fatalf("signal ID length=%d exceeds bound", got)
+	}
+}
+
 func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 	findings := []sessionFinding{
 		{Category: "owned-tool", Title: "tool"},

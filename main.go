@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 15
+const codexSessionInsightsSchemaVersion = 16
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -29,6 +29,7 @@ var searchMissExitCodePattern = regexp.MustCompile(`(?im)(?:"exit_code"\s*:\s*1(
 var codexNestedCommandStartPattern = regexp.MustCompile(`(?:^|[,{]\s*)(?:"cmd"|'cmd'|cmd)\s*:\s*`)
 var codexNestedContinuationPattern = regexp.MustCompile(`(?s)tools\.(?:write_stdin|wait)\s*\(\s*\{[^}]*?"?(session_id|cell_id)"?\s*:\s*(?:"([^"]+)"|'([^']+)'|([0-9]+))`)
 var codexContinuationStatusPattern = regexp.MustCompile(`(?im)^(?:script|process) running with (session|cell) id\s+([^\s]+)\s*$`)
+var suppressedSignalPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{0,199}$`)
 
 type codexTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -68,6 +69,8 @@ type codexTaskInsights struct {
 	InlineOrchestrationByTool    map[string]codexInlineMetrics                `json:"inlineOrchestrationByTool"`
 	FailureReasons               map[string]int                               `json:"failureReasons"`
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
+	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
+	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 }
 
 type codexToolMetrics struct {
@@ -100,6 +103,12 @@ type codexTransitionMetrics struct {
 type codexOccurrenceMetrics struct {
 	Count    int `json:"count"`
 	Sessions int `json:"sessions"`
+}
+
+type codexWaitMetrics struct {
+	Calls    int   `json:"calls"`
+	Seconds  int64 `json:"seconds"`
+	Sessions int   `json:"sessions"`
 }
 
 type codexInlineMetrics struct {
@@ -147,6 +156,8 @@ type codexSessionInsightsSummary struct {
 	InlineOrchestrationByTool    map[string]codexInlineMetrics                `json:"inlineOrchestrationByTool"`
 	FailureReasons               map[string]int                               `json:"failureReasons"`
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
+	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
+	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 }
 
 type codexSessionInsightsReport struct {
@@ -190,6 +201,8 @@ type codexSessionRecord struct {
 	InlineOrchestrationByTool    map[string]codexInlineMetrics
 	FailureReasons               map[string]int
 	FailureContexts              map[string]map[string]int
+	ProgressStalls               map[string]codexWaitMetrics
+	ExpectedWaits                map[string]codexWaitMetrics
 }
 
 type codexToolCallDescriptor struct {
@@ -227,8 +240,9 @@ type codexRolloutPayload struct {
 }
 
 type repositoryConfig struct {
-	SchemaVersion int `json:"schemaVersion"`
-	Actions       struct {
+	SchemaVersion   int      `json:"schemaVersion"`
+	SuppressSignals []string `json:"suppressSignals,omitempty"`
+	Actions         struct {
 		SourceContext       string `json:"sourceContext"`
 		RecurringFailure    string `json:"recurringFailure"`
 		AgentInterface      string `json:"agentInterface"`
@@ -294,8 +308,34 @@ func loadRepositoryConfig(repoRoot, explicit string) (repositoryConfig, error) {
 	if err := validateOwnedToolConfig(decoded.OwnedTools); err != nil {
 		return repositoryConfig{}, fmt.Errorf("parse Muninn config %s: %w", path, err)
 	}
+	suppressSignals, err := normalizeSuppressedSignals(decoded.SuppressSignals)
+	if err != nil {
+		return repositoryConfig{}, fmt.Errorf("parse Muninn config %s: %w", path, err)
+	}
+	config.SuppressSignals = suppressSignals
 	config.OwnedTools = decoded.OwnedTools
 	return config, nil
+}
+
+func normalizeSuppressedSignals(signals []string) ([]string, error) {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(signals))
+	for index, signal := range signals {
+		signal = strings.TrimSpace(signal)
+		if signal == "" {
+			return nil, fmt.Errorf("suppressSignals[%d] must not be empty", index)
+		}
+		if !suppressedSignalPattern.MatchString(signal) || strings.Contains(signal, "..") || strings.Contains(signal, "//") {
+			return nil, fmt.Errorf("suppressSignals[%d] must be an exact printed signal ID", index)
+		}
+		if _, exists := seen[signal]; exists {
+			continue
+		}
+		seen[signal] = struct{}{}
+		result = append(result, signal)
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 type sessionSource interface {
@@ -761,6 +801,8 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 			InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 			FailureReasons:               map[string]int{},
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
+			ProgressStalls:               map[string]codexWaitMetrics{},
+			ExpectedWaits:                map[string]codexWaitMetrics{},
 		},
 	}
 }
@@ -1129,6 +1171,10 @@ func codexShellSegmentFamily(tokens []string) string {
 	case "make":
 		if len(lowerTokens) > 1 && (lowerTokens[1] == "install" || lowerTokens[1] == "build") {
 			return "build, lint, or install"
+		}
+	case "codex":
+		if len(lowerTokens) > 1 && lowerTokens[1] == "review" {
+			return "review"
 		}
 	case "clj-kondo", "golangci-lint":
 		return "build, lint, or install"
@@ -1595,6 +1641,8 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 		summary.FailureReasons[reason] += count
 	}
 	addCodexFailureContexts(summary.FailureContexts, record.FailureContexts)
+	addCodexWaitMetrics(summary.ProgressStalls, record.ProgressStalls)
+	addCodexWaitMetrics(summary.ExpectedWaits, record.ExpectedWaits)
 
 	task := taskMap[record.Task]
 	if task == nil {
@@ -1610,6 +1658,8 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 			FailureReasons:               map[string]int{},
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
+			ProgressStalls:               map[string]codexWaitMetrics{},
+			ExpectedWaits:                map[string]codexWaitMetrics{},
 		}
 		taskMap[record.Task] = task
 	}
@@ -1655,6 +1705,20 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 		task.FailureReasons[reason] += count
 	}
 	addCodexFailureContexts(task.FailureContexts, record.FailureContexts)
+	addCodexWaitMetrics(task.ProgressStalls, record.ProgressStalls)
+	addCodexWaitMetrics(task.ExpectedWaits, record.ExpectedWaits)
+}
+
+func addCodexWaitMetrics(target, addition map[string]codexWaitMetrics) {
+	for context, value := range addition {
+		metrics := target[context]
+		metrics.Calls += value.Calls
+		metrics.Seconds += value.Seconds
+		if value.Calls > 0 {
+			metrics.Sessions++
+		}
+		target[context] = metrics
+	}
 }
 
 func addCodexTransitionMetrics(target map[string]codexTransitionMetrics, additions map[string]int) {
@@ -1816,15 +1880,16 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		rows = rows[:limit]
 	}
 	fmt.Println("\nTop tasks by fresh-token proxy:")
-	fmt.Printf("%-48s %8s %13s %13s %10s %9s %8s\n", "TASK", "SESSIONS", "FRESH", "TOOL OUTPUT", "CALLS", "TRUNC", "FAILED")
+	fmt.Printf("%-40s %8s %13s %13s %13s %13s %10s %8s\n", "TASK", "SESSIONS", "INPUT", "UNCACHED", "FRESH", "FRESH/SESS", "TOOL OUT", "FAILED")
 	for _, task := range rows {
-		fmt.Printf("%-48s %8s %13s %13s %10s %9s %8s\n",
-			truncateCodexLabel(task.Task, 48),
+		fmt.Printf("%-40s %8s %13s %13s %13s %13s %10s %8s\n",
+			truncateCodexLabel(task.Task, 40),
 			formatCodexCount(int64(task.Sessions)),
+			formatCodexCount(task.Tokens.InputTokens),
+			formatCodexCount(task.Tokens.UncachedInputTokens),
 			formatCodexCount(task.FreshTokens),
+			formatCodexCount(perSessionTokens(task.FreshTokens, task.Sessions)),
 			"~"+formatCodexCount(task.ToolOutputTokens),
-			formatCodexCount(int64(task.ToolCalls)),
-			formatCodexCount(int64(task.TruncatedToolCalls)),
 			formatCodexCount(int64(task.FailedToolCalls)),
 		)
 	}
@@ -1839,6 +1904,8 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	printCodexReadTargets(summary.ReadTargets, 12)
 	printOwnedTooling(summary.OwnedTooling, config.OwnedTools)
 	printOwnedOperations(summary.OwnedOperations, 16)
+	printCodexWaitMetrics("\nCandidate progress stalls (long, low-output waits):", summary.ProgressStalls, 12)
+	printCodexWaitMetrics("\nExpected long waits excluded from stall findings:", summary.ExpectedWaits, 12)
 	printCodexFailureReasons(summary.FailureReasons)
 	printCodexFailureContexts(summary.FailureContexts, 12)
 
@@ -1860,6 +1927,20 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Printf("- %s context compactions occurred with %.0f%% cached input. Repeated compactions plus recurring transitions indicate a session loop or stale-context problem; cache hits alone do not.\n",
 			formatCodexCount(int64(summary.Compactions)),
 			cachedRatio,
+		)
+	}
+	stallCalls, stallSeconds := codexWaitTotals(summary.ProgressStalls)
+	expectedWaitCalls, expectedWaitSeconds := codexWaitTotals(summary.ExpectedWaits)
+	if stallCalls > 0 {
+		fmt.Printf("- %s candidate low-output waits consumed %s. Remove redundant polling or add bounded progress for non-essential waits.\n",
+			formatCodexCount(int64(stallCalls)),
+			formatDurationSeconds(stallSeconds),
+		)
+	}
+	if expectedWaitCalls > 0 {
+		fmt.Printf("- %s long waits consuming %s were classified as expected tests, builds, local reviews, or remote GitHub review and excluded from stall findings.\n",
+			formatCodexCount(int64(expectedWaitCalls)),
+			formatDurationSeconds(expectedWaitSeconds),
 		)
 	}
 	if summary.TruncatedToolCalls > 0 {
@@ -1893,6 +1974,50 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Printf("- %s remaining tool calls failed or timed out; inspect the reason/context rows before changing shared tooling.\n", formatCodexCount(int64(remainingFailures)))
 	}
 	fmt.Println("- Token counts are rollout totals, not billing amounts. Fresh-token proxy excludes cached input but does not apply model prices.")
+}
+
+func printCodexWaitMetrics(title string, metrics map[string]codexWaitMetrics, limit int) {
+	type row struct {
+		Context string
+		Metrics codexWaitMetrics
+	}
+	rows := make([]row, 0, len(metrics))
+	for context, value := range metrics {
+		rows = append(rows, row{Context: context, Metrics: value})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.Seconds != rows[j].Metrics.Seconds {
+			return rows[i].Metrics.Seconds > rows[j].Metrics.Seconds
+		}
+		if rows[i].Metrics.Calls != rows[j].Metrics.Calls {
+			return rows[i].Metrics.Calls > rows[j].Metrics.Calls
+		}
+		return rows[i].Context < rows[j].Context
+	})
+	if len(rows) == 0 {
+		return
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println(title)
+	fmt.Printf("%-40s %8s %10s %10s\n", "CONTEXT", "CALLS", "SESSIONS", "WAIT")
+	for _, row := range rows {
+		fmt.Printf("%-40s %8s %10s %10s\n",
+			truncateCodexLabel(row.Context, 40),
+			formatCodexCount(int64(row.Metrics.Calls)),
+			formatCodexCount(int64(row.Metrics.Sessions)),
+			formatDurationSeconds(row.Metrics.Seconds),
+		)
+	}
+}
+
+func codexWaitTotals(metrics map[string]codexWaitMetrics) (calls int, seconds int64) {
+	for _, value := range metrics {
+		calls += value.Calls
+		seconds += value.Seconds
+	}
+	return calls, seconds
 }
 
 func printCodexInlineTools(metrics map[string]codexInlineMetrics) {

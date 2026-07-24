@@ -307,6 +307,12 @@ func TestCodexShellCommandFamilyUsesFixedPrivacySafeLabels(t *testing.T) {
 			want:      "bounded task inspect",
 		},
 		{
+			name:      "local codex review",
+			tool:      "exec_command",
+			arguments: `{"cmd":"codex review --base origin/main"}`,
+			want:      "review",
+		},
+		{
 			name:      "non-shell tool",
 			tool:      "apply_patch",
 			arguments: `{}`,
@@ -494,6 +500,65 @@ func TestOwnedOperationFailureReasonsSeparateExpectedFailures(t *testing.T) {
 	actionable, expected := ownedOperationFailureCounts(report.Summary.OwnedOperationFailureReasons["bwb/test"])
 	if actionable != 0 || expected != 1 {
 		t.Fatalf("failure split=(%d,%d) want (0,1)", actionable, expected)
+	}
+}
+
+func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	eventPair := func(start time.Time, family string, operations []string, outputBytes int64) []normalizedSessionEvent {
+		return []normalizedSessionEvent{
+			{
+				OccurredAt:      start,
+				Kind:            sessionEventToolCall,
+				ToolName:        "exec_command",
+				Family:          family,
+				OwnedOperations: operations,
+			},
+			{
+				OccurredAt:      start.Add(30 * time.Second),
+				CallOccurredAt:  start,
+				Kind:            sessionEventToolOutput,
+				ToolName:        "exec_command",
+				Family:          family,
+				OutputBytes:     outputBytes,
+				OwnedOperations: operations,
+			},
+		}
+	}
+	events := eventPair(generatedAt.Add(-4*time.Minute), "other shell", []string{"bwb/api-start"}, 0)
+	events = append(events, eventPair(generatedAt.Add(-3*time.Minute), "other shell", []string{"bwb/api-start"}, 10)...)
+	events = append(events, eventPair(generatedAt.Add(-2*time.Minute), "other shell", []string{"bwb/comments"}, 0)...)
+	events = append(events, eventPair(generatedAt.Add(-time.Minute), "tests", nil, 0)...)
+	events = append(events, eventPair(generatedAt.Add(-45*time.Second), "other shell", []string{"bwb/test-nses"}, 0)...)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      workspaceRoot,
+		Events:   events,
+	}
+	record, err := sessionRecordFromNormalized(session, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt, ownershipCatalog{})
+	if err != nil {
+		t.Fatalf("normalize session: %v", err)
+	}
+	if got := record.ProgressStalls["bwb/api-start"]; got.Calls != 2 || got.Seconds != 60 {
+		t.Fatalf("candidate progress stalls=%#v want two calls and 60 seconds", got)
+	}
+	if got := record.ExpectedWaits["bwb/comments"]; got.Calls != 1 || got.Seconds != 30 {
+		t.Fatalf("review wait=%#v want one call and 30 seconds", got)
+	}
+	if got := record.ExpectedWaits["tests"]; got.Calls != 1 || got.Seconds != 30 {
+		t.Fatalf("test wait=%#v want one call and 30 seconds", got)
+	}
+	if got := record.ExpectedWaits["bwb/test-nses"]; got.Calls != 1 || got.Seconds != 30 {
+		t.Fatalf("owned test wait=%#v want one call and 30 seconds", got)
+	}
+	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)
+	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
+	if got := report.Summary.ProgressStalls["bwb/api-start"]; got.Sessions != 1 {
+		t.Fatalf("candidate progress stall sessions=%#v want one", got)
+	}
+	if got := report.Summary.ExpectedWaits["tests"]; got.Sessions != 1 {
+		t.Fatalf("expected test wait sessions=%#v want one", got)
 	}
 }
 
@@ -1040,6 +1105,10 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	override := `{
 		"schemaVersion": 1,
 		"actions": {"sourceContext": "Use repo context."},
+		"suppressSignals": [
+			"session-loop/progress-stall/bwb/api-start",
+			"session-loop/progress-stall/bwb/api-start"
+		],
 		"ownedTools": [{
 			"id": "bwb",
 			"repository": "breyta-workbench",
@@ -1059,6 +1128,27 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	}
 	if len(config.OwnedTools) != 1 || config.OwnedTools[0].ID != "bwb" {
 		t.Fatalf("owned tooling config missing: %#v", config)
+	}
+	if len(config.SuppressSignals) != 1 || config.SuppressSignals[0] != "session-loop/progress-stall/bwb/api-start" {
+		t.Fatalf("signal suppressions were not normalized: %#v", config.SuppressSignals)
+	}
+}
+
+func TestLoadRepositoryConfigRejectsEmptySuppressedSignal(t *testing.T) {
+	root := t.TempDir()
+	override := `{"schemaVersion":1,"suppressSignals":["  "]}`
+	if err := os.WriteFile(filepath.Join(root, ".muninn.json"), []byte(override), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := loadRepositoryConfig(root, ""); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Fatalf("empty suppression error=%v want actionable validation", err)
+	}
+}
+
+func TestNormalizeSuppressedSignalsRejectsNonSignalText(t *testing.T) {
+	if _, err := normalizeSuppressedSignals([]string{"Progress stall: /private/path"}); err == nil ||
+		!strings.Contains(err.Error(), "exact printed signal ID") {
+		t.Fatalf("invalid signal error=%v want exact-ID guidance", err)
 	}
 }
 
