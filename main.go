@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 13
+const codexSessionInsightsSchemaVersion = 14
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -158,6 +158,7 @@ type codexSessionInsightsReport struct {
 	SessionDirs   []string                    `json:"-"`
 	Summary       codexSessionInsightsSummary `json:"summary"`
 	Tasks         []codexTaskInsights         `json:"tasks"`
+	Feedback      []agentFeedbackAggregate    `json:"feedback,omitempty"`
 	Findings      []sessionFinding            `json:"findings"`
 }
 
@@ -402,6 +403,8 @@ func cmdCodex(root string, args []string) error {
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
 	case "sessions":
 		return cmdCodexSessions(root, args[1:])
+	case "feedback":
+		return cmdFeedback(root, args[1:])
 	default:
 		return fmt.Errorf("unknown Muninn command: %s", args[0])
 	}
@@ -413,10 +416,12 @@ func printCodexHelp() {
 Usage:
   muninn analyze [flags]
   muninn sessions [flags]
+  muninn feedback <add|resolve|list> [flags]
 
 Available Commands:
   analyze   Analyze agent-session cost and friction for a repository
   sessions  Compatibility alias for analyze
+  feedback  Record or inspect normalized agent-reported friction
 
 Codex is the first session provider. The provider boundary is explicit so
 Claude Code and OpenCode adapters can be added later without changing the
@@ -439,6 +444,7 @@ Examples:
   muninn analyze --repo . --focus structure
   muninn analyze --repo . --details
   muninn analyze --repo . --json
+  muninn feedback add --category roundtrip --target bwb/pr --signal existing-pr-create-failed
 `)
 }
 
@@ -592,12 +598,18 @@ func cmdCodexSessions(root string, args []string) error {
 		}
 	}
 	report.Provider = source.Name()
+	repositoryKey := ownershipSelectorDigest("repo", resolvedRepoRoot)
+	if store != nil {
+		report.Feedback, err = store.listFeedback(context.Background(), repositoryKey, since, false)
+		if err != nil {
+			return err
+		}
+	}
 	report.Findings = buildSessionFindings(report, config)
 	report.Findings, err = filterSessionFindings(report.Findings, *focus)
 	if err != nil {
 		return err
 	}
-	repositoryKey := ownershipSelectorDigest("repo", resolvedRepoRoot)
 	var baseline *codexSessionInsightsReport
 	if name := strings.TrimSpace(*compareName); name != "" {
 		loaded, err := store.loadCheckpoint(context.Background(), name, source.Name(), repositoryKey)
@@ -1776,6 +1788,10 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	)
 	if summary.FilesUnreadable > 0 {
 		fmt.Printf("Files: %s scanned, %s unreadable\n", formatCodexCount(int64(summary.FilesScanned)), formatCodexCount(int64(summary.FilesUnreadable)))
+	}
+	if view == "findings" && len(report.Findings) > 0 {
+		printSessionFindings(report.Findings, limit)
+		return
 	}
 	if len(report.Tasks) == 0 {
 		fmt.Println("\nNo matching sessions.")
