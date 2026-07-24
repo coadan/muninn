@@ -220,12 +220,22 @@ func recordOversizedOutput(record codexSessionRecord, event normalizedSessionEve
 	if event.OperationAttributionAmbiguous {
 		ownedOperations = nil
 	}
-	context := progressWaitContext(event, ownedOperations)
+	context := oversizedOutputContext(event, ownedOperations)
 	metrics := record.OversizedOutputs[context]
 	metrics.Calls++
 	metrics.OutputBytes += event.OutputBytes
 	metrics.MaxOutputBytes = max(metrics.MaxOutputBytes, event.OutputBytes)
 	record.OversizedOutputs[context] = metrics
+}
+
+func oversizedOutputContext(event normalizedSessionEvent, ownedOperations []string) string {
+	if len(ownedOperations) > 0 {
+		return progressWaitContext(event, ownedOperations)
+	}
+	if event.Shape != "" {
+		return event.Shape
+	}
+	return progressWaitContext(event, nil)
 }
 
 const progressStallMinimum = 20 * time.Second

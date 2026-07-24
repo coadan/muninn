@@ -204,6 +204,13 @@ func TestBuildSessionFindingsCapsOversizedOutputsAndMarksOwnedContext(t *testing
 	}
 }
 
+func TestOversizedOutputActionKeepsCompoundWorkflowBundled(t *testing.T) {
+	action := oversizedOutputAction("git inspect -> file reads -> tests", "repository")
+	if !strings.Contains(action, "Keep the workflow bundled") || !strings.Contains(action, "cap each") {
+		t.Fatalf("compound oversized-output action should reduce output without adding roundtrips: %q", action)
+	}
+}
+
 func TestSessionFindingSignalIsPrivacySafeAndBounded(t *testing.T) {
 	finding := sessionFinding{
 		Category: "session-loop",
