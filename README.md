@@ -37,6 +37,8 @@ muninn analyze --repo . --since 24h
 muninn analyze --repo . --task my-task
 muninn analyze --repo . --since 14d --include-archived
 muninn analyze --repo . --json
+muninn analyze --repo . --checkpoint before-tooling-change
+muninn analyze --repo . --compare before-tooling-change
 ```
 
 `muninn sessions` is a compatibility alias for `muninn analyze`.
@@ -52,6 +54,16 @@ The default human report highlights:
 Muninn includes recent tool events from sessions that started before the
 lookback boundary. This avoids losing active work simply because a session is
 long-lived.
+
+The default SQLite index lives in the user cache directory. A cold analysis
+first prefilters session metadata to the requested repository, then indexes
+only attributable files. Subsequent reports reuse unchanged sources. Use
+`--refresh` to rebuild selected repository sources, `--db <path>` to select a
+different local store, or `--no-cache` for a direct scan.
+
+Named checkpoints support before/after measurement. Trend output compares
+normalized rates such as calls and compactions per session, output per call,
+completion ratio, and failures/truncations per 1,000 calls.
 
 ## Repository guidance
 
@@ -84,6 +96,29 @@ Owned-tool attribution lets Muninn prioritize fixes with a short local path.
 Findings that do not map to an owned tool can instead recommend repository
 guidance, an agent-optimized façade for a fragmented workflow, or an upstream
 follow-up.
+
+## Improvement loop
+
+Muninn is intended to close a repository improvement loop:
+
+1. Take a checkpoint.
+2. Select one current, cross-session finding.
+3. Improve owned tooling, instructions, an agent-facing interface, or source
+   ownership.
+4. Re-run the same window and compare the checkpoint.
+5. Suppress findings whose current target is gone, bounded, or no longer
+   recurring.
+
+Useful evidence includes repeated privacy-safe failure contexts across
+sessions, recurring cross-call transitions, repeated context compactions,
+large inline orchestration payloads, repeated source reads, and files that are
+frequently searched or sliced together. Cache hits are reported separately:
+they are beneficial by themselves, but high cached-context volume combined
+with compactions and recurring loops indicates stale session context.
+
+The overview should lead with findings. Focused detail may identify safe
+repository-relative source targets, but paths outside the analyzed repository
+must remain private.
 
 ## Direction
 

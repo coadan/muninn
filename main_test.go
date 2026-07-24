@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -112,7 +113,7 @@ func TestAnalyzeCodexSessionsAggregatesFinalCumulativeUsageAndFriction(t *testin
 	if report.Tasks[0].FailureReasons["other non-zero exit"] != 1 {
 		t.Fatalf("task-level failure reason missing: %#v", report.Tasks[0].FailureReasons)
 	}
-	if got := report.Tasks[0].FailureContexts["other non-zero exit"]["other shell"]; got != 1 {
+	if got := report.Tasks[0].FailureContexts["other non-zero exit"]["other shell"]; got.Count != 1 || got.Sessions != 1 {
 		t.Fatalf("task-level failure context missing: %#v", report.Tasks[0].FailureContexts)
 	}
 }
@@ -772,6 +773,54 @@ func TestAnalyzeCodexSessionsAttributesConfiguredOwnedToolsAndCompactions(t *tes
 	}
 	if got := report.Tasks[0].OwnedTooling["bwb"]; got.Calls != 1 || got.FailedCalls != 1 {
 		t.Fatalf("task-owned tool attribution missing: %#v", report.Tasks[0].OwnedTooling)
+	}
+}
+
+func TestAnalyzeCodexSessionsRanksFailureContextByCrossSessionRecurrence(t *testing.T) {
+	sessionsDir := t.TempDir()
+	repositoryRoot := filepath.Join(t.TempDir(), "repository")
+	for index := 0; index < 2; index++ {
+		callID := "test-" + strconv.Itoa(index)
+		writeCodexSessionFixture(t, sessionsDir, callID, []any{
+			map[string]any{
+				"timestamp": "2026-07-24T08:00:00Z",
+				"type":      "session_meta",
+				"payload":   map[string]any{"cwd": repositoryRoot},
+			},
+			map[string]any{
+				"timestamp": "2026-07-24T08:00:01Z",
+				"type":      "response_item",
+				"payload": map[string]any{
+					"type":      "function_call",
+					"call_id":   callID,
+					"name":      "exec_command",
+					"arguments": `{"cmd":"go test ./..."}`,
+				},
+			},
+			map[string]any{
+				"timestamp": "2026-07-24T08:00:02Z",
+				"type":      "response_item",
+				"payload": map[string]any{
+					"type":    "function_call_output",
+					"call_id": callID,
+					"output":  "tests failed\nexit code: 1",
+				},
+			},
+		})
+	}
+	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	report, err := analyzeCodexSessions(
+		[]string{sessionsDir},
+		repositoryRoot,
+		generatedAt.Add(-24*time.Hour),
+		generatedAt,
+	)
+	if err != nil {
+		t.Fatalf("analyze recurring failures: %v", err)
+	}
+	metrics := report.Summary.FailureContexts["test failure"]["tests"]
+	if metrics.Count != 2 || metrics.Sessions != 2 {
+		t.Fatalf("cross-session recurrence missing: %#v", report.Summary.FailureContexts)
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"strings"
@@ -191,6 +192,38 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 		return normalizedSession{}, err
 	}
 	return session, nil
+}
+
+func (codexSessionSource) NormalizeSession(path string) (normalizedSession, error) {
+	return parseCodexNormalizedSession(path)
+}
+
+func (codexSessionSource) SessionCWD(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !bytes.Contains(line, []byte(`"type":"session_meta"`)) {
+			continue
+		}
+		var envelope codexRolloutEnvelope
+		if json.Unmarshal(line, &envelope) != nil || envelope.Type != "session_meta" {
+			continue
+		}
+		var payload codexRolloutPayload
+		if json.Unmarshal(envelope.Payload, &payload) == nil {
+			return payload.CWD, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 func appendNormalizedCompaction(session *normalizedSession, sequence *int, last *time.Time, timestamp time.Time) {
