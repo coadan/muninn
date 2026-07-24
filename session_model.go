@@ -85,6 +85,11 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				record.InlineOrchestrationCalls++
 				record.InlineOrchestrationBytes += event.InlineBytes
 				record.InlineOrchestrationMaxBytes = max(record.InlineOrchestrationMaxBytes, event.InlineBytes)
+				metrics := record.InlineOrchestrationByTool[event.ToolName]
+				metrics.Calls++
+				metrics.Bytes += event.InlineBytes
+				metrics.MaxBytes = max(metrics.MaxBytes, event.InlineBytes)
+				record.InlineOrchestrationByTool[event.ToolName] = metrics
 			}
 			record.ToolCallsByName[event.ToolName]++
 			addCodexToolMetrics(record.ToolMetricsByName, event.ToolName, 1, false, false, 0)
@@ -192,6 +197,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		OwnedOperationAmbiguous:      map[string]codexToolMetrics{},
 		OwnedOperationFailureReasons: map[string]map[string]int{},
 		ReadTargets:                  map[string]codexTargetMetrics{},
+		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		FailureReasons:               map[string]int{},
 		FailureContexts:              map[string]map[string]int{},
 	}

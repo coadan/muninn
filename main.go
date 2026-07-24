@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 12
+const codexSessionInsightsSchemaVersion = 13
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -65,6 +65,7 @@ type codexTaskInsights struct {
 	InlineOrchestrationBytes     int64                                        `json:"inlineOrchestrationBytes"`
 	InlineOrchestrationMaxBytes  int64                                        `json:"inlineOrchestrationMaxBytes"`
 	InlineOrchestrationSessions  int                                          `json:"inlineOrchestrationSessions"`
+	InlineOrchestrationByTool    map[string]codexInlineMetrics                `json:"inlineOrchestrationByTool"`
 	FailureReasons               map[string]int                               `json:"failureReasons"`
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 }
@@ -99,6 +100,13 @@ type codexTransitionMetrics struct {
 type codexOccurrenceMetrics struct {
 	Count    int `json:"count"`
 	Sessions int `json:"sessions"`
+}
+
+type codexInlineMetrics struct {
+	Calls    int   `json:"calls"`
+	Sessions int   `json:"sessions"`
+	Bytes    int64 `json:"bytes"`
+	MaxBytes int64 `json:"maxBytes"`
 }
 
 type codexTargetMetrics struct {
@@ -136,6 +144,7 @@ type codexSessionInsightsSummary struct {
 	InlineOrchestrationBytes     int64                                        `json:"inlineOrchestrationBytes"`
 	InlineOrchestrationMaxBytes  int64                                        `json:"inlineOrchestrationMaxBytes"`
 	InlineOrchestrationSessions  int                                          `json:"inlineOrchestrationSessions"`
+	InlineOrchestrationByTool    map[string]codexInlineMetrics                `json:"inlineOrchestrationByTool"`
 	FailureReasons               map[string]int                               `json:"failureReasons"`
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 }
@@ -177,6 +186,7 @@ type codexSessionRecord struct {
 	InlineOrchestrationCalls     int
 	InlineOrchestrationBytes     int64
 	InlineOrchestrationMaxBytes  int64
+	InlineOrchestrationByTool    map[string]codexInlineMetrics
 	FailureReasons               map[string]int
 	FailureContexts              map[string]map[string]int
 }
@@ -736,6 +746,7 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 			OwnedOperations:              map[string]codexOwnedOperationMetrics{},
 			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
 			ReadTargets:                  map[string]codexTargetMetrics{},
+			InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 			FailureReasons:               map[string]int{},
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 		},
@@ -1561,6 +1572,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	summary.InlineOrchestrationCalls += record.InlineOrchestrationCalls
 	summary.InlineOrchestrationBytes += record.InlineOrchestrationBytes
 	summary.InlineOrchestrationMaxBytes = max(summary.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
+	addCodexInlineMetrics(summary.InlineOrchestrationByTool, record.InlineOrchestrationByTool)
 	if record.InlineOrchestrationCalls > 0 {
 		summary.InlineOrchestrationSessions++
 	}
@@ -1580,6 +1592,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			OwnedOperations:              map[string]codexOwnedOperationMetrics{},
 			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
 			ReadTargets:                  map[string]codexTargetMetrics{},
+			InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 			FailureReasons:               map[string]int{},
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 		}
@@ -1619,6 +1632,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	task.InlineOrchestrationCalls += record.InlineOrchestrationCalls
 	task.InlineOrchestrationBytes += record.InlineOrchestrationBytes
 	task.InlineOrchestrationMaxBytes = max(task.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
+	addCodexInlineMetrics(task.InlineOrchestrationByTool, record.InlineOrchestrationByTool)
 	if record.InlineOrchestrationCalls > 0 {
 		task.InlineOrchestrationSessions++
 	}
@@ -1669,6 +1683,19 @@ func addCodexToolMetricsValue(target map[string]codexToolMetrics, key string, ad
 	value.OutputBytes += addition.OutputBytes
 	value.EstimatedOutputTokens = estimatedTokens(value.OutputBytes)
 	target[key] = value
+}
+
+func addCodexInlineMetrics(target, additions map[string]codexInlineMetrics) {
+	for tool, addition := range additions {
+		metrics := target[tool]
+		metrics.Calls += addition.Calls
+		if addition.Calls > 0 {
+			metrics.Sessions++
+		}
+		metrics.Bytes += addition.Bytes
+		metrics.MaxBytes = max(metrics.MaxBytes, addition.MaxBytes)
+		target[tool] = metrics
+	}
 }
 
 func addCodexOwnedOperationMetrics(target map[string]codexOwnedOperationMetrics, additions, ambiguous map[string]codexToolMetrics) {
@@ -1804,6 +1831,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 			formatCodexCount(int64(summary.InlineOrchestrationSessions)),
 			formatCodexCount(summary.InlineOrchestrationMaxBytes),
 		)
+		printCodexInlineTools(summary.InlineOrchestrationByTool)
 	}
 	if summary.Compactions > 0 {
 		cachedRatio := float64(0)
@@ -1846,6 +1874,31 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Printf("- %s remaining tool calls failed or timed out; inspect the reason/context rows before changing shared tooling.\n", formatCodexCount(int64(remainingFailures)))
 	}
 	fmt.Println("- Token counts are rollout totals, not billing amounts. Fresh-token proxy excludes cached input but does not apply model prices.")
+}
+
+func printCodexInlineTools(metrics map[string]codexInlineMetrics) {
+	type row struct {
+		Tool    string
+		Metrics codexInlineMetrics
+	}
+	rows := make([]row, 0, len(metrics))
+	for tool, value := range metrics {
+		rows = append(rows, row{Tool: tool, Metrics: value})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.Bytes != rows[j].Metrics.Bytes {
+			return rows[i].Metrics.Bytes > rows[j].Metrics.Bytes
+		}
+		return rows[i].Tool < rows[j].Tool
+	})
+	for _, row := range rows {
+		fmt.Printf("  - %s: %s calls, %s bytes, largest %s\n",
+			row.Tool,
+			formatCodexCount(int64(row.Metrics.Calls)),
+			formatCodexCount(row.Metrics.Bytes),
+			formatCodexCount(row.Metrics.MaxBytes),
+		)
+	}
 }
 
 func codexMixedSearchReadMetrics(shapes map[string]codexToolMetrics) codexToolMetrics {

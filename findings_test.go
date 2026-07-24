@@ -53,9 +53,16 @@ func TestBuildSessionFindingsFlagsOneVeryLongInlineToolCall(t *testing.T) {
 	report.Summary.InlineOrchestrationBytes = 9 * 1024
 	report.Summary.InlineOrchestrationMaxBytes = 9 * 1024
 	report.Summary.InlineOrchestrationSessions = 1
+	report.Summary.InlineOrchestrationByTool["exec"] = codexInlineMetrics{
+		Calls:    1,
+		Sessions: 1,
+		Bytes:    9 * 1024,
+		MaxBytes: 9 * 1024,
+	}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 || findings[0].Category != "agent-interface" ||
-		!strings.Contains(findings[0].Title, "long inline code") {
+		!strings.Contains(findings[0].Title, "long inline code") ||
+		!strings.Contains(findings[0].Evidence, "exec 1 calls/9,216 bytes") {
 		t.Fatalf("long inline call finding mismatch: %#v", findings)
 	}
 }
