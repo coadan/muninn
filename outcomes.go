@@ -42,16 +42,25 @@ type deliveryReworkMetrics struct {
 	ReworkScopes                    map[string]int                   `json:"reworkScopes,omitempty"`
 	ReworkTargets                   map[string]int                   `json:"reworkTargets,omitempty"`
 	Cohorts                         map[string]deliveryCohortMetrics `json:"cohorts,omitempty"`
+	VerificationChecks              map[string]verificationMetrics   `json:"verificationChecks,omitempty"`
 }
 
 type deliveryCohortMetrics struct {
-	Deliveries                      int `json:"deliveries"`
-	DeliveriesWithPreTests          int `json:"deliveriesWithPreTests"`
-	DeliveriesWithPreReview         int `json:"deliveriesWithPreReview"`
-	DeliveriesWithRework            int `json:"deliveriesWithRework"`
-	ReworkedDeliveriesWithPreTests  int `json:"reworkedDeliveriesWithPreTests"`
-	ReworkedDeliveriesWithPreReview int `json:"reworkedDeliveriesWithPreReview"`
-	ReviewToEditCycles              int `json:"reviewToEditCycles"`
+	Deliveries                      int                            `json:"deliveries"`
+	DeliveriesWithPreTests          int                            `json:"deliveriesWithPreTests"`
+	DeliveriesWithPreReview         int                            `json:"deliveriesWithPreReview"`
+	DeliveriesWithRework            int                            `json:"deliveriesWithRework"`
+	ReworkedDeliveriesWithPreTests  int                            `json:"reworkedDeliveriesWithPreTests"`
+	ReworkedDeliveriesWithPreReview int                            `json:"reworkedDeliveriesWithPreReview"`
+	ReviewToEditCycles              int                            `json:"reviewToEditCycles"`
+	VerificationChecks              map[string]verificationMetrics `json:"verificationChecks,omitempty"`
+}
+
+type verificationMetrics struct {
+	Deliveries            int `json:"deliveries"`
+	DeliveriesWithRework  int `json:"deliveriesWithRework"`
+	FailedRuns            int `json:"failedRuns"`
+	FailFixPassDeliveries int `json:"failFixPassDeliveries"`
 }
 
 type deliveryReworkTracker struct {
@@ -68,6 +77,11 @@ type deliveryReworkTracker struct {
 	currentDeliveryCohorts   map[string]struct{}
 	currentDeliveryTargets   map[string]struct{}
 	reworkedDeliveryCohorts  map[string]struct{}
+	passedChecksAfterEdit    map[string]struct{}
+	failedChecksAwaitingEdit map[string]struct{}
+	repairCandidateChecks    map[string]struct{}
+	repairedChecksAfterEdit  map[string]struct{}
+	currentDeliveryChecks    map[string]struct{}
 }
 
 func (tracker *deliveryReworkTracker) observe(event normalizedSessionEvent, operations []string) {
@@ -75,15 +89,19 @@ func (tracker *deliveryReworkTracker) observe(event normalizedSessionEvent, oper
 		tracker.observeEdit(event)
 		return
 	}
-	if event.Kind == sessionEventToolOutput && !event.Failed && len(tracker.pendingEditCohorts) > 0 {
-		if testOperation(event, operations) {
-			tracker.testsAfterLatestEdit = true
-		}
+	if event.Kind == sessionEventToolOutput && !event.OperationContinues &&
+		len(tracker.pendingEditCohorts) > 0 &&
+		testOperation(event, operations) {
+		tracker.observeTest(event, operations)
+	}
+	if event.Kind == sessionEventToolOutput && !event.Failed && !event.OperationContinues &&
+		len(tracker.pendingEditCohorts) > 0 {
 		if reviewOperation(event, operations) {
 			tracker.reviewAfterLatestEdit = true
 		}
 	}
-	if event.Kind == sessionEventToolOutput && !event.Failed && deliveryOperation(event, operations) {
+	if event.Kind == sessionEventToolOutput && !event.Failed && !event.OperationContinues &&
+		deliveryOperation(event, operations) {
 		tracker.observeDelivery()
 		return
 	}
@@ -117,8 +135,57 @@ func (tracker *deliveryReworkTracker) observeEdit(event normalizedSessionEvent) 
 	for _, target := range event.Targets {
 		tracker.pendingEditTargets[target] = struct{}{}
 	}
+	if tracker.repairCandidateChecks == nil {
+		tracker.repairCandidateChecks = map[string]struct{}{}
+	}
+	for check := range tracker.failedChecksAwaitingEdit {
+		tracker.repairCandidateChecks[check] = struct{}{}
+	}
+	tracker.failedChecksAwaitingEdit = nil
 	tracker.testsAfterLatestEdit = false
 	tracker.reviewAfterLatestEdit = false
+	tracker.passedChecksAfterEdit = nil
+	tracker.repairedChecksAfterEdit = nil
+}
+
+func (tracker *deliveryReworkTracker) observeTest(event normalizedSessionEvent, operations []string) {
+	checks := verificationCheckIDs(event, operations)
+	if event.Failed {
+		if tracker.failedChecksAwaitingEdit == nil {
+			tracker.failedChecksAwaitingEdit = map[string]struct{}{}
+		}
+		for _, check := range checks {
+			tracker.failedChecksAwaitingEdit[check] = struct{}{}
+			delete(tracker.repairCandidateChecks, check)
+			delete(tracker.passedChecksAfterEdit, check)
+			delete(tracker.repairedChecksAfterEdit, check)
+			metrics := tracker.verification(check)
+			metrics.FailedRuns++
+			tracker.metrics.VerificationChecks[check] = metrics
+			for cohort := range tracker.pendingEditCohorts {
+				cohortMetrics := tracker.cohort(cohort)
+				checkMetrics := cohortVerification(&cohortMetrics, check)
+				checkMetrics.FailedRuns++
+				cohortMetrics.VerificationChecks[check] = checkMetrics
+				tracker.metrics.Cohorts[cohort] = cohortMetrics
+			}
+		}
+		tracker.testsAfterLatestEdit = len(tracker.passedChecksAfterEdit) > 0
+		return
+	}
+	tracker.testsAfterLatestEdit = true
+	if tracker.passedChecksAfterEdit == nil {
+		tracker.passedChecksAfterEdit = map[string]struct{}{}
+	}
+	if tracker.repairedChecksAfterEdit == nil {
+		tracker.repairedChecksAfterEdit = map[string]struct{}{}
+	}
+	for _, check := range checks {
+		tracker.passedChecksAfterEdit[check] = struct{}{}
+		if _, repaired := tracker.repairCandidateChecks[check]; repaired {
+			tracker.repairedChecksAfterEdit[check] = struct{}{}
+		}
+	}
 }
 
 func (tracker *deliveryReworkTracker) observeDelivery() {
@@ -138,7 +205,23 @@ func (tracker *deliveryReworkTracker) observeDelivery() {
 		if tracker.reviewAfterLatestEdit {
 			metrics.DeliveriesWithPreReview++
 		}
+		for check := range tracker.passedChecksAfterEdit {
+			checkMetrics := cohortVerification(&metrics, check)
+			checkMetrics.Deliveries++
+			if _, repaired := tracker.repairedChecksAfterEdit[check]; repaired {
+				checkMetrics.FailFixPassDeliveries++
+			}
+			metrics.VerificationChecks[check] = checkMetrics
+		}
 		tracker.metrics.Cohorts[cohort] = metrics
+	}
+	for check := range tracker.passedChecksAfterEdit {
+		metrics := tracker.verification(check)
+		metrics.Deliveries++
+		if _, repaired := tracker.repairedChecksAfterEdit[check]; repaired {
+			metrics.FailFixPassDeliveries++
+		}
+		tracker.metrics.VerificationChecks[check] = metrics
 	}
 	tracker.delivered = true
 	tracker.deliveryHadRework = false
@@ -147,11 +230,16 @@ func (tracker *deliveryReworkTracker) observeDelivery() {
 	tracker.currentDeliveryPreReview = tracker.reviewAfterLatestEdit
 	tracker.currentDeliveryCohorts = cloneStringSet(tracker.pendingEditCohorts)
 	tracker.currentDeliveryTargets = cloneStringSet(tracker.pendingEditTargets)
+	tracker.currentDeliveryChecks = cloneStringSet(tracker.passedChecksAfterEdit)
 	tracker.reworkedDeliveryCohorts = map[string]struct{}{}
 	tracker.pendingEditCohorts = nil
 	tracker.pendingEditTargets = nil
 	tracker.testsAfterLatestEdit = false
 	tracker.reviewAfterLatestEdit = false
+	tracker.passedChecksAfterEdit = nil
+	tracker.failedChecksAwaitingEdit = nil
+	tracker.repairCandidateChecks = nil
+	tracker.repairedChecksAfterEdit = nil
 }
 
 func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSessionEvent) {
@@ -203,6 +291,11 @@ func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSe
 		if tracker.currentDeliveryPreReview {
 			tracker.metrics.ReworkedDeliveriesWithPreReview++
 		}
+		for check := range tracker.currentDeliveryChecks {
+			metrics := tracker.verification(check)
+			metrics.DeliveriesWithRework++
+			tracker.metrics.VerificationChecks[check] = metrics
+		}
 		tracker.deliveryHadRework = true
 	}
 	for cohort := range cohorts {
@@ -216,6 +309,11 @@ func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSe
 			}
 			if tracker.currentDeliveryPreReview {
 				metrics.ReworkedDeliveriesWithPreReview++
+			}
+			for check := range tracker.currentDeliveryChecks {
+				checkMetrics := cohortVerification(&metrics, check)
+				checkMetrics.DeliveriesWithRework++
+				metrics.VerificationChecks[check] = checkMetrics
 			}
 			tracker.reworkedDeliveryCohorts[cohort] = struct{}{}
 		}
@@ -237,6 +335,20 @@ func (tracker *deliveryReworkTracker) cohort(name string) deliveryCohortMetrics 
 		tracker.metrics.Cohorts = map[string]deliveryCohortMetrics{}
 	}
 	return tracker.metrics.Cohorts[name]
+}
+
+func (tracker *deliveryReworkTracker) verification(name string) verificationMetrics {
+	if tracker.metrics.VerificationChecks == nil {
+		tracker.metrics.VerificationChecks = map[string]verificationMetrics{}
+	}
+	return tracker.metrics.VerificationChecks[name]
+}
+
+func cohortVerification(cohort *deliveryCohortMetrics, name string) verificationMetrics {
+	if cohort.VerificationChecks == nil {
+		cohort.VerificationChecks = map[string]verificationMetrics{}
+	}
+	return cohort.VerificationChecks[name]
 }
 
 func eventTargetCohorts(targets []string) map[string]struct{} {
@@ -300,6 +412,21 @@ func testOperation(event normalizedSessionEvent, operations []string) bool {
 		}
 	}
 	return false
+}
+
+func verificationCheckIDs(event normalizedSessionEvent, operations []string) []string {
+	var checks []string
+	for _, operation := range operations {
+		name := operation[strings.LastIndex(operation, "/")+1:]
+		if name == "test" || strings.HasPrefix(name, "test-") {
+			checks = appendUniqueString(checks, operation)
+		}
+	}
+	if len(checks) == 0 && event.Family == "tests" {
+		checks = append(checks, "tests")
+	}
+	sort.Strings(checks)
+	return checks
 }
 
 func reworkTargetLever(target string) string {
@@ -399,6 +526,7 @@ func addDeliveryReworkMetrics(target *deliveryReworkMetrics, addition deliveryRe
 		addDeliveryCohortMetrics(&current, metrics)
 		target.Cohorts[cohort] = current
 	}
+	addVerificationMetricsMap(&target.VerificationChecks, addition.VerificationChecks)
 }
 
 func addDeliveryCohortMetrics(target *deliveryCohortMetrics, addition deliveryCohortMetrics) {
@@ -409,6 +537,21 @@ func addDeliveryCohortMetrics(target *deliveryCohortMetrics, addition deliveryCo
 	target.ReworkedDeliveriesWithPreTests += addition.ReworkedDeliveriesWithPreTests
 	target.ReworkedDeliveriesWithPreReview += addition.ReworkedDeliveriesWithPreReview
 	target.ReviewToEditCycles += addition.ReviewToEditCycles
+	addVerificationMetricsMap(&target.VerificationChecks, addition.VerificationChecks)
+}
+
+func addVerificationMetricsMap(target *map[string]verificationMetrics, addition map[string]verificationMetrics) {
+	if *target == nil {
+		*target = map[string]verificationMetrics{}
+	}
+	for check, metrics := range addition {
+		current := (*target)[check]
+		current.Deliveries += metrics.Deliveries
+		current.DeliveriesWithRework += metrics.DeliveriesWithRework
+		current.FailedRuns += metrics.FailedRuns
+		current.FailFixPassDeliveries += metrics.FailFixPassDeliveries
+		(*target)[check] = current
+	}
 }
 
 func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncrement codexTokenUsage, operations []string) {
@@ -817,6 +960,54 @@ func printDeliveryReworkAnalysis(metrics deliveryReworkMetrics) {
 			fmt.Printf("Top rework targets: %s\n", formatDeliveryReworkTargets(metrics.ReworkTargets))
 		}
 	}
+	if checks := formatVerificationChecks(
+		metrics.Deliveries,
+		metrics.DeliveriesWithRework,
+		metrics.VerificationChecks,
+		3,
+	); checks != "" {
+		fmt.Printf("Verification effectiveness: %s\n", checks)
+	}
+}
+
+func formatVerificationChecks(
+	totalDeliveries,
+	totalRework int,
+	checks map[string]verificationMetrics,
+	limit int,
+) string {
+	type row struct {
+		name    string
+		metrics verificationMetrics
+	}
+	rows := make([]row, 0, len(checks))
+	for name, metrics := range checks {
+		if metrics.Deliveries == 0 {
+			continue
+		}
+		rows = append(rows, row{name: name, metrics: metrics})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].metrics.Deliveries != rows[j].metrics.Deliveries {
+			return rows[i].metrics.Deliveries > rows[j].metrics.Deliveries
+		}
+		if rows[i].metrics.FailFixPassDeliveries != rows[j].metrics.FailFixPassDeliveries {
+			return rows[i].metrics.FailFixPassDeliveries > rows[j].metrics.FailFixPassDeliveries
+		}
+		return rows[i].name < rows[j].name
+	})
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		parts = append(parts, row.name+" "+verificationCheckComparison(
+			totalDeliveries,
+			totalRework,
+			row.metrics,
+		))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func formatDeliveryReworkTargets(targets map[string]int) string {

@@ -44,6 +44,7 @@ type normalizedSessionEvent struct {
 	CommandCandidates             []ownedCommandInvocation
 	OwnedOperations               []string
 	OperationAttributionAmbiguous bool
+	OperationContinues            bool
 	TargetCandidates              []string
 	Targets                       []string
 	InlineBytes                   int64

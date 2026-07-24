@@ -788,7 +788,7 @@ func TestCodexMixedSearchReadMetricsAggregatesOnlyRelevantShapes(t *testing.T) {
 func TestAnalyzeCodexSessionsAttributesContinuationOutputToCommandFamily(t *testing.T) {
 	sessionsDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "breyta-workbench")
-	writeCodexSessionFixture(t, sessionsDir, "rollout-attribution", []any{
+	sessionPath := writeCodexSessionFixture(t, sessionsDir, "rollout-attribution", []any{
 		map[string]any{
 			"timestamp": "2026-07-24T08:00:00Z",
 			"type":      "session_meta",
@@ -893,6 +893,22 @@ func TestAnalyzeCodexSessionsAttributesContinuationOutputToCommandFamily(t *test
 			},
 		},
 	})
+
+	normalized, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatalf("parse normalized continuation fixture: %v", err)
+	}
+	var outputs []normalizedSessionEvent
+	for _, event := range normalized.Events {
+		if event.Kind == sessionEventToolOutput {
+			outputs = append(outputs, event)
+		}
+	}
+	if len(outputs) != 5 || !outputs[0].OperationContinues || outputs[1].OperationContinues ||
+		!outputs[2].OperationContinues || outputs[3].OperationContinues ||
+		outputs[4].OperationContinues {
+		t.Fatalf("terminal continuation classification mismatch: %#v", outputs)
+	}
 
 	generatedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	report, err := analyzeCodexSessions([]string{sessionsDir}, workspaceRoot, generatedAt.Add(-24*time.Hour), generatedAt)

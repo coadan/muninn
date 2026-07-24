@@ -81,6 +81,9 @@ Muninn highlights:
   review-to-edit cycles, and deliveries that required rework
 - generic repository-relative delivery cohorts, with tests and review counted
   only when observed after the latest edit and before delivery
+- verification effectiveness by configured test operation or generic test
+  family, including failed runs, fail-fix-pass deliveries, and rework rates
+  with versus without each check
 - total, cached, uncached, and per-session input-token cost
 - fresh-token and visible tool-output volume
 - long low-output tool waits, with tests, builds, and review waits reported
@@ -227,7 +230,9 @@ rework hotspots are shown only for files that both belonged to the preceding
 delivery and were edited after a review check. They work for ordinary
 repositories and monorepos; nested repository managers are only
 path-normalization inputs. Test/review comparisons are observational and do not
-claim that the executed check covered the edited subsystem.
+claim that the executed check covered the edited subsystem. Long-running tool
+outputs count verification or delivery only at the terminal continuation, so
+polling does not create duplicate check outcomes.
 
 ## Direction
 

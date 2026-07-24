@@ -168,6 +168,16 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 			case "function_call_output", "custom_tool_call_output":
 				text, statusText, byteCount := codexToolOutputText(payload.Output)
 				descriptor := callDescriptors[payload.CallID]
+				var continuationReferences []codexContinuationReference
+				if descriptor.Family != "" {
+					continuationReferences = codexToolContinuationReferences(payload.Output)
+					if descriptor.EmitsSessionMarker {
+						continuationReferences = append(
+							continuationReferences,
+							codexExplicitSessionMarkerReferences(payload.Output)...,
+						)
+					}
+				}
 				failed := codexToolOutputFailed(statusText, descriptor.Name)
 				reason := ""
 				context := ""
@@ -193,13 +203,10 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					CommandCandidates:             descriptor.CommandCandidates,
 					OwnedOperations:               descriptor.OwnedOperations,
 					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
+					OperationContinues:            len(continuationReferences) > 0,
 				})
 				if descriptor.Family != "" {
-					references := codexToolContinuationReferences(payload.Output)
-					if descriptor.EmitsSessionMarker {
-						references = append(references, codexExplicitSessionMarkerReferences(payload.Output)...)
-					}
-					for _, reference := range references {
+					for _, reference := range continuationReferences {
 						if reference.Type == "session" {
 							execSessions[reference.ID] = descriptor
 						} else {
