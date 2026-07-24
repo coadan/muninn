@@ -373,6 +373,22 @@ func TestCodexShellCommandAnalysisUsesPrivacySafeMixedShapes(t *testing.T) {
 	}
 }
 
+func TestCodexSelectorDigestsRecognizeOwnedCommandSubstitution(t *testing.T) {
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "bwb",
+		Executables: []string{"bwb"},
+	}})
+	digests := codexSelectorDigests(
+		"exec_command",
+		`{"cmd":"eval \"$(bwb task example status --env-only --env-format shell)\"\nbreyta flows list"}`,
+		"",
+	)
+	matches := catalog.match(digests)
+	if len(matches) != 1 || matches[0] != "bwb" {
+		t.Fatalf("owned executable in command substitution was not recognized: %#v", matches)
+	}
+}
+
 func TestCodexMixedSearchReadMetricsAggregatesOnlyRelevantShapes(t *testing.T) {
 	got := codexMixedSearchReadMetrics(map[string]codexToolMetrics{
 		"search -> file reads":          {Calls: 2, FailedCalls: 1, OutputBytes: 400},

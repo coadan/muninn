@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+var shellCommandSubstitutionExecutablePattern = regexp.MustCompile(`\$\(\s*([A-Za-z0-9._/+-]+)`)
 
 type ownedToolConfig struct {
 	ID             string   `json:"id"`
@@ -93,6 +96,13 @@ func codexSelectorDigests(toolName, arguments, input string) []string {
 		for _, segment := range codexShellCommandSegments(command) {
 			for _, executable := range codexShellExecutables(segment) {
 				digests = appendUniqueString(digests, ownershipSelectorDigest("exec", executable))
+			}
+			for _, token := range segment {
+				for _, match := range shellCommandSubstitutionExecutablePattern.FindAllStringSubmatch(token, -1) {
+					if len(match) > 1 {
+						digests = appendUniqueString(digests, ownershipSelectorDigest("exec", filepath.Base(match[1])))
+					}
+				}
 			}
 		}
 	}
