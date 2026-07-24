@@ -21,6 +21,7 @@ type sessionFinding struct {
 	Count    int    `json:"count,omitempty"`
 	Sessions int    `json:"sessions,omitempty"`
 	Target   string `json:"target,omitempty"`
+	LastSeen string `json:"lastSeen,omitempty"`
 	score    int
 }
 
@@ -39,10 +40,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				strings.Join(feedback.Sources, ", "),
 				feedback.LastSeen,
 			),
-			Action: directFeedbackAction(feedback),
-			Count:  feedback.Occurrences,
-			Target: feedback.Target,
-			score:  800 + feedback.Occurrences*10,
+			Action:   directFeedbackAction(feedback),
+			Count:    feedback.Occurrences,
+			Target:   feedback.Target,
+			LastSeen: feedback.LastSeen,
+			score:    800 + feedback.Occurrences*10,
 		})
 	}
 
@@ -92,6 +94,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Count:    metrics.Calls,
 			Sessions: metrics.Sessions,
 			Target:   operation,
+			LastSeen: sessionFindingLastSeen(report, "owned-operation", operation),
 			score:    650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + int(metrics.EstimatedOutputTokens/5_000),
 		})
 	}
@@ -116,6 +119,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Count:    metrics.Calls,
 			Sessions: metrics.Sessions,
 			Target:   context,
+			LastSeen: sessionFindingLastSeen(report, "oversized-output", context),
 			score:    600 + metrics.Calls + int(metrics.OutputBytes/10_000),
 		})
 	}
@@ -140,10 +144,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				formatCodexCount(int64(metrics.TruncatedCalls)),
 				formatCodexCount(outputTokens),
 			),
-			Action: action,
-			Count:  metrics.Calls,
-			Target: owned.ID,
-			score:  500 + metrics.FailedCalls*20 + metrics.TruncatedCalls*5 + int(outputTokens/10_000),
+			Action:   action,
+			Count:    metrics.Calls,
+			Target:   owned.ID,
+			LastSeen: sessionFindingLastSeen(report, "owned-tool", owned.ID),
+			score:    500 + metrics.FailedCalls*20 + metrics.TruncatedCalls*5 + int(outputTokens/10_000),
 		})
 	}
 
@@ -164,6 +169,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				Action:   config.Actions.RecurringFailure,
 				Count:    metrics.Count,
 				Sessions: metrics.Sessions,
+				LastSeen: sessionFindingLastSeen(report, "failure", reason+"\x00"+context),
 				score:    400 + metrics.Sessions*30 + metrics.Count,
 			})
 		}
@@ -172,6 +178,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	type workflowEvidence struct {
 		Count    int
 		Sessions int
+		LastSeen time.Time
 	}
 	workflows := map[string]workflowEvidence{}
 	for transition, metrics := range summary.CrossCallTransitions {
@@ -183,6 +190,9 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		evidence.Count += metrics.Count
 		if metrics.Sessions > evidence.Sessions {
 			evidence.Sessions = metrics.Sessions
+		}
+		if seen := sessionFindingActivity(report, "transition", transition); seen.After(evidence.LastSeen) {
+			evidence.LastSeen = seen
 		}
 		workflows[workflow] = evidence
 	}
@@ -201,6 +211,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Action:   config.Actions.AgentInterface,
 			Count:    metrics.Count,
 			Sessions: metrics.Sessions,
+			LastSeen: formatSessionFindingTime(metrics.LastSeen),
 			score:    300 + metrics.Sessions*10 + metrics.Count,
 		})
 	}
@@ -239,6 +250,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				Count:    metrics.Reads,
 				Sessions: metrics.Sessions,
 				Target:   target,
+				LastSeen: sessionFindingLastSeen(report, "read", target),
 				score:    320 + metrics.Sessions*15 + metrics.SearchReadLoops*10 + metrics.Reads,
 			})
 			continue
@@ -257,6 +269,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Count:    metrics.Reads,
 			Sessions: metrics.Sessions,
 			Target:   target,
+			LastSeen: sessionFindingLastSeen(report, "read", target),
 			score:    350 + metrics.Sessions*15 + metrics.SearchReadLoops*10 + metrics.Reads,
 		})
 	}
@@ -280,6 +293,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Action:   config.Actions.InlineOrchestration,
 			Count:    summary.InlineOrchestrationCalls,
 			Sessions: summary.InlineOrchestrationSessions,
+			LastSeen: sessionFindingLastSeen(report, "inline", ""),
 			score:    450 + summary.InlineOrchestrationSessions*20 + summary.InlineOrchestrationCalls,
 		})
 	}
@@ -297,6 +311,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Action:   config.Actions.SessionLoop,
 			Count:    summary.Compactions,
 			Sessions: summary.SessionsWithCompactions,
+			LastSeen: sessionFindingLastSeen(report, "compaction", ""),
 			score:    420 + summary.SessionsWithCompactions*20 + summary.Compactions,
 		})
 	}
@@ -333,6 +348,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Count:    task.Sessions,
 			Sessions: task.Sessions,
 			Target:   task.Task,
+			LastSeen: sessionFindingLastSeen(report, "task", task.Task),
 			score:    430 + task.Sessions*10 + task.Compactions*5 + int(uncachedPerSession/25_000),
 		})
 	}
@@ -354,6 +370,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Count:    metrics.Calls,
 			Sessions: metrics.Sessions,
 			Target:   context,
+			LastSeen: sessionFindingLastSeen(report, "progress-stall", context),
 			score:    440 + metrics.Sessions*20 + metrics.Calls*5 + int(metrics.Seconds/10),
 		})
 	}
@@ -368,14 +385,18 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				formatCodexCount(int64(searchRead.Calls)),
 				formatCodexCount(searchRead.EstimatedOutputTokens),
 			),
-			Action: config.Actions.SourceContext,
-			Count:  searchRead.Calls,
-			score:  250 + searchRead.Calls + int(searchRead.EstimatedOutputTokens/10_000),
+			Action:   config.Actions.SourceContext,
+			Count:    searchRead.Calls,
+			LastSeen: latestSearchReadActivity(report),
+			score:    250 + searchRead.Calls + int(searchRead.EstimatedOutputTokens/10_000),
 		})
 	}
 
 	findings = assignAndSuppressSessionFindingSignals(findings, config.SuppressSignals)
 	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].LastSeen != findings[j].LastSeen {
+			return findings[i].LastSeen > findings[j].LastSeen
+		}
 		if findings[i].score != findings[j].score {
 			return findings[i].score > findings[j].score
 		}
@@ -403,6 +424,34 @@ func assignAndSuppressSessionFindingSignals(findings []sessionFinding, suppressi
 		result = append(result, finding)
 	}
 	return result
+}
+
+func sessionFindingActivity(report codexSessionInsightsReport, kind, target string) time.Time {
+	return report.Summary.Activity[sessionActivityKey(kind, target)]
+}
+
+func sessionFindingLastSeen(report codexSessionInsightsReport, kind, target string) string {
+	return formatSessionFindingTime(sessionFindingActivity(report, kind, target))
+}
+
+func formatSessionFindingTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func latestSearchReadActivity(report codexSessionInsightsReport) string {
+	var latest time.Time
+	for shape := range report.Summary.MixedShellShapes {
+		if !strings.Contains(shape, "search") || !strings.Contains(shape, "file reads") {
+			continue
+		}
+		if seen := sessionFindingActivity(report, "shape", shape); seen.After(latest) {
+			latest = seen
+		}
+	}
+	return formatSessionFindingTime(latest)
 }
 
 func sessionFindingSignal(finding sessionFinding) string {
@@ -734,16 +783,41 @@ func printSessionFindings(findings []sessionFinding, limit int) {
 		rows = rows[:limit]
 	}
 	for _, finding := range rows {
-		target := ""
-		if finding.Target != "" {
-			target = " · " + finding.Target
-		}
+		target := sessionFindingDisplayTarget(finding)
 		fmt.Printf("- [%s/%s] %s%s\n", finding.Category, finding.Control, finding.Title, target)
 		fmt.Printf("  Signal: %s\n", finding.Signal)
 		fmt.Printf("  Evidence: %s.\n", strings.TrimSuffix(finding.Evidence, "."))
+		if finding.LastSeen != "" {
+			fmt.Printf("  Last seen: %s\n", formatSessionFindingAge(finding.LastSeen, time.Now().UTC()))
+		}
 		fmt.Printf("  Next: %s\n", finding.Action)
 	}
 	if len(rows) < len(findings) {
 		fmt.Printf("... %d more findings; use --limit 0 or --details.\n", len(findings)-len(rows))
+	}
+}
+
+func sessionFindingDisplayTarget(finding sessionFinding) string {
+	if finding.Target == "" || strings.Contains(finding.Title, finding.Target) {
+		return ""
+	}
+	return " · " + finding.Target
+}
+
+func formatSessionFindingAge(lastSeen string, now time.Time) string {
+	seen, err := time.Parse(time.RFC3339, lastSeen)
+	if err != nil || seen.After(now) {
+		return lastSeen
+	}
+	age := now.Sub(seen)
+	switch {
+	case age < time.Minute:
+		return "just now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm ago", int(age/time.Minute))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(age/time.Hour))
+	default:
+		return fmt.Sprintf("%dd ago", int(age/(24*time.Hour)))
 	}
 }

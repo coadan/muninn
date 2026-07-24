@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 18
+const codexSessionInsightsSchemaVersion = 19
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -72,6 +72,7 @@ type codexTaskInsights struct {
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
+	Activity                     map[string]time.Time                         `json:"-"`
 }
 
 type codexToolMetrics struct {
@@ -167,6 +168,7 @@ type codexSessionInsightsSummary struct {
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
+	Activity                     map[string]time.Time                         `json:"-"`
 }
 
 type codexSessionInsightsReport struct {
@@ -213,6 +215,7 @@ type codexSessionRecord struct {
 	ProgressStalls               map[string]codexWaitMetrics
 	ExpectedWaits                map[string]codexWaitMetrics
 	OversizedOutputs             map[string]codexOversizedOutputMetrics
+	Activity                     map[string]time.Time
 }
 
 type codexToolCallDescriptor struct {
@@ -814,6 +817,7 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 			ProgressStalls:               map[string]codexWaitMetrics{},
 			ExpectedWaits:                map[string]codexWaitMetrics{},
 			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
+			Activity:                     map[string]time.Time{},
 		},
 	}
 }
@@ -1411,6 +1415,28 @@ func addCodexToolMetrics(metrics map[string]codexToolMetrics, key string, calls 
 	metrics[key] = value
 }
 
+func sessionActivityKey(kind, target string) string {
+	return kind + "\x00" + target
+}
+
+func touchSessionActivity(activity map[string]time.Time, kind, target string, occurredAt time.Time) {
+	if occurredAt.IsZero() {
+		return
+	}
+	key := sessionActivityKey(kind, target)
+	if current := activity[key]; current.IsZero() || occurredAt.After(current) {
+		activity[key] = occurredAt
+	}
+}
+
+func mergeSessionActivity(target, additions map[string]time.Time) {
+	for key, occurredAt := range additions {
+		if current := target[key]; current.IsZero() || occurredAt.After(current) {
+			target[key] = occurredAt
+		}
+	}
+}
+
 func pathInsideRoot(root, path string) (bool, error) {
 	absolutePath, err := filepath.Abs(path)
 	if err != nil {
@@ -1655,6 +1681,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexWaitMetrics(summary.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(summary.ExpectedWaits, record.ExpectedWaits)
 	addCodexOversizedOutputMetrics(summary.OversizedOutputs, record.OversizedOutputs)
+	mergeSessionActivity(summary.Activity, record.Activity)
 
 	task := taskMap[record.Task]
 	if task == nil {
@@ -1673,6 +1700,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			ProgressStalls:               map[string]codexWaitMetrics{},
 			ExpectedWaits:                map[string]codexWaitMetrics{},
 			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
+			Activity:                     map[string]time.Time{},
 		}
 		taskMap[record.Task] = task
 	}
@@ -1721,6 +1749,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexWaitMetrics(task.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(task.ExpectedWaits, record.ExpectedWaits)
 	addCodexOversizedOutputMetrics(task.OversizedOutputs, record.OversizedOutputs)
+	mergeSessionActivity(task.Activity, record.Activity)
 }
 
 func addCodexWaitMetrics(target, addition map[string]codexWaitMetrics) {

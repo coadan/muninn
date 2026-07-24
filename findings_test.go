@@ -226,6 +226,53 @@ func TestSessionFindingSignalIsPrivacySafeAndBounded(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsRanksRecentSignalsFirst(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.ProgressStalls["older-high-count"] = codexWaitMetrics{
+		Calls: 20, Seconds: 600, Sessions: 5,
+	}
+	report.Summary.ProgressStalls["recent-low-count"] = codexWaitMetrics{
+		Calls: 2, Seconds: 40, Sessions: 2,
+	}
+	older := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
+	recent := older.Add(24 * time.Hour)
+	touchSessionActivity(report.Summary.Activity, "progress-stall", "older-high-count", older)
+	touchSessionActivity(report.Summary.Activity, "progress-stall", "recent-low-count", recent)
+
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 2 {
+		t.Fatalf("expected two progress findings, got %#v", findings)
+	}
+	if findings[0].Target != "recent-low-count" {
+		t.Fatalf("freshness should outrank cumulative score: %#v", findings)
+	}
+	if findings[0].LastSeen != "2026-07-24T08:00:00Z" ||
+		findings[1].LastSeen != "2026-07-23T08:00:00Z" {
+		t.Fatalf("finding freshness mismatch: %#v", findings)
+	}
+}
+
+func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
+	finding := sessionFinding{
+		Title:  "individual tool calls return oversized output: file reads",
+		Target: "file reads",
+	}
+	if got := sessionFindingDisplayTarget(finding); got != "" {
+		t.Fatalf("embedded target should not be repeated: %q", got)
+	}
+	finding.Title = "a small current owner is repeatedly reread"
+	if got := sessionFindingDisplayTarget(finding); got != " · file reads" {
+		t.Fatalf("distinct target should remain visible: %q", got)
+	}
+}
+
+func TestFormatSessionFindingAge(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	if got := formatSessionFindingAge("2026-07-24T10:30:00Z", now); got != "1h ago" {
+		t.Fatalf("unexpected finding age: %q", got)
+	}
+}
+
 func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 	findings := []sessionFinding{
 		{Category: "owned-tool", Title: "tool"},
