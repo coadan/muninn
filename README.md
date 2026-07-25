@@ -113,6 +113,8 @@ Muninn highlights:
   test/build/check failures, explicit reverts, exact-target fix cycles,
   checked redeliveries, recovery, and time-to-failure/recovery by cohort
 - total, cached, uncached, and per-session input-token cost
+- provider-specific root and scoped repository-instruction footprint, with a
+  static token estimate that is stored in checkpoints
 - fresh-token and visible tool-output volume
 - long low-output tool waits, with tests, builds, and review waits reported
   separately from candidate progress stalls

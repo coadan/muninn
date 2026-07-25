@@ -38,6 +38,26 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	ownership := newOwnershipCatalog(config.OwnedTools)
 	var findings []sessionFinding
 
+	const largeRootInstructionBytes = 16 * 1024
+	if report.Instructions.RootBytes >= largeRootInstructionBytes {
+		findings = append(findings, sessionFinding{
+			Category: "instruction-footprint",
+			Control:  "repository",
+			Title:    "large always-on repository instruction footprint",
+			Evidence: fmt.Sprintf("%s root instruction files total %s bytes (~%s tokens per session before provider/system context)",
+				formatCodexCount(int64(report.Instructions.RootFiles)),
+				formatCodexCount(report.Instructions.RootBytes),
+				formatCodexCount(report.Instructions.RootEstimatedTokens),
+			),
+			Action:     "Keep behavioral and safety rules injected, but move stable command syntax and long reference examples behind repository help or bounded documentation surfaces.",
+			Count:      report.Instructions.RootFiles,
+			LastSeen:   report.GeneratedAt,
+			Lever:      "instructions/docs",
+			Confidence: "high",
+			score:      620 + int(report.Instructions.RootEstimatedTokens/100),
+		})
+	}
+
 	for _, feedback := range report.Feedback {
 		findings = append(findings, sessionFinding{
 			Category: directFeedbackFindingCategory(feedback.Category),
@@ -1316,6 +1336,7 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 		},
 		"instructions": {
 			"instruction-discovery": true,
+			"instruction-footprint": true,
 			"session-loop":          true,
 		},
 		"interface": {
@@ -1417,6 +1438,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"agent-interface":       4,
 		"code-structure":        6,
 		"instruction-discovery": 4,
+		"instruction-footprint": 1,
 		"recurring-failure":     4,
 		"owned-tool":            4,
 		"owned-operation":       6,
