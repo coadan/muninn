@@ -67,6 +67,15 @@ type agentFeedbackAggregate struct {
 	LastSeen    string   `json:"lastSeen"`
 }
 
+type agentFeedbackFilter struct {
+	IncludeResolved bool
+	Source          string
+	Control         string
+	Category        string
+	Target          string
+	Signal          string
+}
+
 func normalizeFeedbackCategory(raw string) (string, error) {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	if !feedbackCategories[value] {
@@ -105,6 +114,13 @@ func normalizeFeedbackSignal(raw string) (string, error) {
 		return "", fmt.Errorf("--signal must be a privacy-safe slug such as existing-pr-create-failed")
 	}
 	return value, nil
+}
+
+func normalizeOptionalFeedbackFilter(raw string, normalize func(string) (string, error)) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	return normalize(raw)
 }
 
 func (store *sessionStore) addFeedback(ctx context.Context, feedback agentFeedback) error {
@@ -164,12 +180,34 @@ func (store *sessionStore) resolveFeedback(ctx context.Context, repositoryKey, c
 }
 
 func (store *sessionStore) listFeedback(ctx context.Context, repositoryKey string, since time.Time, includeResolved bool) ([]agentFeedbackAggregate, error) {
+	return store.listFeedbackFiltered(ctx, repositoryKey, since, agentFeedbackFilter{
+		IncludeResolved: includeResolved,
+	})
+}
+
+func (store *sessionStore) listFeedbackFiltered(ctx context.Context, repositoryKey string, since time.Time, filter agentFeedbackFilter) ([]agentFeedbackAggregate, error) {
 	query := `SELECT source, control, category, target, signal, occurrences, status, last_seen_ns
 		FROM feedback
 		WHERE repository_key = ? AND last_seen_ns >= ?`
 	args := []any{repositoryKey, since.UnixNano()}
-	if !includeResolved {
+	if !filter.IncludeResolved {
 		query += ` AND status = 'open'`
+	}
+	for _, condition := range []struct {
+		column string
+		value  string
+	}{
+		{column: "source", value: filter.Source},
+		{column: "control", value: filter.Control},
+		{column: "category", value: filter.Category},
+		{column: "target", value: filter.Target},
+		{column: "signal", value: filter.Signal},
+	} {
+		if condition.value == "" {
+			continue
+		}
+		query += ` AND ` + condition.column + ` = ?`
+		args = append(args, condition.value)
 	}
 	query += ` ORDER BY last_seen_ns DESC, id DESC`
 	rows, err := store.db.QueryContext(ctx, query, args...)
@@ -426,6 +464,11 @@ func cmdFeedbackList(root string, args []string) error {
 	sinceRaw := fs.String("since", "30d", "lookback duration")
 	includeResolved := fs.Bool("all", false, "include resolved feedback")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
+	sourceRaw := fs.String("source", "", "feedback source filter")
+	controlRaw := fs.String("control", "", "change-control filter")
+	categoryRaw := fs.String("category", "", "friction category filter")
+	targetRaw := fs.String("target", "", "logical tool or workflow ID filter")
+	signalRaw := fs.String("signal", "", "friction signal filter")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -436,6 +479,22 @@ func cmdFeedbackList(root string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid --since value %q: %w", *sinceRaw, err)
 	}
+	filter := agentFeedbackFilter{IncludeResolved: *includeResolved}
+	if filter.Source, err = normalizeOptionalFeedbackFilter(*sourceRaw, normalizeFeedbackSource); err != nil {
+		return err
+	}
+	if filter.Control, err = normalizeOptionalFeedbackFilter(*controlRaw, normalizeFeedbackControl); err != nil {
+		return err
+	}
+	if filter.Category, err = normalizeOptionalFeedbackFilter(*categoryRaw, normalizeFeedbackCategory); err != nil {
+		return err
+	}
+	if filter.Target, err = normalizeOptionalFeedbackFilter(*targetRaw, normalizeFeedbackTarget); err != nil {
+		return err
+	}
+	if filter.Signal, err = normalizeOptionalFeedbackFilter(*signalRaw, normalizeFeedbackSignal); err != nil {
+		return err
+	}
 	repositoryKey, err := feedbackRepositoryKey(*repo)
 	if err != nil {
 		return err
@@ -445,7 +504,12 @@ func cmdFeedbackList(root string, args []string) error {
 		return err
 	}
 	defer store.Close()
-	rows, err := store.listFeedback(context.Background(), repositoryKey, time.Now().UTC().Add(-lookback), *includeResolved)
+	rows, err := store.listFeedbackFiltered(
+		context.Background(),
+		repositoryKey,
+		time.Now().UTC().Add(-lookback),
+		filter,
+	)
 	if err != nil {
 		return err
 	}
@@ -480,7 +544,7 @@ func printFeedbackHelp() {
 Usage:
   muninn feedback add --category <category> --target <logical-id> --signal <slug>
   muninn feedback resolve --category <category> --target <logical-id> --signal <slug>
-  muninn feedback list [--since 30d] [--all] [--json]
+  muninn feedback list [--since 30d] [--category <category>] [--target <logical-id>] [--signal <slug>] [--all] [--json]
 
 Categories: failure, roundtrip, output, discovery, instructions, interface,
 structure, loop, inline-code, other.

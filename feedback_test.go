@@ -100,6 +100,74 @@ func TestSessionStoreFeedbackLifecycleAggregatesSources(t *testing.T) {
 	}
 }
 
+func TestSessionStoreFeedbackFiltersBeforeAggregation(t *testing.T) {
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "muninn.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	observedAt := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	for _, feedback := range []agentFeedback{
+		{
+			RepositoryKey: "repo-digest",
+			Source:        "codex",
+			Control:       "local",
+			Category:      "interface",
+			Target:        "muninn/feedback-list",
+			Signal:        "missing-server-side-filter-flags",
+			Occurrences:   2,
+			ObservedAt:    observedAt,
+		},
+		{
+			RepositoryKey: "repo-digest",
+			Source:        "claude",
+			Control:       "local",
+			Category:      "interface",
+			Target:        "muninn/feedback-list",
+			Signal:        "missing-server-side-filter-flags",
+			Occurrences:   1,
+			ObservedAt:    observedAt.Add(time.Minute),
+		},
+		{
+			RepositoryKey: "repo-digest",
+			Source:        "codex",
+			Control:       "repository",
+			Category:      "structure",
+			Target:        "breyta/flows-api",
+			Signal:        "oversized-command-owner",
+			Occurrences:   4,
+			ObservedAt:    observedAt.Add(2 * time.Minute),
+		},
+	} {
+		if err := store.addFeedback(ctx, feedback); err != nil {
+			t.Fatalf("add feedback: %v", err)
+		}
+	}
+
+	rows, err := store.listFeedbackFiltered(
+		ctx,
+		"repo-digest",
+		observedAt.Add(-time.Hour),
+		agentFeedbackFilter{
+			Source:   "codex",
+			Control:  "local",
+			Category: "interface",
+			Target:   "muninn/feedback-list",
+			Signal:   "missing-server-side-filter-flags",
+		},
+	)
+	if err != nil {
+		t.Fatalf("list filtered feedback: %v", err)
+	}
+	if len(rows) != 1 ||
+		rows[0].Occurrences != 2 ||
+		strings.Join(rows[0].Sources, ",") != "codex" ||
+		rows[0].Target != "muninn/feedback-list" {
+		t.Fatalf("unexpected filtered feedback: %#v", rows)
+	}
+}
+
 func TestBuildSessionFindingsIncludesDirectFeedback(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Feedback = []agentFeedbackAggregate{{
