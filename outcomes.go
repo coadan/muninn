@@ -1455,13 +1455,26 @@ func analyzeTaskCostTailDrivers(episodes []codexTaskEpisode) taskCostTailDrivers
 		return episode.Families
 	})
 	drivers.OwnedOperations = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
-		return episode.OwnedOperations
+		return taskCostDiagnosticOperations(episode.OwnedOperations)
 	})
 	drivers.TargetCohorts = taskCostTailDimension(tail, ordinary, func(episode codexTaskEpisode) map[string]int {
 		return episode.TargetCohorts
 	})
 	drivers.Targets = taskCostTailTargetContributors(tail, ordinary, drivers.TargetCohorts)
 	return drivers
+}
+
+func taskCostDiagnosticOperations(operations map[string]int) map[string]int {
+	filtered := make(map[string]int, len(operations))
+	for operation, calls := range operations {
+		name := operation[strings.LastIndex(operation, "/")+1:]
+		switch name {
+		case "git-add", "git-commit", "git-push", "pr", "publish", "worktree-land":
+			continue
+		}
+		filtered[operation] = calls
+	}
+	return filtered
 }
 
 func taskCostTailTargetContributors(
