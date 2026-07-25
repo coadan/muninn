@@ -47,6 +47,38 @@ func TestCodexInlineOrchestrationExcludesEdits(t *testing.T) {
 	}
 }
 
+func TestCodexInlineOrchestrationExcludesRoutineCodeModeWrappers(t *testing.T) {
+	patch := `const result = await tools.apply_patch(` + strings.Repeat("x", 9*1024) + `); text(result);`
+	if got := codexInlineOrchestrationBytes("exec", "", patch); got != 0 {
+		t.Fatalf("nested apply_patch wrapper was misclassified as inline orchestration: %d", got)
+	}
+
+	batch := `const results = await Promise.allSettled([
+		tools.exec_command({cmd:"one"}),
+		tools.exec_command({cmd:"two"})
+	]);` + strings.Repeat(" ", 5*1024) + `
+	for (const result of results) text(result.status);`
+	if got := codexInlineOrchestrationBytes("exec", "", batch); got != 0 {
+		t.Fatalf("routine concurrent tool batch was misclassified as inline orchestration: %d", got)
+	}
+}
+
+func TestCodexInlineOrchestrationRetainsLargeCustomExecCells(t *testing.T) {
+	sequential := `const first = await tools.exec_command({cmd:"one"});
+	const second = await tools.exec_command({cmd:"two"});` + strings.Repeat("x", 9*1024)
+	if got := codexInlineOrchestrationBytes("exec", "", sequential); got != int64(len(sequential)) {
+		t.Fatalf("large sequential exec bytes=%d want %d", got, len(sequential))
+	}
+
+	oversizedBatch := `const results = await Promise.allSettled([
+		tools.exec_command({cmd:"one"}),
+		tools.exec_command({cmd:"two"})
+	]);` + strings.Repeat("x", 17*1024)
+	if got := codexInlineOrchestrationBytes("exec", "", oversizedBatch); got != int64(len(oversizedBatch)) {
+		t.Fatalf("oversized batch bytes=%d want %d", got, len(oversizedBatch))
+	}
+}
+
 func TestBuildSessionFindingsFlagsOneVeryLongInlineToolCall(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.InlineOrchestrationCalls = 1
