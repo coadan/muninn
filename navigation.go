@@ -8,6 +8,7 @@ import (
 )
 
 var codexPatchTargetPattern = regexp.MustCompile(`(?m)^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$`)
+var codexNestedToolCallPattern = regexp.MustCompile(`\btools\.([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
 
 func codexReadTargetCandidates(toolName, arguments, input string) []string {
 	var candidates []string
@@ -168,6 +169,9 @@ func codexInlineOrchestrationBytes(toolName, arguments, input string) int64 {
 	var size int
 	switch name {
 	case "exec":
+		if codexRoutineCodeModeWrapper(input) {
+			return 0
+		}
 		size = len(input)
 	case "exec_command":
 		for _, command := range codexShellCommands(toolName, arguments, input) {
@@ -181,4 +185,22 @@ func codexInlineOrchestrationBytes(toolName, arguments, input string) int64 {
 		return 0
 	}
 	return int64(size)
+}
+
+func codexRoutineCodeModeWrapper(input string) bool {
+	matches := codexNestedToolCallPattern.FindAllStringSubmatch(input, -1)
+	if len(matches) == 1 && matches[0][1] == "apply_patch" {
+		return true
+	}
+	if len(matches) < 2 ||
+		(!strings.Contains(input, "Promise.allSettled(") && !strings.Contains(input, "Promise.all(")) {
+		return false
+	}
+	for _, match := range matches {
+		if match[1] == "apply_patch" {
+			return false
+		}
+	}
+	const maximumRoutineBatchBytesPerCall = 8 * 1024
+	return len(input)/len(matches) <= maximumRoutineBatchBytesPerCall
 }
