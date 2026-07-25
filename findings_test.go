@@ -63,6 +63,22 @@ func TestCodexInlineOrchestrationExcludesRoutineCodeModeWrappers(t *testing.T) {
 	}
 }
 
+func TestCodexConcurrentToolBatchRecognizesBoundedAndCustomBatches(t *testing.T) {
+	batch := `const results = await Promise.allSettled([
+		tools.exec_command({cmd:"one"}),
+		tools.exec_command({cmd:"two"})
+	]);`
+	if !codexConcurrentToolBatch("exec", batch) {
+		t.Fatal("concurrent Code Mode batch was not recognized")
+	}
+	if codexConcurrentToolBatch("exec", `const result = await tools.exec_command({cmd:"one"});`) {
+		t.Fatal("single nested tool call was misclassified as a concurrent batch")
+	}
+	if codexConcurrentToolBatch("exec_command", batch) {
+		t.Fatal("non-Code Mode tool call was misclassified as a concurrent batch")
+	}
+}
+
 func TestCodexInlineOrchestrationRetainsLargeCustomExecCells(t *testing.T) {
 	sequential := `const first = await tools.exec_command({cmd:"one"});
 	const second = await tools.exec_command({cmd:"two"});` + strings.Repeat("x", 9*1024)
@@ -326,6 +342,24 @@ func TestOversizedOutputActionKeepsCompoundWorkflowBundled(t *testing.T) {
 	action := oversizedOutputAction("git inspect -> file reads -> tests", "repository")
 	if !strings.Contains(action, "Keep the workflow bundled") || !strings.Contains(action, "cap each") {
 		t.Fatalf("compound oversized-output action should reduce output without adding roundtrips: %q", action)
+	}
+}
+
+func TestConcurrentBatchOversizedOutputFindingPreservesBatching(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.OversizedOutputs["concurrent tool batch"] = codexOversizedOutputMetrics{
+		Calls: 2, OutputBytes: 75_000, MaxOutputBytes: 40_000, Sessions: 1,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	outputFindings, err := filterSessionFindings(findings, "output")
+	if err != nil || len(outputFindings) != 1 {
+		t.Fatalf("concurrent batch output finding mismatch: findings=%#v err=%v", outputFindings, err)
+	}
+	finding := outputFindings[0]
+	if finding.Title != "concurrent tool batches exceed the shared output budget" ||
+		!strings.Contains(finding.Action, "Keep independent calls concurrent") ||
+		!strings.Contains(finding.Action, "inspect every partial result") {
+		t.Fatalf("concurrent batch guidance mismatch: %#v", finding)
 	}
 }
 

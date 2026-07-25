@@ -263,6 +263,15 @@ func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
 	if operationTaskColumn != 1 {
 		t.Fatalf("expected operation task column, got %d", operationTaskColumn)
 	}
+	var concurrentBatchColumn int
+	if err := migrated.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'concurrent_batch'`,
+	).Scan(&concurrentBatchColumn); err != nil {
+		t.Fatalf("inspect concurrent batch column: %v", err)
+	}
+	if concurrentBatchColumn != 1 {
+		t.Fatalf("expected concurrent batch column, got %d", concurrentBatchColumn)
+	}
 }
 
 func TestSessionStoreWaitsForConcurrentWriter(t *testing.T) {
