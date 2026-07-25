@@ -85,7 +85,11 @@ Use `--operations <owned-tool>` for a bounded drill-down that contains only
 that locally controlled tool's configured operation IDs, calls, sessions,
 output, failures, truncations, and fixed failure-reason labels. This is the
 compact bridge from an `owned-tool` finding to the exact operation worth
-improving; add `--json` when another local tool will consume the result.
+improving. Add `--details` to show every operation row, or combine it with an
+explicit `--limit` to retain a chosen bound. Add `--json` when another local
+tool will consume the result. `--focus <category> --details` is accepted as the
+focused findings view because each finding already includes its full evidence;
+it does not expand into unrelated aggregate rankings.
 
 Muninn highlights:
 
