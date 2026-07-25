@@ -419,13 +419,22 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, session
 			session.SourcePath = path
 			for index := range session.Events {
 				if session.Events[index].ToolName == "apply_patch" {
+					if session.Events[index].OperationTask == "" {
+						session.Events[index].OperationTask = repositoryTaskForTargetCandidates(
+							session.Events[index].TargetCandidates,
+							session.CWD,
+							repositoryRoot,
+						)
+					}
 					session.Events[index].Targets = normalizeRepositoryEditTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
 				} else {
 					session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
 				}
 				session.Events[index].TargetCandidates = nil
 				session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
-				session.Events[index].OperationTask = ownership.taskForInvocations(session.Events[index].CommandCandidates)
+				if session.Events[index].OperationTask == "" {
+					session.Events[index].OperationTask = ownership.taskForInvocations(session.Events[index].CommandCandidates)
+				}
 				session.Events[index].CommandCandidates = nil
 			}
 			if err := store.replaceSession(ctx, session, info.Size(), info.ModTime().UnixNano()); err != nil {

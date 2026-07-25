@@ -81,8 +81,8 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	previousTokens := codexTokenUsage{}
 	hasPreviousTokens := false
 	episode := codexTaskEpisode{}
-	deliveryTracker := deliveryReworkTracker{}
-	downstreamTracker := downstreamQualityTracker{}
+	deliveryTrackers := map[string]*deliveryReworkTracker{}
+	downstreamTrackers := map[string]*downstreamQualityTracker{}
 	for _, event := range session.Events {
 		event = withoutContinuationCallAttribution(event)
 		if event.OccurredAt.Before(since) {
@@ -111,6 +111,13 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 		if event.Kind == sessionEventToolCall && len(event.Targets) == 0 {
 			if event.ToolName == "apply_patch" {
+				if event.OperationTask == "" {
+					event.OperationTask = repositoryTaskForTargetCandidates(
+						event.TargetCandidates,
+						session.CWD,
+						workspaceRoot,
+					)
+				}
 				event.Targets = normalizeRepositoryEditTargets(event.TargetCandidates, session.CWD, workspaceRoot)
 			} else {
 				event.Targets = normalizeRepositoryTargets(event.TargetCandidates, session.CWD, workspaceRoot)
@@ -122,6 +129,17 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 		if event.Kind != sessionEventToolOutput {
 			episode.observe(event, tokenIncrement, eventOperations)
+		}
+		eventTask := ownedOperationTask(event, ownership, record.Task)
+		deliveryTracker := deliveryTrackers[eventTask]
+		if deliveryTracker == nil {
+			deliveryTracker = &deliveryReworkTracker{}
+			deliveryTrackers[eventTask] = deliveryTracker
+		}
+		downstreamTracker := downstreamTrackers[eventTask]
+		if downstreamTracker == nil {
+			downstreamTracker = &downstreamQualityTracker{}
+			downstreamTrackers[eventTask] = downstreamTracker
 		}
 		postDeliveryEdits := deliveryTracker.metrics.PostDeliveryEditCalls
 		postDeliveryReviews := deliveryTracker.metrics.PostDeliveryReviewChecks
@@ -295,13 +313,16 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if !episode.StartedAt.IsZero() {
 		record.TaskEpisodes = append(record.TaskEpisodes, episode)
 	}
-	record.DeliveryRework = deliveryTracker.metrics
+	for _, tracker := range deliveryTrackers {
+		addDeliveryReworkMetrics(&record.DeliveryRework, tracker.metrics)
+	}
 	if record.DeliveryRework.Deliveries > 0 ||
 		record.DeliveryRework.PostDeliveryReviewChecks > 0 {
 		record.DeliveryRework.Sessions = 1
 	}
-	record.DownstreamQuality = downstreamTracker.metrics
-	finalizeDownstreamQualityMetrics(&record.DownstreamQuality)
+	for _, tracker := range downstreamTrackers {
+		addDownstreamQualityMetrics(&record.DownstreamQuality, tracker.metrics)
+	}
 	if record.DownstreamQuality.Deliveries > 0 ||
 		record.DownstreamQuality.DeliveriesWithFailure > 0 ||
 		record.DownstreamQuality.Reverts > 0 {
