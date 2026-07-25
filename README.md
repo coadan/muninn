@@ -40,7 +40,7 @@ muninn analyze --repo . --since-commit HEAD~3
 muninn analyze --repo . --task my-task
 muninn analyze --repo . --since 14d --include-archived
 muninn analyze --repo . --json
-muninn analyze --repo . --checkpoint before-tooling-change
+muninn checkpoint before-tooling-change --repo .
 muninn analyze --repo . --compare before-tooling-change
 muninn analyze --repo . --overview
 muninn analyze --repo . --since 24h --operations bwb
@@ -145,7 +145,10 @@ only attributable files. Subsequent reports reuse unchanged sources. Use
 `--refresh` to rebuild selected repository sources, `--db <path>` to select a
 different local store, or `--no-cache` for a direct scan.
 
-Named checkpoints support before/after measurement. Trend output compares
+Named checkpoints support before/after measurement. Use
+`muninn checkpoint <name> [analysis flags]` for a quiet save without printing
+the full report; `analyze --checkpoint` remains available when the report is
+also useful. Trend output compares
 normalized rates such as calls and compactions per session, output per call,
 completion ratio, and failures/truncations per 1,000 calls.
 Interactive `--refresh` runs emit one bounded start message and one completion
@@ -228,7 +231,7 @@ follow-up.
 
 Muninn is intended to close a repository improvement loop:
 
-1. Take a checkpoint.
+1. Take a checkpoint with `muninn checkpoint <name>`.
 2. Select one current, cross-session finding.
 3. Improve owned tooling, instructions, an agent-facing interface, or source
    ownership.

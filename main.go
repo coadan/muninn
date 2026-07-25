@@ -480,6 +480,8 @@ func cmdCodex(root string, args []string) error {
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
 	case "sessions":
 		return cmdCodexSessions(root, args[1:])
+	case "checkpoint":
+		return cmdCheckpoint(root, args[1:])
 	case "failures":
 		return cmdFailures(root, args[1:])
 	case "feedback":
@@ -495,12 +497,14 @@ func printCodexHelp() {
 Usage:
   muninn analyze [flags]
   muninn sessions [flags]
+  muninn checkpoint <name> [analysis flags]
   muninn failures --operation <tool/operation> [flags]
   muninn feedback <add|resolve|list> [flags]
 
 Available Commands:
   analyze   Analyze agent-session cost and friction for a repository
   sessions  Compatibility alias for analyze
+  checkpoint Save a quiet named trend checkpoint
   failures  Inspect bounded failure events for one owned operation
   feedback  Record or inspect normalized agent-reported friction
 
@@ -520,6 +524,7 @@ Examples:
   muninn analyze --repo . --task my-worktree
   muninn analyze --repo . --since 14d --include-archived
   muninn analyze --repo . --checkpoint before-tooling-change
+  muninn checkpoint before-tooling-change --repo .
   muninn analyze --repo . --compare before-tooling-change
   muninn analyze --repo . --overview
   muninn analyze --repo . --since 24h --operations bwb
@@ -529,6 +534,49 @@ Examples:
   muninn failures --repo . --operation bwb/comments-wait --since 14d
   muninn feedback add --category roundtrip --target bwb/pr --signal existing-pr-create-failed
 `)
+}
+
+func cmdCheckpoint(root string, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: muninn checkpoint <name> [analysis flags]")
+	}
+	if isHelpToken(args[0]) {
+		fmt.Print(`Save a quiet named trend checkpoint
+
+Usage:
+  muninn checkpoint <name> [analysis flags]
+
+Examples:
+  muninn checkpoint before-tooling-change
+  muninn checkpoint after-tooling-change --repo . --since 14d
+  muninn checkpoint reclassified --repo . --refresh
+`)
+		return nil
+	}
+	analyzeArgs, err := checkpointAnalyzeArgs(args)
+	if err != nil {
+		return err
+	}
+	return cmdCodexSessions(root, analyzeArgs)
+}
+
+func checkpointAnalyzeArgs(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, errors.New("usage: muninn checkpoint <name> [analysis flags]")
+	}
+	name := strings.TrimSpace(args[0])
+	if name == "" || strings.HasPrefix(name, "-") {
+		return nil, errors.New("checkpoint name must be the first argument")
+	}
+	for _, arg := range args[1:] {
+		if arg == "--checkpoint" || strings.HasPrefix(arg, "--checkpoint=") ||
+			arg == "--quiet" || strings.HasPrefix(arg, "--quiet=") {
+			return nil, errors.New("muninn checkpoint manages --checkpoint and --quiet automatically")
+		}
+	}
+	analyzeArgs := append([]string(nil), args[1:]...)
+	analyzeArgs = append(analyzeArgs, "--checkpoint", name, "--quiet")
+	return analyzeArgs, nil
 }
 
 func cmdCodexSessions(root string, args []string) error {
@@ -553,6 +601,7 @@ func cmdCodexSessions(root string, args []string) error {
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
 	checkpointName := fs.String("checkpoint", "", "save this analysis as a named trend checkpoint")
 	compareName := fs.String("compare", "", "compare this analysis with a named checkpoint")
+	quietOutput := fs.Bool("quiet", false, "suppress report output after saving a checkpoint")
 	overviewOutput := fs.Bool("overview", false, "show aggregate family totals only")
 	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
 	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals")
@@ -596,6 +645,18 @@ func cmdCodexSessions(root string, args []string) error {
 	}
 	if *jsonOutput && strings.TrimSpace(*compareName) != "" {
 		return errors.New("--compare currently requires human output")
+	}
+	if *quietOutput && (*jsonOutput ||
+		strings.TrimSpace(*compareName) != "" ||
+		*overviewOutput ||
+		*findingsOutput ||
+		*detailsOutput ||
+		strings.TrimSpace(*focus) != "" ||
+		strings.TrimSpace(*operationsTool) != "") {
+		return errors.New("--quiet cannot be combined with report, comparison, focus, or operations output")
+	}
+	if *quietOutput && strings.TrimSpace(*checkpointName) == "" {
+		return errors.New("--quiet requires --checkpoint")
 	}
 	viewCount := 0
 	for _, selected := range []bool{*overviewOutput, *findingsOutput, *detailsOutput} {
@@ -724,6 +785,10 @@ func cmdCodexSessions(root string, args []string) error {
 		if *jsonOutput {
 			fmt.Fprintf(os.Stderr, "saved Muninn checkpoint %q\n", name)
 		}
+	}
+	if *quietOutput {
+		fmt.Printf("Saved checkpoint %q.\n", strings.TrimSpace(*checkpointName))
+		return nil
 	}
 	if toolID := strings.TrimSpace(*operationsTool); toolID != "" {
 		drilldown, err := buildOwnedOperationsDrilldown(report, config, toolID, *limit)
