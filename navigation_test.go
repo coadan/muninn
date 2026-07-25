@@ -69,3 +69,18 @@ func TestCodexEditTargetsRemainAttributableAfterWorktreeRemoval(t *testing.T) {
 		}
 	}
 }
+
+func TestRepositoryTaskForTargetCandidatesPreservesWorktreeIdentity(t *testing.T) {
+	root := t.TempDir()
+	candidates := []string{
+		filepath.Join(root, ".worktrees", "task-one", "breyta", "src", "one.clj"),
+		filepath.Join(root, ".worktrees", "task-one", "breyta", "test", "one_test.clj"),
+	}
+	if got := repositoryTaskForTargetCandidates(candidates, root, root); got != "task-one" {
+		t.Fatalf("worktree task=%q want task-one", got)
+	}
+	candidates = append(candidates, filepath.Join(root, ".worktrees", "task-two", "breyta", "src", "two.clj"))
+	if got := repositoryTaskForTargetCandidates(candidates, root, root); got != "" {
+		t.Fatalf("mixed worktree task=%q want empty", got)
+	}
+}

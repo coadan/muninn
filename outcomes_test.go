@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -644,6 +645,61 @@ func TestDownstreamQualityCountsSuccessfulRevertAsBrokenDelivery(t *testing.T) {
 	if got := tracker.metrics; got.Reverts != 1 || got.DeliveriesWithFailure != 1 ||
 		got.Cohorts["src"].Reverts != 1 {
 		t.Fatalf("revert quality mismatch: %#v", got)
+	}
+}
+
+func TestSessionRecordDoesNotPairReviewWithEditFromAnotherWorktreeTask(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".workbench", "repos", "breyta"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	since := time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC)
+	at := func(seconds int) time.Time { return since.Add(time.Duration(seconds) * time.Second) }
+	target := func(task string) string {
+		return filepath.Join(root, ".worktrees", task, "breyta", "src", "shared.clj")
+	}
+	session := normalizedSession{
+		CWD: root,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt:       at(1),
+				Kind:             sessionEventToolCall,
+				ToolName:         "apply_patch",
+				TargetCandidates: []string{target("task-a")},
+			},
+			{
+				OccurredAt:     at(2),
+				CallOccurredAt: at(1),
+				Kind:           sessionEventToolOutput,
+				Family:         "delivery",
+				OperationTask:  "task-a",
+			},
+			{
+				OccurredAt:    at(3),
+				Kind:          sessionEventToolCall,
+				ToolName:      "exec_command",
+				Family:        "review",
+				OperationTask: "task-a",
+			},
+			{
+				OccurredAt:       at(4),
+				Kind:             sessionEventToolCall,
+				ToolName:         "apply_patch",
+				TargetCandidates: []string{target("task-b")},
+			},
+		},
+	}
+
+	record, err := sessionRecordFromNormalized(session, root, since, at(10), ownershipCatalog{})
+	if err != nil {
+		t.Fatalf("session record: %v", err)
+	}
+	got := record.DeliveryRework
+	if got.Deliveries != 1 || got.PostDeliveryReviewChecks != 1 {
+		t.Fatalf("delivery review metrics mismatch: %#v", got)
+	}
+	if got.ReviewToEditCycles != 0 || got.PostDeliveryEditCalls != 0 || got.DeliveriesWithRework != 0 {
+		t.Fatalf("cross-task edit was attributed as delivery rework: %#v", got)
 	}
 }
 

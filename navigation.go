@@ -73,6 +73,44 @@ func normalizeRepositoryEditTargets(candidates []string, cwd, repositoryRoot str
 	return normalizeRepositoryTargetCandidates(candidates, cwd, repositoryRoot, false)
 }
 
+func repositoryTaskForTargetCandidates(candidates []string, cwd, repositoryRoot string) string {
+	task := ""
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || strings.ContainsAny(candidate, "*?[]{}") {
+			continue
+		}
+		path := candidate
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		relative, err := filepath.Rel(repositoryRoot, absolute)
+		if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
+			continue
+		}
+		parts := strings.Split(filepath.ToSlash(filepath.Clean(relative)), "/")
+		candidateTask := ""
+		switch {
+		case len(parts) >= 2 && parts[0] == ".worktrees":
+			candidateTask = parts[1]
+		case len(parts) >= 3 && parts[0] == ".workbench" && parts[1] == "worktrees":
+			candidateTask = parts[2]
+		}
+		if !ownedTaskLabelPattern.MatchString(candidateTask) {
+			continue
+		}
+		if task != "" && task != candidateTask {
+			return ""
+		}
+		task = candidateTask
+	}
+	return task
+}
+
 func normalizeRepositoryTargetCandidates(candidates []string, cwd, repositoryRoot string, requireCurrentFile bool) []string {
 	var targets []string
 	for _, candidate := range candidates {
