@@ -206,6 +206,8 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 		})
 	}
 	fmt.Printf("\nTrend from checkpoint %q:\n", checkpointName)
+	printCompletedTaskTrend(baseline, current)
+	fmt.Printf("\nSession and quality rates:\n")
 	fmt.Printf("%-32s %12s %12s %12s\n", "RATE", "BASELINE", "CURRENT", "CHANGE")
 	for _, metric := range metrics {
 		change := metric.Current - metric.Baseline
@@ -239,6 +241,112 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 		)
 	}
 	printFindingTrend(baseline.Findings, current.Findings)
+}
+
+func completedTaskTrendMetrics(baseline, current codexSessionInsightsReport) []trendMetric {
+	base := baseline.Outcomes
+	now := current.Outcomes
+	if base.ToolUsingCompleted == 0 || now.ToolUsingCompleted == 0 {
+		return nil
+	}
+	var metrics []trendMetric
+	if baseline.SchemaVersion >= 30 && current.SchemaVersion >= 30 {
+		metrics = append(metrics,
+			trendMetric{Name: "cached input p50", Baseline: float64(base.CachedInputTokens.P50), Current: float64(now.CachedInputTokens.P50), LowerIsBetter: true},
+			trendMetric{Name: "cached input p90", Baseline: float64(base.CachedInputTokens.P90), Current: float64(now.CachedInputTokens.P90), LowerIsBetter: true},
+			trendMetric{Name: "uncached input p50", Baseline: float64(base.UncachedInputTokens.P50), Current: float64(now.UncachedInputTokens.P50), LowerIsBetter: true},
+			trendMetric{Name: "uncached input p90", Baseline: float64(base.UncachedInputTokens.P90), Current: float64(now.UncachedInputTokens.P90), LowerIsBetter: true},
+			trendMetric{Name: "model output p50", Baseline: float64(base.ModelOutputTokens.P50), Current: float64(now.ModelOutputTokens.P50), LowerIsBetter: true},
+			trendMetric{Name: "model output p90", Baseline: float64(base.ModelOutputTokens.P90), Current: float64(now.ModelOutputTokens.P90), LowerIsBetter: true},
+		)
+	} else {
+		metrics = append(metrics,
+			trendMetric{Name: "fresh tokens p50", Baseline: float64(base.FreshTokens.P50), Current: float64(now.FreshTokens.P50), LowerIsBetter: true},
+			trendMetric{Name: "fresh tokens p90", Baseline: float64(base.FreshTokens.P90), Current: float64(now.FreshTokens.P90), LowerIsBetter: true},
+		)
+	}
+	return append(metrics,
+		trendMetric{Name: "tool calls p50", Baseline: float64(base.ToolCalls.P50), Current: float64(now.ToolCalls.P50), LowerIsBetter: true},
+		trendMetric{Name: "tool calls p90", Baseline: float64(base.ToolCalls.P90), Current: float64(now.ToolCalls.P90), LowerIsBetter: true},
+		trendMetric{Name: "duration seconds p50", Baseline: float64(base.DurationSeconds.P50), Current: float64(now.DurationSeconds.P50), LowerIsBetter: true},
+		trendMetric{Name: "duration seconds p90", Baseline: float64(base.DurationSeconds.P90), Current: float64(now.DurationSeconds.P90), LowerIsBetter: true},
+		trendMetric{Name: "failed calls p90", Baseline: float64(base.FailedCalls.P90), Current: float64(now.FailedCalls.P90), LowerIsBetter: true},
+		trendMetric{Name: "compactions p90", Baseline: float64(base.Compactions.P90), Current: float64(now.Compactions.P90), LowerIsBetter: true},
+	)
+}
+
+func materialTrendDirection(metric trendMetric) string {
+	change := metric.Current - metric.Baseline
+	scale := math.Max(math.Abs(metric.Baseline), 1)
+	if math.Abs(change)/scale < 0.01 {
+		return "unchanged"
+	}
+	improved := change > 0
+	if metric.LowerIsBetter {
+		improved = change < 0
+	}
+	if improved {
+		return "improved"
+	}
+	return "regressed"
+}
+
+func summarizeTrendDirections(metrics []trendMetric) (label string, improved, regressed, unchanged int) {
+	for _, metric := range metrics {
+		switch materialTrendDirection(metric) {
+		case "improved":
+			improved++
+		case "regressed":
+			regressed++
+		default:
+			unchanged++
+		}
+	}
+	switch {
+	case improved > 0 && regressed == 0:
+		label = "improved"
+	case regressed > 0 && improved == 0:
+		label = "regressed"
+	case improved > 0 && regressed > 0:
+		label = "mixed"
+	default:
+		label = "unchanged"
+	}
+	return label, improved, regressed, unchanged
+}
+
+func printCompletedTaskTrend(baseline, current codexSessionInsightsReport) {
+	metrics := completedTaskTrendMetrics(baseline, current)
+	if len(metrics) == 0 {
+		fmt.Printf("Completed-task direction: insufficient completed tool-task evidence.\n")
+		return
+	}
+	fmt.Printf(
+		"Completed-task cost (%s baseline → %s current; lower is better):\n",
+		formatCodexCount(int64(baseline.Outcomes.ToolUsingCompleted)),
+		formatCodexCount(int64(current.Outcomes.ToolUsingCompleted)),
+	)
+	fmt.Printf("%-32s %12s %12s %12s\n", "METRIC", "BASELINE", "CURRENT", "CHANGE")
+	for _, metric := range metrics {
+		fmt.Printf(
+			"%-32s %12.0f %12.0f %12s\n",
+			metric.Name,
+			metric.Baseline,
+			metric.Current,
+			materialTrendDirection(metric),
+		)
+	}
+	label, improved, regressed, unchanged := summarizeTrendDirections(metrics)
+	fmt.Printf(
+		"Observed completed-task direction: %s (%d improved, %d regressed, %d unchanged). Rolling task mix is observational, not causal.\n",
+		label,
+		improved,
+		regressed,
+		unchanged,
+	)
+	if baseline.SchemaVersion < 30 && current.SchemaVersion >= 30 {
+		fmt.Printf("Create a new checkpoint with this Muninn version to compare cached input, uncached input, and model output separately.\n")
+	}
 }
 
 func ratio(numerator, denominator float64) float64 {

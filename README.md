@@ -160,9 +160,12 @@ different local store, or `--no-cache` for a direct scan.
 Named checkpoints support before/after measurement. Use
 `muninn checkpoint <name> [analysis flags]` for a quiet save without printing
 the full report; `analyze --checkpoint` remains available when the report is
-also useful. Trend output compares
-normalized rates such as calls and compactions per session, output per call,
-completion ratio, and failures/truncations per 1,000 calls.
+also useful. Trend output leads with completed tool-task p50/p90 cost and then
+compares normalized session and quality rates. Current checkpoints keep cached
+input, uncached input, and model output separate; Muninn does not invent a
+credit-weighted total when plan/model weights are unavailable. Rolling cohorts
+are observational, so compare the same scope and treat task-mix changes as a
+confound.
 Interactive `--refresh` runs emit one bounded start message and one completion
 summary so long reclassification passes do not look stalled; JSON stays clean.
 

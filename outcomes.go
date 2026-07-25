@@ -1219,6 +1219,9 @@ type completionEpisodeAnalysis struct {
 	ToolUsingCompleted       int                          `json:"toolUsingCompleted"`
 	ResponseOnlyCompleted    int                          `json:"responseOnlyCompleted"`
 	Incomplete               int                          `json:"incomplete"`
+	CachedInputTokens        outcomeDistribution          `json:"cachedInputTokens"`
+	UncachedInputTokens      outcomeDistribution          `json:"uncachedInputTokens"`
+	ModelOutputTokens        outcomeDistribution          `json:"modelOutputTokens"`
 	FreshTokens              outcomeDistribution          `json:"freshTokens"`
 	ToolCalls                outcomeDistribution          `json:"toolCalls"`
 	VisibleOutputTokens      outcomeDistribution          `json:"visibleOutputTokens"`
@@ -1275,6 +1278,7 @@ type taskCostTailDriver struct {
 
 func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAnalysis {
 	analysis := completionEpisodeAnalysis{}
+	var cachedInputTokens, uncachedInputTokens, modelOutputTokens []int64
 	var freshTokens, toolCalls, outputTokens, durations, failures, compactions []int64
 	var eligible []codexTaskEpisode
 	for _, episode := range episodes {
@@ -1294,6 +1298,9 @@ func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAna
 		}
 		analysis.ToolUsingCompleted++
 		eligible = append(eligible, episode)
+		cachedInputTokens = append(cachedInputTokens, episode.Tokens.CachedInputTokens)
+		uncachedInputTokens = append(uncachedInputTokens, episode.Tokens.UncachedInputTokens)
+		modelOutputTokens = append(modelOutputTokens, episode.Tokens.OutputTokens)
 		freshTokens = append(freshTokens, episode.Tokens.UncachedInputTokens+episode.Tokens.OutputTokens)
 		toolCalls = append(toolCalls, int64(episode.ToolCalls))
 		outputTokens = append(outputTokens, estimatedTokens(episode.ToolOutputBytes))
@@ -1301,6 +1308,9 @@ func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAna
 		failures = append(failures, int64(episode.FailedCalls))
 		compactions = append(compactions, int64(episode.Compactions))
 	}
+	analysis.CachedInputTokens = summarizeOutcomeDistribution(cachedInputTokens)
+	analysis.UncachedInputTokens = summarizeOutcomeDistribution(uncachedInputTokens)
+	analysis.ModelOutputTokens = summarizeOutcomeDistribution(modelOutputTokens)
 	analysis.FreshTokens = summarizeOutcomeDistribution(freshTokens)
 	analysis.ToolCalls = summarizeOutcomeDistribution(toolCalls)
 	analysis.VisibleOutputTokens = summarizeOutcomeDistribution(outputTokens)
@@ -1687,6 +1697,15 @@ func printCompletionEpisodeAnalysis(analysis completionEpisodeAnalysis) {
 		formatDurationSeconds(analysis.DurationSeconds.P50),
 		formatDurationSeconds(analysis.DurationSeconds.P75),
 		formatDurationSeconds(analysis.DurationSeconds.P90),
+	)
+	fmt.Printf(
+		"Completed task token split p50/p90: cached input %s/%s; uncached input %s/%s; model output %s/%s\n",
+		formatCodexCount(analysis.CachedInputTokens.P50),
+		formatCodexCount(analysis.CachedInputTokens.P90),
+		formatCodexCount(analysis.UncachedInputTokens.P50),
+		formatCodexCount(analysis.UncachedInputTokens.P90),
+		formatCodexCount(analysis.ModelOutputTokens.P50),
+		formatCodexCount(analysis.ModelOutputTokens.P90),
 	)
 	if phases := formatTaskPhaseAnalysis(analysis.Phases); phases != "" {
 		fmt.Printf("Task phase outcomes: %s\n", phases)
