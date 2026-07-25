@@ -254,6 +254,15 @@ func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
 	if continuationColumn != 1 {
 		t.Fatalf("expected operation continuation column, got %d", continuationColumn)
 	}
+	var operationTaskColumn int
+	if err := migrated.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'operation_task'`,
+	).Scan(&operationTaskColumn); err != nil {
+		t.Fatalf("inspect operation task column: %v", err)
+	}
+	if operationTaskColumn != 1 {
+		t.Fatalf("expected operation task column, got %d", operationTaskColumn)
+	}
 }
 
 func TestSessionStoreWaitsForConcurrentWriter(t *testing.T) {
@@ -373,6 +382,22 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 				OwnedOperations: []string{"bwb/test-nses"},
 			}},
 		},
+		{
+			Provider:   "codex",
+			SourcePath: "task.jsonl",
+			CWD:        filepath.Join(root, "worktree"),
+			Events: []normalizedSessionEvent{{
+				Sequence:        1,
+				OccurredAt:      now.Add(-4 * time.Hour),
+				Kind:            sessionEventToolOutput,
+				Family:          "tests",
+				Failed:          true,
+				OutputBytes:     240,
+				FailureReason:   "test failure",
+				OwnedOperations: []string{"bwb/test-nses"},
+				OperationTask:   "cost-task",
+			}},
+		},
 	}
 	for index, session := range sessions {
 		if err := store.replaceSession(context.Background(), session, int64(index+1), int64(index+1)); err != nil {
@@ -386,6 +411,7 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		root,
 		now.Add(-24*time.Hour),
 		"bwb/test-nses",
+		"",
 		"",
 		1,
 	)
@@ -401,6 +427,9 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 	if events[0].Operation != "bwb/test-nses" || events[0].Family != "mixed shell" {
 		t.Fatalf("missing safe event labels: %#v", events[0])
 	}
+	if events[0].Task != "(root)" {
+		t.Fatalf("task=%q want root attribution", events[0].Task)
+	}
 
 	events, err = store.ownedOperationFailures(
 		context.Background(),
@@ -409,13 +438,31 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		now.Add(-24*time.Hour),
 		"bwb/test-nses",
 		"test failure",
+		"",
 		10,
 	)
 	if err != nil {
 		t.Fatalf("query reason-filtered failures: %v", err)
 	}
-	if len(events) != 1 || events[0].Reason != "test failure" {
+	if len(events) != 2 || events[0].Reason != "test failure" || events[1].Task != "cost-task" {
 		t.Fatalf("reason-filtered events=%#v", events)
+	}
+
+	events, err = store.ownedOperationFailures(
+		context.Background(),
+		"codex",
+		root,
+		now.Add(-24*time.Hour),
+		"bwb/test-nses",
+		"test failure",
+		"cost-task",
+		10,
+	)
+	if err != nil {
+		t.Fatalf("query task-filtered failures: %v", err)
+	}
+	if len(events) != 1 || events[0].Task != "cost-task" || events[0].OutputBytes != 240 {
+		t.Fatalf("task-filtered events=%#v", events)
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 11
+const sessionStoreSchemaVersion = 12
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionNormalizer interface {
@@ -42,6 +42,7 @@ func (store *sessionStore) ownedOperationFailures(
 	since time.Time,
 	operation string,
 	reason string,
+	task string,
 	limit int,
 ) ([]ownedOperationFailureEvent, error) {
 	repositoryRoot = filepath.Clean(repositoryRoot)
@@ -52,7 +53,9 @@ func (store *sessionStore) ownedOperationFailures(
 		events.failure_reason,
 		events.family,
 		events.output_bytes,
-		events.operation_attribution_ambiguous
+		events.operation_attribution_ambiguous,
+		events.operation_task,
+		sessions.cwd
 	FROM events
 	JOIN sessions ON sessions.id = events.session_id
 	JOIN sources ON sources.id = sessions.source_id
@@ -74,8 +77,11 @@ func (store *sessionStore) ownedOperationFailures(
 		query += "\n  AND events.failure_reason = ?"
 		args = append(args, reason)
 	}
-	query += "\nORDER BY events.occurred_at_ns DESC, events.sequence DESC\nLIMIT ?"
-	args = append(args, limit)
+	query += "\nORDER BY events.occurred_at_ns DESC, events.sequence DESC"
+	if task == "" {
+		query += "\nLIMIT ?"
+		args = append(args, limit)
+	}
 	rows, err := store.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query owned-operation failures: %w", err)
@@ -85,6 +91,8 @@ func (store *sessionStore) ownedOperationFailures(
 	for rows.Next() {
 		var occurredAtNS int64
 		var ambiguous int
+		var operationTask string
+		var cwd string
 		var event ownedOperationFailureEvent
 		if err := rows.Scan(
 			&occurredAtNS,
@@ -93,12 +101,24 @@ func (store *sessionStore) ownedOperationFailures(
 			&event.Family,
 			&event.OutputBytes,
 			&ambiguous,
+			&operationTask,
+			&cwd,
 		); err != nil {
 			return nil, fmt.Errorf("scan owned-operation failure: %w", err)
 		}
 		event.OccurredAt = time.Unix(0, occurredAtNS).UTC()
 		event.AttributionAmbiguous = ambiguous != 0
+		event.Task = operationTask
+		if event.Task == "" {
+			event.Task = codexTaskName(repositoryRoot, cwd)
+		}
+		if task != "" && event.Task != task {
+			continue
+		}
 		events = append(events, event)
+		if len(events) >= limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read owned-operation failures: %w", err)
@@ -200,6 +220,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			total_tokens INTEGER NOT NULL DEFAULT 0,
 			selector_digests TEXT NOT NULL DEFAULT '[]',
 			owned_operations TEXT NOT NULL DEFAULT '[]',
+			operation_task TEXT NOT NULL DEFAULT '',
 			operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0,
 			operation_continues INTEGER NOT NULL DEFAULT 0,
 			targets TEXT NOT NULL DEFAULT '[]',
@@ -314,6 +335,10 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
+	case existing == "11":
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
 	case existing != fmt.Sprint(sessionStoreSchemaVersion):
 		return fmt.Errorf("unsupported Muninn store schema version %s (expected %d); remove the local cache to rebuild it", existing, sessionStoreSchemaVersion)
 	}
@@ -329,6 +354,19 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			_, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_continues INTEGER NOT NULL DEFAULT 0`)
 			if err != nil {
 				return fmt.Errorf("migrate Muninn operation continuation state: %w", err)
+			}
+		}
+		var operationTaskColumn int
+		if err := store.db.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'operation_task'`,
+		).Scan(&operationTaskColumn); err != nil {
+			return fmt.Errorf("inspect Muninn operation task state: %w", err)
+		}
+		if operationTaskColumn == 0 {
+			_, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_task TEXT NOT NULL DEFAULT ''`)
+			if err != nil {
+				return fmt.Errorf("migrate Muninn operation task state: %w", err)
 			}
 		}
 		if _, err := store.db.ExecContext(ctx, `DELETE FROM sources`); err != nil {
@@ -387,6 +425,7 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, session
 				}
 				session.Events[index].TargetCandidates = nil
 				session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
+				session.Events[index].OperationTask = ownership.taskForInvocations(session.Events[index].CommandCandidates)
 				session.Events[index].CommandCandidates = nil
 			}
 			if err := store.replaceSession(ctx, session, info.Size(), info.ModTime().UnixNano()); err != nil {
@@ -462,9 +501,10 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		truncated, output_bytes, failure_reason, failure_context, input_tokens,
 		cached_input_tokens, uncached_input_tokens, output_tokens,
 		reasoning_tokens, total_tokens, selector_digests, owned_operations,
+		operation_task,
 		operation_attribution_ambiguous,
 		operation_continues, targets, inline_bytes
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -512,6 +552,7 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 			event.Tokens.TotalTokens,
 			string(selectorDigests),
 			string(ownedOperations),
+			event.OperationTask,
 			boolInt(event.OperationAttributionAmbiguous),
 			boolInt(event.OperationContinues),
 			string(targets),
@@ -547,7 +588,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.input_tokens, events.cached_input_tokens,
 		events.uncached_input_tokens, events.output_tokens,
 		events.reasoning_tokens, events.total_tokens, events.selector_digests,
-		events.owned_operations, events.operation_attribution_ambiguous,
+		events.owned_operations, events.operation_task,
+		events.operation_attribution_ambiguous,
 		events.operation_continues, events.targets, events.inline_bytes
 		FROM sessions
 		JOIN sources ON sources.id = sessions.source_id
@@ -579,6 +621,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			truncated                     int
 			selectorDigests               string
 			ownedOperations               string
+			operationTask                 string
 			operationAttributionAmbiguous int
 			operationContinues            int
 			targets                       string
@@ -610,6 +653,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&event.Tokens.TotalTokens,
 			&selectorDigests,
 			&ownedOperations,
+			&operationTask,
 			&operationAttributionAmbiguous,
 			&operationContinues,
 			&targets,
@@ -637,6 +681,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		event.OperationContinues = operationContinues != 0
 		_ = json.Unmarshal([]byte(selectorDigests), &event.SelectorDigests)
 		_ = json.Unmarshal([]byte(ownedOperations), &event.OwnedOperations)
+		event.OperationTask = operationTask
 		_ = json.Unmarshal([]byte(targets), &event.Targets)
 		session.Events = append(session.Events, event)
 	}
