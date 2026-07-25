@@ -582,6 +582,43 @@ func TestOwnedOperationClassificationPrefersSpecificRule(t *testing.T) {
 	}
 }
 
+func TestOwnedOperationTaskUsesConfiguredBoundedArgument(t *testing.T) {
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:                "bwb",
+		Executables:       []string{"bwb"},
+		TaskArgumentAfter: "task",
+	}})
+	invocations := []ownedCommandInvocation{
+		{Executable: "bwb", Args: []string{"task", "installer-create-api-connections", "test"}},
+		{Executable: "git", Args: []string{"status"}},
+	}
+	if got := catalog.taskForInvocations(invocations); got != "installer-create-api-connections" {
+		t.Fatalf("task=%q want configured task argument", got)
+	}
+	invocations = append(invocations, ownedCommandInvocation{
+		Executable: "bwb",
+		Args:       []string{"task", "other-task", "status"},
+	})
+	if got := catalog.taskForInvocations(invocations); got != "" {
+		t.Fatalf("ambiguous task=%q want empty", got)
+	}
+}
+
+func TestOwnedOperationTaskRejectsUnsafeArgument(t *testing.T) {
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:                "bwb",
+		Executables:       []string{"bwb"},
+		TaskArgumentAfter: "task",
+	}})
+	invocations := []ownedCommandInvocation{{
+		Executable: "bwb",
+		Args:       []string{"task", "/private/task", "test"},
+	}}
+	if got := catalog.taskForInvocations(invocations); got != "" {
+		t.Fatalf("unsafe task=%q want empty", got)
+	}
+}
+
 func TestConfiguredExpectedOwnedOperationFailureRemainsQueryableWithoutFriction(t *testing.T) {
 	generatedAt := time.Date(2026, 7, 25, 3, 0, 0, 0, time.UTC)
 	ownership := newOwnershipCatalog([]ownedToolConfig{{
@@ -1635,6 +1672,7 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 			"id": "bwb",
 			"repository": "breyta-workbench",
 			"executables": ["bwb"],
+			"taskArgumentAfter": "task",
 			"operations": [{
 				"id": "comments-wait",
 				"args": ["comments", "--wait"],
@@ -1656,11 +1694,32 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	if len(config.OwnedTools) != 1 || config.OwnedTools[0].ID != "bwb" {
 		t.Fatalf("owned tooling config missing: %#v", config)
 	}
+	if config.OwnedTools[0].TaskArgumentAfter != "task" {
+		t.Fatalf("owned task argument marker missing: %#v", config.OwnedTools[0])
+	}
 	if got := config.OwnedTools[0].Operations[0].ExpectedFailureReasons; !reflect.DeepEqual(got, []string{"timeout"}) {
 		t.Fatalf("expected failure reasons missing: %#v", got)
 	}
 	if len(config.SuppressSignals) != 1 || config.SuppressSignals[0] != "session-loop/progress-stall/bwb/api-start" {
 		t.Fatalf("signal suppressions were not normalized: %#v", config.SuppressSignals)
+	}
+}
+
+func TestLoadRepositoryConfigRejectsInvalidTaskArgumentMarker(t *testing.T) {
+	root := t.TempDir()
+	override := `{
+		"schemaVersion": 1,
+		"ownedTools": [{
+			"id": "bwb",
+			"executables": ["bwb"],
+			"taskArgumentAfter": "two tokens"
+		}]
+	}`
+	if err := os.WriteFile(filepath.Join(root, ".muninn.json"), []byte(override), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := loadRepositoryConfig(root, ""); err == nil || !strings.Contains(err.Error(), "taskArgumentAfter") {
+		t.Fatalf("invalid task argument marker error=%v", err)
 	}
 }
 

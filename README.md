@@ -49,6 +49,7 @@ muninn analyze --repo . --focus output
 muninn analyze --repo . --focus quality
 muninn analyze --repo . --details
 muninn failures --repo . --operation bwb/comments-wait --since 14d
+muninn failures --repo . --operation bwb/test-nses --task installer-create-api-connections
 muninn failures --repo . --operation bwb/test-nses --reason "test harness protocol" --json
 muninn feedback add \
   --category roundtrip \
@@ -165,6 +166,10 @@ completion ratio, and failures/truncations per 1,000 calls.
 Interactive `--refresh` runs emit one bounded start message and one completion
 summary so long reclassification passes do not look stalled; JSON stays clean.
 
+`muninn failures` attributes each safe event to its worktree task. Use
+`--task <task-id>` to isolate a recurring owned-operation failure without
+opening raw session logs or rediscovering which task produced it.
+
 `muninn feedback` captures friction while it is fresh. It accepts only fixed
 categories plus bounded logical target/signal labels; it cannot store prose,
 commands, output, paths, URLs, prompts, session IDs, or secrets. Use
@@ -193,6 +198,7 @@ their preferred tooling surface:
       "id": "repository-cli",
       "repository": "path-or-logical-repo-name",
       "executables": ["repo-cli"],
+      "taskArgumentAfter": "task",
       "operationsOnly": false,
       "operations": [
         {
@@ -233,6 +239,9 @@ When patterns overlap, Muninn attributes an invocation only to the most
 specific match; equally specific matches are retained when one command
 deliberately carries multiple classified flags. Reports retain only configured
 IDs such as `repository-cli/status`, never the matched arguments.
+`taskArgumentAfter` optionally retains the one bounded logical argument after
+that token (for example the task ID after `task`) so failure drilldowns can
+group and filter root-launched CLI work without retaining other command text.
 Set `operationsOnly` for a CLI reached through a shared launcher such as `npm`;
 configured operations remain attributable without claiming every invocation of
 the launcher as owned tooling.

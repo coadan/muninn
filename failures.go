@@ -16,6 +16,7 @@ import (
 type ownedOperationFailureEvent struct {
 	OccurredAt           time.Time `json:"occurredAt"`
 	Operation            string    `json:"operation"`
+	Task                 string    `json:"task"`
 	Reason               string    `json:"reason"`
 	Family               string    `json:"family"`
 	OutputBytes          int64     `json:"outputBytes"`
@@ -29,6 +30,7 @@ type ownedOperationFailureReport struct {
 	Generated  time.Time                    `json:"generatedAt"`
 	Operation  string                       `json:"operation"`
 	Reason     string                       `json:"reason,omitempty"`
+	Task       string                       `json:"task,omitempty"`
 	Events     []ownedOperationFailureEvent `json:"events"`
 }
 
@@ -50,14 +52,16 @@ func cmdFailures(root string, args []string) error {
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
 	operation := fs.String("operation", "", "configured owned operation ID, for example bwb/comments-wait")
 	reason := fs.String("reason", "", "only include this fixed failure-reason label")
+	task := fs.String("task", "", "only include failures attributed to this exact worktree/task ID")
 	limit := fs.Int("limit", 20, "maximum failure events to return (1-100)")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	setFlagSetUsage(
 		fs,
-		"muninn failures --operation <tool/operation> [--repo <path>] [--since <duration>] [--reason <label>] [--limit <n>] [--json]",
+		"muninn failures --operation <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>] [--json]",
 		"Inspect bounded, privacy-safe failure events for one configured owned operation.",
 		[]string{
 			"muninn failures --repo . --operation bwb/comments-wait --since 14d",
+			"muninn failures --repo . --operation bwb/test-nses --task installer-create-api-connections",
 			"muninn failures --repo . --operation bwb/test-nses --reason \"test harness protocol\" --json",
 		},
 	)
@@ -131,6 +135,7 @@ func cmdFailures(root string, args []string) error {
 		since,
 		selectedOperation,
 		strings.TrimSpace(*reason),
+		strings.TrimSpace(*task),
 		*limit,
 	)
 	if err != nil {
@@ -143,6 +148,7 @@ func cmdFailures(root string, args []string) error {
 		Generated:  now,
 		Operation:  selectedOperation,
 		Reason:     strings.TrimSpace(*reason),
+		Task:       strings.TrimSpace(*task),
 		Events:     events,
 	}
 	if *jsonOutput {
@@ -181,6 +187,9 @@ func printOwnedOperationFailureReport(report ownedOperationFailureReport) {
 	if report.Reason != "" {
 		fmt.Printf("Reason: %s\n", report.Reason)
 	}
+	if report.Task != "" {
+		fmt.Printf("Task: %s\n", report.Task)
+	}
 	fmt.Printf("Events: %s\n", formatCodexCount(int64(len(report.Events))))
 	for _, event := range report.Events {
 		attribution := "exact"
@@ -192,8 +201,9 @@ func printOwnedOperationFailureReport(report ownedOperationFailureReport) {
 			family = "(unknown)"
 		}
 		fmt.Printf(
-			"- %s · %s · %s · %s bytes · %s\n",
+			"- %s · task %s · %s · %s · %s bytes · %s\n",
 			event.OccurredAt.Format(time.RFC3339),
+			event.Task,
 			event.Reason,
 			family,
 			formatCodexCount(event.OutputBytes),

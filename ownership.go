@@ -12,6 +12,7 @@ import (
 
 var shellCommandSubstitutionExecutablePattern = regexp.MustCompile(`\$\(\s*([A-Za-z0-9._/+-]+)`)
 var shellCommandSubstitutionPattern = regexp.MustCompile(`\$\(([^)]*)\)`)
+var ownedTaskLabelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$`)
 
 type ownedOperationConfig struct {
 	ID                     string   `json:"id"`
@@ -20,19 +21,21 @@ type ownedOperationConfig struct {
 }
 
 type ownedToolConfig struct {
-	ID             string                 `json:"id"`
-	Repository     string                 `json:"repository,omitempty"`
-	Executables    []string               `json:"executables,omitempty"`
-	ToolCalls      []string               `json:"toolCalls,omitempty"`
-	Operations     []ownedOperationConfig `json:"operations,omitempty"`
-	OperationsOnly bool                   `json:"operationsOnly,omitempty"`
-	Recommendation string                 `json:"recommendation,omitempty"`
+	ID                string                 `json:"id"`
+	Repository        string                 `json:"repository,omitempty"`
+	Executables       []string               `json:"executables,omitempty"`
+	ToolCalls         []string               `json:"toolCalls,omitempty"`
+	Operations        []ownedOperationConfig `json:"operations,omitempty"`
+	OperationsOnly    bool                   `json:"operationsOnly,omitempty"`
+	TaskArgumentAfter string                 `json:"taskArgumentAfter,omitempty"`
+	Recommendation    string                 `json:"recommendation,omitempty"`
 }
 
 type ownershipCatalog struct {
 	byDigest         map[string][]string
 	operations       []ownedOperationRule
 	expectedFailures map[string]map[string]struct{}
+	taskMarkers      map[string][]string
 }
 
 type ownedOperationRule struct {
@@ -67,6 +70,11 @@ func validateOwnedToolConfig(configs []ownedToolConfig) error {
 		if config.OperationsOnly && (len(config.Executables) == 0 || len(config.Operations) == 0) {
 			return errors.New("ownedTools operationsOnly requires executables and operations")
 		}
+		taskMarker := strings.TrimSpace(config.TaskArgumentAfter)
+		if taskMarker != "" &&
+			(len(config.Executables) == 0 || len(strings.Fields(taskMarker)) != 1 || len(taskMarker) > 80) {
+			return errors.New("ownedTools taskArgumentAfter requires executables and one bounded argument token")
+		}
 		operationIDs := map[string]struct{}{}
 		for _, operation := range config.Operations {
 			operationID := strings.TrimSpace(operation.ID)
@@ -97,11 +105,15 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 	catalog := ownershipCatalog{
 		byDigest:         map[string][]string{},
 		expectedFailures: map[string]map[string]struct{}{},
+		taskMarkers:      map[string][]string{},
 	}
 	for _, config := range configs {
 		id := strings.TrimSpace(config.ID)
 		for _, executable := range config.Executables {
 			normalizedExecutable := strings.ToLower(filepath.Base(strings.TrimSpace(executable)))
+			if marker := strings.ToLower(strings.TrimSpace(config.TaskArgumentAfter)); marker != "" {
+				catalog.taskMarkers[normalizedExecutable] = appendUniqueString(catalog.taskMarkers[normalizedExecutable], marker)
+			}
 			if !config.OperationsOnly {
 				digest := ownershipSelectorDigest("exec", normalizedExecutable)
 				catalog.byDigest[digest] = appendUniqueString(catalog.byDigest[digest], id)
@@ -190,6 +202,31 @@ func (catalog ownershipCatalog) classifyOperations(invocations []ownedCommandInv
 	}
 	sort.Strings(matches)
 	return matches
+}
+
+func (catalog ownershipCatalog) taskForInvocations(invocations []ownedCommandInvocation) string {
+	tasks := map[string]struct{}{}
+	for _, invocation := range invocations {
+		executable := strings.ToLower(filepath.Base(invocation.Executable))
+		for _, marker := range catalog.taskMarkers[executable] {
+			for index := 0; index+1 < len(invocation.Args); index++ {
+				if strings.ToLower(strings.TrimSpace(invocation.Args[index])) != marker {
+					continue
+				}
+				task := strings.TrimSpace(invocation.Args[index+1])
+				if ownedTaskLabelPattern.MatchString(task) {
+					tasks[task] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(tasks) != 1 {
+		return ""
+	}
+	for task := range tasks {
+		return task
+	}
+	return ""
 }
 
 type ownedOperationSpecificity struct {
