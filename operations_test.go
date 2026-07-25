@@ -160,3 +160,13 @@ func TestSessionRecordAttributesOwnedOperationsToLogicalTasks(t *testing.T) {
 		t.Fatalf("report logical task metrics mismatch: %#v", got)
 	}
 }
+
+func TestOwnedOperationTaskDoesNotApplyMixedShellTaskToEveryOperation(t *testing.T) {
+	event := normalizedSessionEvent{
+		OperationTask:                 "unrelated-task",
+		OperationAttributionAmbiguous: true,
+	}
+	if got := ownedOperationTask(event, ownershipCatalog{}, "(root)"); got != "(root)" {
+		t.Fatalf("ambiguous operation task=%q want session fallback", got)
+	}
+}

@@ -361,6 +361,12 @@ func newCodexSessionRecord() codexSessionRecord {
 }
 
 func ownedOperationTask(event normalizedSessionEvent, ownership ownershipCatalog, fallback string) string {
+	if event.OperationAttributionAmbiguous {
+		if fallback = strings.TrimSpace(fallback); fallback != "" {
+			return fallback
+		}
+		return "(root)"
+	}
 	if task := strings.TrimSpace(event.OperationTask); task != "" {
 		return task
 	}
