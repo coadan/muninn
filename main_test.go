@@ -63,6 +63,64 @@ func TestCheckpointAnalyzeArgsRejectsManagedFlags(t *testing.T) {
 	}
 }
 
+func TestResolveAnalyzeOutputSelectionComposesDetailsWithOperations(t *testing.T) {
+	selection, err := resolveAnalyzeOutputSelection(false, false, true, "", "bwb", 10, false)
+	if err != nil {
+		t.Fatalf("resolve operations details output: %v", err)
+	}
+	if selection.OperationLimit != 0 {
+		t.Fatalf("operations details limit=%d, want all rows", selection.OperationLimit)
+	}
+
+	selection, err = resolveAnalyzeOutputSelection(false, false, true, "", "bwb", 4, true)
+	if err != nil {
+		t.Fatalf("resolve explicitly bounded operations details output: %v", err)
+	}
+	if selection.OperationLimit != 4 {
+		t.Fatalf("explicit operations details limit=%d, want 4", selection.OperationLimit)
+	}
+}
+
+func TestResolveAnalyzeOutputSelectionComposesDetailsWithFocus(t *testing.T) {
+	selection, err := resolveAnalyzeOutputSelection(false, false, true, "structure", "", 10, false)
+	if err != nil {
+		t.Fatalf("resolve focused details output: %v", err)
+	}
+	if selection.View != "focused" {
+		t.Fatalf("focused details view=%q, want focused", selection.View)
+	}
+}
+
+func TestResolveAnalyzeOutputSelectionRetainsIncompatibleModeErrors(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		overview   bool
+		findings   bool
+		details    bool
+		focus      string
+		operations string
+	}{
+		{name: "multiple views", overview: true, details: true},
+		{name: "overview focus", overview: true, focus: "structure"},
+		{name: "operations focus", operations: "bwb", focus: "structure"},
+		{name: "operations findings", operations: "bwb", findings: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := resolveAnalyzeOutputSelection(
+				test.overview,
+				test.findings,
+				test.details,
+				test.focus,
+				test.operations,
+				10,
+				false,
+			); err == nil {
+				t.Fatal("expected incompatible output modes to fail")
+			}
+		})
+	}
+}
+
 func TestAnalyzeCodexSessionsAggregatesFinalCumulativeUsageAndFriction(t *testing.T) {
 	sessionsDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "breyta-workbench")

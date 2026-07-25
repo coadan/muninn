@@ -605,7 +605,7 @@ func cmdCodexSessions(root string, args []string) error {
 	quietOutput := fs.Bool("quiet", false, "suppress report output after saving a checkpoint")
 	overviewOutput := fs.Bool("overview", false, "show aggregate family totals only")
 	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
-	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals")
+	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals; with --operations, show all operation rows")
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
 	operationsTool := fs.String("operations", "", "show only configured operations for one locally owned tool ID")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
@@ -618,6 +618,8 @@ func cmdCodexSessions(root string, args []string) error {
 			"muninn analyze --repo .",
 			"muninn analyze --repo . --since 24h",
 			"muninn analyze --repo . --since 24h --operations bwb",
+			"muninn analyze --repo . --since 24h --operations bwb --details",
+			"muninn analyze --repo . --focus structure --details",
 			"muninn analyze --repo . --task my-worktree",
 			"muninn analyze --repo . --since 14d --include-archived --limit 20",
 			"muninn analyze --repo . --json",
@@ -633,9 +635,13 @@ func cmdCodexSessions(root string, args []string) error {
 		return errors.New("--limit must be 0 or greater")
 	}
 	sinceWasSet := false
+	limitWasSet := false
 	fs.Visit(func(visited *flag.Flag) {
-		if visited.Name == "since" {
+		switch visited.Name {
+		case "since":
 			sinceWasSet = true
+		case "limit":
+			limitWasSet = true
 		}
 	})
 	if strings.TrimSpace(*sinceCommit) != "" && sinceWasSet {
@@ -659,29 +665,17 @@ func cmdCodexSessions(root string, args []string) error {
 	if *quietOutput && strings.TrimSpace(*checkpointName) == "" {
 		return errors.New("--quiet requires --checkpoint")
 	}
-	viewCount := 0
-	for _, selected := range []bool{*overviewOutput, *findingsOutput, *detailsOutput} {
-		if selected {
-			viewCount++
-		}
-	}
-	if viewCount > 1 {
-		return errors.New("--overview, --findings, and --details are mutually exclusive")
-	}
-	if strings.TrimSpace(*focus) != "" && (*overviewOutput || *detailsOutput) {
-		return errors.New("--focus applies to findings output and cannot be combined with --overview or --details")
-	}
-	if strings.TrimSpace(*operationsTool) != "" &&
-		(*overviewOutput || *findingsOutput || *detailsOutput || strings.TrimSpace(*focus) != "") {
-		return errors.New("--operations cannot be combined with --overview, --findings, --details, or --focus")
-	}
-	view := "findings"
-	if *overviewOutput {
-		view = "overview"
-	} else if *detailsOutput {
-		view = "details"
-	} else if strings.TrimSpace(*focus) != "" {
-		view = "focused"
+	outputSelection, err := resolveAnalyzeOutputSelection(
+		*overviewOutput,
+		*findingsOutput,
+		*detailsOutput,
+		*focus,
+		*operationsTool,
+		*limit,
+		limitWasSet,
+	)
+	if err != nil {
+		return err
 	}
 	source, err := resolveSessionSource(*providerName)
 	if err != nil {
@@ -793,7 +787,7 @@ func cmdCodexSessions(root string, args []string) error {
 		return nil
 	}
 	if toolID := strings.TrimSpace(*operationsTool); toolID != "" {
-		drilldown, err := buildOwnedOperationsDrilldown(report, config, toolID, *limit)
+		drilldown, err := buildOwnedOperationsDrilldown(report, config, toolID, outputSelection.OperationLimit)
 		if err != nil {
 			return err
 		}
@@ -813,7 +807,7 @@ func cmdCodexSessions(root string, args []string) error {
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	}
-	printCodexSessionInsights(report, config, *limit, view)
+	printCodexSessionInsights(report, config, *limit, outputSelection.View)
 	if baseline != nil {
 		printSessionTrend(*baseline, report, strings.TrimSpace(*compareName))
 	}
@@ -821,6 +815,59 @@ func cmdCodexSessions(root string, args []string) error {
 		fmt.Printf("\nSaved checkpoint %q.\n", name)
 	}
 	return nil
+}
+
+type analyzeOutputSelection struct {
+	View           string
+	OperationLimit int
+}
+
+func resolveAnalyzeOutputSelection(
+	overview,
+	findings,
+	details bool,
+	focus,
+	operations string,
+	limit int,
+	limitWasSet bool,
+) (analyzeOutputSelection, error) {
+	viewCount := 0
+	for _, selected := range []bool{overview, findings, details} {
+		if selected {
+			viewCount++
+		}
+	}
+	if viewCount > 1 {
+		return analyzeOutputSelection{}, errors.New("--overview, --findings, and --details are mutually exclusive")
+	}
+	focus = strings.TrimSpace(focus)
+	operations = strings.TrimSpace(operations)
+	if focus != "" && overview {
+		return analyzeOutputSelection{}, errors.New("--focus applies to findings output and cannot be combined with --overview")
+	}
+	if operations != "" && (overview || findings || focus != "") {
+		return analyzeOutputSelection{}, errors.New("--operations cannot be combined with --overview, --findings, or --focus")
+	}
+
+	selection := analyzeOutputSelection{
+		View:           "findings",
+		OperationLimit: limit,
+	}
+	switch {
+	case operations != "":
+		if details && !limitWasSet {
+			selection.OperationLimit = 0
+		}
+	case focus != "":
+		// Focused findings already include their full evidence. Accepting
+		// --details here avoids a help/retry roundtrip without expanding output.
+		selection.View = "focused"
+	case overview:
+		selection.View = "overview"
+	case details:
+		selection.View = "details"
+	}
+	return selection, nil
 }
 
 func formatRefreshCompletion(stats sessionRefreshStats) string {
