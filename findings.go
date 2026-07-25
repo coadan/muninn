@@ -35,6 +35,7 @@ type workflowTransitionEvidence struct {
 
 func buildSessionFindings(report codexSessionInsightsReport, config repositoryConfig) []sessionFinding {
 	summary := report.Summary
+	ownership := newOwnershipCatalog(config.OwnedTools)
 	var findings []sessionFinding
 
 	for _, feedback := range report.Feedback {
@@ -65,7 +66,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			continue
 		}
 		reasons := summary.OwnedOperationFailureReasons[operation]
-		actionableFailures, expectedFailures := ownedOperationFailureCounts(operation, reasons)
+		actionableFailures, expectedFailures := ownedOperationFailureCounts(ownership, operation, reasons)
 		outputThreshold := max(int64(25_000), summary.ToolOutputTokens/100)
 		outputHeavy := metrics.EstimatedOutputTokens >= outputThreshold &&
 			ratio(float64(metrics.EstimatedOutputTokens), float64(metrics.Calls)) >= 500
@@ -93,7 +94,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			formatCodexCount(metrics.EstimatedOutputTokens),
 			formatCodexCount(metrics.EstimatedAmbiguousOutputTokens),
 		)
-		if formatted := formatOwnedOperationActionableReasons(operation, reasons); formatted != "" {
+		if formatted := formatOwnedOperationActionableReasons(ownership, operation, reasons); formatted != "" {
 			evidence += "; actionable reasons: " + formatted
 		}
 		findings = append(findings, sessionFinding{
@@ -1197,9 +1198,9 @@ func inlineToolEvidence(metrics map[string]codexInlineMetrics) string {
 	return strings.Join(parts, ", ")
 }
 
-func ownedOperationFailureCounts(operation string, reasons map[string]codexOccurrenceMetrics) (actionable int, expected int) {
+func ownedOperationFailureCounts(ownership ownershipCatalog, operation string, reasons map[string]codexOccurrenceMetrics) (actionable int, expected int) {
 	for reason, metrics := range reasons {
-		if ownedOperationExpectedFailure(operation, reason) {
+		if ownership.operationFailureExpected(operation, reason) {
 			expected += metrics.Count
 		} else {
 			actionable += metrics.Count
@@ -1230,7 +1231,7 @@ func ownedOperationFindingLastSeen(
 	return sessionFindingLastSeen(report, "owned-operation", operation)
 }
 
-func formatOwnedOperationActionableReasons(operation string, reasons map[string]codexOccurrenceMetrics) string {
+func formatOwnedOperationActionableReasons(ownership ownershipCatalog, operation string, reasons map[string]codexOccurrenceMetrics) string {
 	type row struct {
 		reason   string
 		count    int
@@ -1238,7 +1239,7 @@ func formatOwnedOperationActionableReasons(operation string, reasons map[string]
 	}
 	rows := make([]row, 0, len(reasons))
 	for reason, metrics := range reasons {
-		if ownedOperationExpectedFailure(operation, reason) || metrics.Count <= 0 {
+		if ownership.operationFailureExpected(operation, reason) || metrics.Count <= 0 {
 			continue
 		}
 		rows = append(rows, row{

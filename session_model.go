@@ -258,7 +258,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				addCodexToolMetrics(target, operation, 0, event.Failed, event.Truncated, event.OutputBytes)
 				touchSessionActivity(record.Activity, "owned-operation", operation, event.OccurredAt)
 				if !event.OperationAttributionAmbiguous &&
-					(event.Truncated || (event.Failed && !ownedOperationExpectedFailure(operation, event.FailureReason))) {
+					(event.Truncated || (event.Failed && !ownership.operationFailureExpected(operation, event.FailureReason))) {
 					touchSessionActivity(record.Activity, "owned-operation-friction", operation, event.OccurredAt)
 				}
 				if !event.Failed {
