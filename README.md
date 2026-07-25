@@ -211,6 +211,7 @@ their preferred tooling surface:
         {
           "id": "review-wait",
           "args": ["review", "--wait"],
+          "expectedWait": true,
           "expectedFailureReasons": ["timeout"]
         }
       ],
@@ -238,6 +239,9 @@ operation outcomes that are intentionally non-actionable, such as an outer
 tool-call timeout while a review waiter remains pending. The failures remain
 in metrics and drill-down reports but do not create an actionable operation
 finding or refresh its friction timestamp.
+`expectedWait` classifies long, low-output calls to that operation as necessary
+latency rather than progress stalls. Use it for operations whose contract
+includes tests, builds, review, CI, or another bounded external wait.
 When patterns overlap, Muninn attributes an invocation only to the most
 specific match; equally specific matches are retained when one command
 deliberately carries multiple classified flags. Reports retain only configured
