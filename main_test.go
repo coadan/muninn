@@ -31,6 +31,38 @@ func writeCodexSessionFixture(t *testing.T, dir, name string, events []any) stri
 	return path
 }
 
+func TestCheckpointAnalyzeArgsUsesQuietSharedAnalysisPath(t *testing.T) {
+	got, err := checkpointAnalyzeArgs([]string{
+		"before-tooling-change",
+		"--repo", ".",
+		"--since", "14d",
+	})
+	if err != nil {
+		t.Fatalf("checkpointAnalyzeArgs returned error: %v", err)
+	}
+	want := []string{
+		"--repo", ".",
+		"--since", "14d",
+		"--checkpoint", "before-tooling-change",
+		"--quiet",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("checkpoint analyze args=%q, want %q", got, want)
+	}
+}
+
+func TestCheckpointAnalyzeArgsRejectsManagedFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"name", "--checkpoint", "other"},
+		{"name", "--quiet"},
+		{"--repo", "."},
+	} {
+		if _, err := checkpointAnalyzeArgs(args); err == nil {
+			t.Fatalf("checkpointAnalyzeArgs(%q) unexpectedly succeeded", args)
+		}
+	}
+}
+
 func TestAnalyzeCodexSessionsAggregatesFinalCumulativeUsageAndFriction(t *testing.T) {
 	sessionsDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "breyta-workbench")
