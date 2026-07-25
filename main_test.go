@@ -908,6 +908,19 @@ func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
 	events = append(events, eventPair(generatedAt.Add(-time.Minute), "tests", nil, 0)...)
 	events = append(events, eventPair(generatedAt.Add(-45*time.Second), "other shell", []string{"bwb/test-nses"}, 0)...)
 	events = append(events, eventPair(generatedAt.Add(-30*time.Second), "other shell", []string{"bwb/publish"}, 0)...)
+	for index := 0; index < 5; index++ {
+		start := generatedAt.Add(time.Duration(-25+index*5) * time.Second)
+		events = append(events, normalizedSessionEvent{
+			OccurredAt:         start.Add(5 * time.Second),
+			CallOccurredAt:     start,
+			Kind:               sessionEventToolOutput,
+			ToolName:           "write_stdin",
+			Family:             "tests",
+			OutputBytes:        100,
+			OwnedOperations:    []string{"bwb/test-nses"},
+			OperationContinues: true,
+		})
+	}
 	session := normalizedSession{
 		Provider: "codex",
 		CWD:      workspaceRoot,
@@ -944,6 +957,9 @@ func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
 	if got := record.ExpectedWaits["bwb/publish"]; got.Calls != 1 || got.Seconds != 30 {
 		t.Fatalf("configured publish wait=%#v want one call and 30 seconds", got)
 	}
+	if got := record.RapidPolls["bwb/test-nses"]; got.Calls != 5 || got.Seconds != 25 {
+		t.Fatalf("rapid test polling=%#v want five calls and 25 seconds", got)
+	}
 	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)
 	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
 	if got := report.Summary.ProgressStalls["bwb/api-start"]; got.Sessions != 1 {
@@ -951,6 +967,9 @@ func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
 	}
 	if got := report.Summary.ExpectedWaits["tests"]; got.Sessions != 1 {
 		t.Fatalf("expected test wait sessions=%#v want one", got)
+	}
+	if got := report.Summary.RapidPolls["bwb/test-nses"]; got.Sessions != 1 {
+		t.Fatalf("rapid poll sessions=%#v want one", got)
 	}
 }
 

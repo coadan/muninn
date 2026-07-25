@@ -504,6 +504,28 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	for context, metrics := range summary.RapidPolls {
+		if metrics.Calls < 5 {
+			continue
+		}
+		findings = append(findings, sessionFinding{
+			Category: "agent-interface",
+			Control:  "repository",
+			Title:    "rapid continuation polling: " + context,
+			Evidence: fmt.Sprintf("%s continuation polls returned within %s across %s sessions",
+				formatCodexCount(int64(metrics.Calls)),
+				formatDurationSeconds(metrics.Seconds),
+				formatCodexCount(int64(metrics.Sessions)),
+			),
+			Action:   "Resume yielded commands with a 30-second wait or the command's documented heartbeat interval; keep necessary work running without a model roundtrip for each short poll.",
+			Count:    metrics.Calls,
+			Sessions: metrics.Sessions,
+			Target:   context,
+			LastSeen: sessionFindingLastSeen(report, "rapid-poll", context),
+			score:    445 + metrics.Sessions*20 + metrics.Calls*5,
+		})
+	}
+
 	delivery := summary.DeliveryRework
 	if delivery.Deliveries >= 2 &&
 		(delivery.DeliveriesWithRework >= 2 || delivery.ReviewToEditCycles >= 2) {
@@ -1093,6 +1115,8 @@ func sessionFindingSignal(finding sessionFinding) string {
 		return signalID("session-loop", "input-cost", target)
 	case strings.HasPrefix(finding.Title, "progress stalls while waiting on: "):
 		return signalID("session-loop", "progress-stall", target)
+	case strings.HasPrefix(finding.Title, "rapid continuation polling: "):
+		return signalID("agent-interface", "rapid-poll", target)
 	case finding.Category == "owned-operation":
 		return signalID("owned-operation", target)
 	case finding.Category == "owned-tool":

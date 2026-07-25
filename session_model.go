@@ -280,6 +280,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			ownedOperations := eventOperations
 			recordProgressWait(record, event, ownedOperations, ownership)
+			recordRapidContinuationPoll(record, event, ownedOperations)
 			recordOversizedOutput(record, event, ownedOperations)
 			for _, operation := range ownedOperations {
 				target := record.OwnedOperations
@@ -377,6 +378,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		FailureContexts:              map[string]map[string]int{},
 		ProgressStalls:               map[string]codexWaitMetrics{},
 		ExpectedWaits:                map[string]codexWaitMetrics{},
+		RapidPolls:                   map[string]codexWaitMetrics{},
 		OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 		Activity:                     map[string]time.Time{},
 	}
@@ -472,6 +474,8 @@ func oversizedOutputContext(event normalizedSessionEvent, ownedOperations []stri
 
 const progressStallMinimum = 20 * time.Second
 const progressStallMaximumOutputBytes = 256
+const rapidContinuationPollMaximum = 10 * time.Second
+const rapidContinuationPollMaximumOutputBytes = 512
 
 func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent, ownedOperations []string, ownership ownershipCatalog) {
 	if event.CallOccurredAt.IsZero() || !event.OccurredAt.After(event.CallOccurredAt) {
@@ -496,6 +500,35 @@ func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent,
 		kind = "expected-wait"
 	}
 	touchSessionActivity(record.Activity, kind, context, event.OccurredAt)
+}
+
+func recordRapidContinuationPoll(record codexSessionRecord, event normalizedSessionEvent, ownedOperations []string) {
+	if !event.OperationContinues ||
+		!continuationToolName(event.ToolName) ||
+		event.CallOccurredAt.IsZero() ||
+		!event.OccurredAt.After(event.CallOccurredAt) {
+		return
+	}
+	duration := event.OccurredAt.Sub(event.CallOccurredAt)
+	if duration > rapidContinuationPollMaximum ||
+		event.OutputBytes > rapidContinuationPollMaximumOutputBytes {
+		return
+	}
+	context := progressWaitContext(event, ownedOperations)
+	metrics := record.RapidPolls[context]
+	metrics.Calls++
+	metrics.Seconds += int64(duration.Seconds())
+	record.RapidPolls[context] = metrics
+	touchSessionActivity(record.Activity, "rapid-poll", context, event.OccurredAt)
+}
+
+func continuationToolName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "wait", "write_stdin":
+		return true
+	default:
+		return false
+	}
 }
 
 func progressWaitContext(event normalizedSessionEvent, ownedOperations []string) string {

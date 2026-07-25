@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 30
+const codexSessionInsightsSchemaVersion = 31
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -72,6 +72,7 @@ type codexTaskInsights struct {
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
+	RapidPolls                   map[string]codexWaitMetrics                  `json:"rapidPolls"`
 	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
 	DeliveryRework               deliveryReworkMetrics                        `json:"deliveryRework"`
 	DownstreamQuality            downstreamQualityMetrics                     `json:"downstreamQuality"`
@@ -170,6 +171,7 @@ type codexSessionInsightsSummary struct {
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
+	RapidPolls                   map[string]codexWaitMetrics                  `json:"rapidPolls"`
 	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
 	DeliveryRework               deliveryReworkMetrics                        `json:"deliveryRework"`
 	DownstreamQuality            downstreamQualityMetrics                     `json:"downstreamQuality"`
@@ -244,6 +246,7 @@ type codexSessionRecord struct {
 	FailureContexts              map[string]map[string]int
 	ProgressStalls               map[string]codexWaitMetrics
 	ExpectedWaits                map[string]codexWaitMetrics
+	RapidPolls                   map[string]codexWaitMetrics
 	OversizedOutputs             map[string]codexOversizedOutputMetrics
 	DeliveryRework               deliveryReworkMetrics
 	DownstreamQuality            downstreamQualityMetrics
@@ -1038,6 +1041,7 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 			ProgressStalls:               map[string]codexWaitMetrics{},
 			ExpectedWaits:                map[string]codexWaitMetrics{},
+			RapidPolls:                   map[string]codexWaitMetrics{},
 			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 			Activity:                     map[string]time.Time{},
 		},
@@ -1964,6 +1968,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexFailureContexts(summary.FailureContexts, record.FailureContexts)
 	addCodexWaitMetrics(summary.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(summary.ExpectedWaits, record.ExpectedWaits)
+	addCodexWaitMetrics(summary.RapidPolls, record.RapidPolls)
 	addCodexOversizedOutputMetrics(summary.OversizedOutputs, record.OversizedOutputs)
 	addDeliveryReworkMetrics(&summary.DeliveryRework, record.DeliveryRework)
 	addDownstreamQualityMetrics(&summary.DownstreamQuality, record.DownstreamQuality)
@@ -1986,6 +1991,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 			ProgressStalls:               map[string]codexWaitMetrics{},
 			ExpectedWaits:                map[string]codexWaitMetrics{},
+			RapidPolls:                   map[string]codexWaitMetrics{},
 			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 			Activity:                     map[string]time.Time{},
 		}
@@ -2035,6 +2041,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexFailureContexts(task.FailureContexts, record.FailureContexts)
 	addCodexWaitMetrics(task.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(task.ExpectedWaits, record.ExpectedWaits)
+	addCodexWaitMetrics(task.RapidPolls, record.RapidPolls)
 	addCodexOversizedOutputMetrics(task.OversizedOutputs, record.OversizedOutputs)
 	addDeliveryReworkMetrics(&task.DeliveryRework, record.DeliveryRework)
 	addDownstreamQualityMetrics(&task.DownstreamQuality, record.DownstreamQuality)
@@ -2293,6 +2300,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	printOwnedOperations(summary.OwnedOperations, 16)
 	printCodexWaitMetrics("\nCandidate progress stalls (long, low-output waits):", summary.ProgressStalls, 12)
 	printCodexWaitMetrics("\nExpected long waits excluded from stall findings:", summary.ExpectedWaits, 12)
+	printCodexWaitMetrics("\nRapid continuation polling:", summary.RapidPolls, 12)
 	printCodexOversizedOutputMetrics(summary.OversizedOutputs, 12)
 	printCodexFailureReasons(summary.FailureReasons)
 	printCodexFailureContexts(summary.FailureContexts, 12)
@@ -2319,6 +2327,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	}
 	stallCalls, stallSeconds := codexWaitTotals(summary.ProgressStalls)
 	expectedWaitCalls, expectedWaitSeconds := codexWaitTotals(summary.ExpectedWaits)
+	rapidPollCalls, rapidPollSeconds := codexWaitTotals(summary.RapidPolls)
 	oversizedCalls, oversizedBytes := codexOversizedOutputTotals(summary.OversizedOutputs)
 	if stallCalls > 0 {
 		fmt.Printf("- %s candidate low-output waits consumed %s. Remove redundant polling or add bounded progress for non-essential waits.\n",
@@ -2330,6 +2339,12 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Printf("- %s long waits consuming %s were classified as expected tests, builds, local reviews, or remote GitHub review and excluded from stall findings.\n",
 			formatCodexCount(int64(expectedWaitCalls)),
 			formatDurationSeconds(expectedWaitSeconds),
+		)
+	}
+	if rapidPollCalls > 0 {
+		fmt.Printf("- %s rapid continuation polls consumed %s. Resume yielded commands with a wait aligned to their progress heartbeat instead of repeatedly returning to the model.\n",
+			formatCodexCount(int64(rapidPollCalls)),
+			formatDurationSeconds(rapidPollSeconds),
 		)
 	}
 	if oversizedCalls > 0 {
