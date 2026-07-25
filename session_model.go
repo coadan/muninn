@@ -74,6 +74,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if err != nil || !inside {
 		return codexSessionRecord{}, nil
 	}
+	record.Task = codexTaskName(workspaceRoot, record.CWD)
 
 	previousCommandRound := 0
 	previousCommand := normalizedSessionEvent{}
@@ -191,6 +192,16 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 					target = record.OwnedOperationAmbiguous
 				}
 				addCodexToolMetrics(target, operation, 1, false, false, 0)
+				recordOwnedOperationTask(
+					record.OwnedOperationTasks,
+					operation,
+					ownedOperationTask(event, ownership, record.Task),
+					event.OperationAttributionAmbiguous,
+					1,
+					false,
+					false,
+					0,
+				)
 				touchSessionActivity(record.Activity, "owned-operation", operation, event.OccurredAt)
 			}
 			for _, target := range event.Targets {
@@ -257,6 +268,16 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 					target = record.OwnedOperationAmbiguous
 				}
 				addCodexToolMetrics(target, operation, 0, event.Failed, event.Truncated, event.OutputBytes)
+				recordOwnedOperationTask(
+					record.OwnedOperationTasks,
+					operation,
+					ownedOperationTask(event, ownership, record.Task),
+					event.OperationAttributionAmbiguous,
+					0,
+					event.Failed,
+					event.Truncated,
+					event.OutputBytes,
+				)
 				touchSessionActivity(record.Activity, "owned-operation", operation, event.OccurredAt)
 				if !event.OperationAttributionAmbiguous &&
 					(event.Truncated || (event.Failed && !ownership.operationFailureExpected(operation, event.FailureReason))) {
@@ -289,7 +310,14 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if record.StartedAt.IsZero() {
 		return codexSessionRecord{}, nil
 	}
-	record.Task = codexTaskName(workspaceRoot, record.CWD)
+	for operation, tasks := range record.OwnedOperationTasks {
+		for task, metrics := range tasks {
+			if metrics.Calls > 0 {
+				metrics.Sessions = 1
+				record.OwnedOperationTasks[operation][task] = metrics
+			}
+		}
+	}
 	touchSessionActivity(record.Activity, "task", record.Task, record.EndedAt)
 	return record, nil
 }
@@ -318,6 +346,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		OwnedTooling:                 map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexToolMetrics{},
 		OwnedOperationAmbiguous:      map[string]codexToolMetrics{},
+		OwnedOperationTasks:          map[string]map[string]codexOwnedOperationMetrics{},
 		OwnedOperationFailureReasons: map[string]map[string]int{},
 		ReadTargets:                  map[string]codexTargetMetrics{},
 		EditTargets:                  map[string]int{},
@@ -329,6 +358,57 @@ func newCodexSessionRecord() codexSessionRecord {
 		OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 		Activity:                     map[string]time.Time{},
 	}
+}
+
+func ownedOperationTask(event normalizedSessionEvent, ownership ownershipCatalog, fallback string) string {
+	if task := strings.TrimSpace(event.OperationTask); task != "" {
+		return task
+	}
+	if task := strings.TrimSpace(ownership.taskForInvocations(event.CommandCandidates)); task != "" {
+		return task
+	}
+	if fallback = strings.TrimSpace(fallback); fallback != "" {
+		return fallback
+	}
+	return "(root)"
+}
+
+func recordOwnedOperationTask(
+	target map[string]map[string]codexOwnedOperationMetrics,
+	operation string,
+	task string,
+	ambiguous bool,
+	calls int,
+	failed bool,
+	truncated bool,
+	outputBytes int64,
+) {
+	if target[operation] == nil {
+		target[operation] = map[string]codexOwnedOperationMetrics{}
+	}
+	metrics := target[operation][task]
+	metrics.Calls += calls
+	if ambiguous {
+		metrics.AmbiguousCalls += calls
+		if failed {
+			metrics.AmbiguousFailedCalls++
+		}
+		if truncated {
+			metrics.AmbiguousTruncatedCalls++
+		}
+		metrics.AmbiguousOutputBytes += outputBytes
+		metrics.EstimatedAmbiguousOutputTokens = estimatedTokens(metrics.AmbiguousOutputBytes)
+	} else {
+		if failed {
+			metrics.FailedCalls++
+		}
+		if truncated {
+			metrics.TruncatedCalls++
+		}
+		metrics.OutputBytes += outputBytes
+		metrics.EstimatedOutputTokens = estimatedTokens(metrics.OutputBytes)
+	}
+	target[operation][task] = metrics
 }
 
 const oversizedOutputMinimumBytes int64 = 30_000

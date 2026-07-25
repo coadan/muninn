@@ -194,6 +194,7 @@ type codexSessionInsightsReport struct {
 	Delegation     delegationAnalysis             `json:"delegation"`
 	taskEpisodes   []codexTaskEpisode
 	sessionRecords []codexSessionRecord
+	operationTasks map[string]map[string]codexOwnedOperationMetrics
 }
 
 type sessionAnalysisScope struct {
@@ -231,6 +232,7 @@ type codexSessionRecord struct {
 	OwnedTooling                 map[string]codexToolMetrics
 	OwnedOperations              map[string]codexToolMetrics
 	OwnedOperationAmbiguous      map[string]codexToolMetrics
+	OwnedOperationTasks          map[string]map[string]codexOwnedOperationMetrics
 	OwnedOperationFailureReasons map[string]map[string]int
 	ReadTargets                  map[string]codexTargetMetrics
 	EditTargets                  map[string]int
@@ -616,17 +618,18 @@ func cmdCodexSessions(root string, args []string) error {
 	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
 	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals; with --operations, show all operation rows")
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
-	operationsTool := fs.String("operations", "", "show only configured operations for one locally owned tool ID")
+	operationsTool := fs.String("operations", "", "show configured operations for one locally owned tool or exact tool/operation ID")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(
 		fs,
-		"muninn analyze [--provider codex] [--repo <path>] [--since <duration>] [--sessions-dir <path>] [--task <task-id>] [--operations <owned-tool>] [--include-archived] [--json] [--limit <n>]",
+		"muninn analyze [--provider codex] [--repo <path>] [--since <duration>] [--sessions-dir <path>] [--task <task-id>] [--operations <owned-tool-or-operation>] [--include-archived] [--json] [--limit <n>]",
 		"Summarize token usage and tool-output attribution without exposing session content or command text.",
 		[]string{
 			"muninn analyze --repo .",
 			"muninn analyze --repo . --since 24h",
 			"muninn analyze --repo . --since 24h --operations bwb",
+			"muninn analyze --repo . --since 24h --operations bwb/test-nses",
 			"muninn analyze --repo . --since 24h --operations bwb --details",
 			"muninn analyze --repo . --focus structure --details",
 			"muninn analyze --repo . --task my-worktree",
@@ -1038,6 +1041,7 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 			Activity:                     map[string]time.Time{},
 		},
+		operationTasks: map[string]map[string]codexOwnedOperationMetrics{},
 	}
 }
 
@@ -1944,6 +1948,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 		addCodexToolMetricsValue(summary.OwnedTooling, id, metrics)
 	}
 	addCodexOwnedOperationMetrics(summary.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguous)
+	addCodexOwnedOperationTaskMetrics(report.operationTasks, record.OwnedOperationTasks)
 	addCodexFailureContexts(summary.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
 	addCodexTargetMetrics(summary.ReadTargets, record.ReadTargets)
 	summary.InlineOrchestrationCalls += record.InlineOrchestrationCalls
@@ -2143,6 +2148,32 @@ func addCodexOwnedOperationMetrics(target map[string]codexOwnedOperationMetrics,
 		metrics.EstimatedOutputTokens = estimatedTokens(metrics.OutputBytes)
 		metrics.EstimatedAmbiguousOutputTokens = estimatedTokens(metrics.AmbiguousOutputBytes)
 		target[operation] = metrics
+	}
+}
+
+func addCodexOwnedOperationTaskMetrics(
+	target map[string]map[string]codexOwnedOperationMetrics,
+	additions map[string]map[string]codexOwnedOperationMetrics,
+) {
+	for operation, tasks := range additions {
+		if target[operation] == nil {
+			target[operation] = map[string]codexOwnedOperationMetrics{}
+		}
+		for task, addition := range tasks {
+			metrics := target[operation][task]
+			metrics.Calls += addition.Calls
+			metrics.AmbiguousCalls += addition.AmbiguousCalls
+			metrics.Sessions += addition.Sessions
+			metrics.FailedCalls += addition.FailedCalls
+			metrics.AmbiguousFailedCalls += addition.AmbiguousFailedCalls
+			metrics.TruncatedCalls += addition.TruncatedCalls
+			metrics.AmbiguousTruncatedCalls += addition.AmbiguousTruncatedCalls
+			metrics.OutputBytes += addition.OutputBytes
+			metrics.AmbiguousOutputBytes += addition.AmbiguousOutputBytes
+			metrics.EstimatedOutputTokens = estimatedTokens(metrics.OutputBytes)
+			metrics.EstimatedAmbiguousOutputTokens = estimatedTokens(metrics.AmbiguousOutputBytes)
+			target[operation][task] = metrics
+		}
 	}
 }
 
