@@ -65,7 +65,7 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 		if index < 3 {
 			episode.Tokens.UncachedInputTokens = 10_000
 			episode.Families["tests"] = 4
-			episode.OwnedOperations = map[string]int{"bwb/test": 3}
+			episode.OwnedOperations = map[string]int{"bwb/test": 3, "bwb/git-add": 1}
 			episode.Targets = map[string]int{"packages/runtime/worker.ts": 5}
 			episode.TargetCohorts["packages/runtime"] = 5
 		}
@@ -98,6 +98,21 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 	}
 	if formatted := formatTaskCostTailDrivers(analysis.TailDrivers); !strings.Contains(formatted, "cohort targets packages/runtime/worker.ts") {
 		t.Fatalf("formatted tail drivers omit exact target: %q", formatted)
+	}
+}
+
+func TestTaskCostDiagnosticOperationsExcludesDeliveryBookkeeping(t *testing.T) {
+	got := taskCostDiagnosticOperations(map[string]int{
+		"bwb/git-add":        1,
+		"bwb/git-commit":     1,
+		"bwb/git-push":       1,
+		"bwb/pr":             1,
+		"bwb/publish":        1,
+		"repo/worktree-land": 1,
+		"bwb/test":           2,
+	})
+	if len(got) != 1 || got["bwb/test"] != 2 {
+		t.Fatalf("diagnostic operations=%#v want only bwb/test", got)
 	}
 }
 
