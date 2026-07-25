@@ -68,6 +68,14 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			PercentageDisplay: true,
 		},
 	}
+	if baseline.SchemaVersion >= 28 && current.SchemaVersion >= 28 {
+		metrics = append(metrics, trendMetric{
+			Name:          "root instruction tokens",
+			Baseline:      float64(baseline.Instructions.RootEstimatedTokens),
+			Current:       float64(current.Instructions.RootEstimatedTokens),
+			LowerIsBetter: true,
+		})
+	}
 	fmt.Printf("\nTrend from checkpoint %q:\n", checkpointName)
 	fmt.Printf("%-32s %12s %12s %12s\n", "RATE", "BASELINE", "CURRENT", "CHANGE")
 	for _, metric := range metrics {

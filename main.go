@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 27
+const codexSessionInsightsSchemaVersion = 28
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -177,19 +177,20 @@ type codexSessionInsightsSummary struct {
 }
 
 type codexSessionInsightsReport struct {
-	SchemaVersion  int                         `json:"schemaVersion"`
-	Provider       string                      `json:"provider"`
-	GeneratedAt    string                      `json:"generatedAt"`
-	Since          string                      `json:"since"`
-	WorkspaceRoot  string                      `json:"-"`
-	SessionDirs    []string                    `json:"-"`
-	Summary        codexSessionInsightsSummary `json:"summary"`
-	Tasks          []codexTaskInsights         `json:"tasks"`
-	Feedback       []agentFeedbackAggregate    `json:"feedback,omitempty"`
-	Findings       []sessionFinding            `json:"findings"`
-	Outcomes       completionEpisodeAnalysis   `json:"outcomes"`
-	Profiles       modelEffortAnalysis         `json:"profiles"`
-	Delegation     delegationAnalysis          `json:"delegation"`
+	SchemaVersion  int                            `json:"schemaVersion"`
+	Provider       string                         `json:"provider"`
+	GeneratedAt    string                         `json:"generatedAt"`
+	Since          string                         `json:"since"`
+	WorkspaceRoot  string                         `json:"-"`
+	SessionDirs    []string                       `json:"-"`
+	Instructions   repositoryInstructionFootprint `json:"instructions"`
+	Summary        codexSessionInsightsSummary    `json:"summary"`
+	Tasks          []codexTaskInsights            `json:"tasks"`
+	Feedback       []agentFeedbackAggregate       `json:"feedback,omitempty"`
+	Findings       []sessionFinding               `json:"findings"`
+	Outcomes       completionEpisodeAnalysis      `json:"outcomes"`
+	Profiles       modelEffortAnalysis            `json:"profiles"`
+	Delegation     delegationAnalysis             `json:"delegation"`
 	taskEpisodes   []codexTaskEpisode
 	sessionRecords []codexSessionRecord
 }
@@ -758,6 +759,7 @@ func cmdCodexSessions(root string, args []string) error {
 		}
 	}
 	report.Provider = source.Name()
+	report.Instructions = inspectRepositoryInstructions(resolvedRepoRoot, source.Name())
 	repositoryKey := ownershipSelectorDigest("repo", resolvedRepoRoot)
 	if store != nil {
 		report.Feedback, err = store.listFeedback(context.Background(), repositoryKey, since, false)
@@ -2125,6 +2127,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		formatCodexCount(summary.Tokens.TotalTokens),
 	)
 	fmt.Printf("Fresh-token proxy: %s (uncached input + output)\n", formatCodexCount(summary.FreshTokens))
+	printRepositoryInstructionFootprint(report.Instructions)
 	fmt.Printf("Tool calls: %s (%s failed, %s truncated); visible output: ~%s tokens\n",
 		formatCodexCount(int64(summary.ToolCalls)),
 		formatCodexCount(int64(summary.FailedToolCalls)),
@@ -2265,6 +2268,20 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Printf("- %s remaining tool calls failed or timed out; inspect the reason/context rows before changing shared tooling.\n", formatCodexCount(int64(remainingFailures)))
 	}
 	fmt.Println("- Token counts are rollout totals, not billing amounts. Fresh-token proxy excludes cached input but does not apply model prices.")
+}
+
+func printRepositoryInstructionFootprint(footprint repositoryInstructionFootprint) {
+	if footprint.RootFiles == 0 && footprint.ScopedFiles == 0 {
+		return
+	}
+	fmt.Printf(
+		"Repository instructions: %s root files, %s bytes (~%s tokens/session baseline); %s scoped files, %s bytes\n",
+		formatCodexCount(int64(footprint.RootFiles)),
+		formatCodexCount(footprint.RootBytes),
+		formatCodexCount(footprint.RootEstimatedTokens),
+		formatCodexCount(int64(footprint.ScopedFiles)),
+		formatCodexCount(footprint.ScopedBytes),
+	)
 }
 
 func printCodexWaitMetrics(title string, metrics map[string]codexWaitMetrics, limit int) {
