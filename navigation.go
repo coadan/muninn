@@ -204,3 +204,12 @@ func codexRoutineCodeModeWrapper(input string) bool {
 	const maximumRoutineBatchBytesPerCall = 8 * 1024
 	return len(input)/len(matches) <= maximumRoutineBatchBytesPerCall
 }
+
+func codexConcurrentToolBatch(toolName, input string) bool {
+	if strings.ToLower(strings.TrimSpace(toolName)) != "exec" {
+		return false
+	}
+	matches := codexNestedToolCallPattern.FindAllStringSubmatch(input, -1)
+	return len(matches) >= 2 &&
+		(strings.Contains(input, "Promise.allSettled(") || strings.Contains(input, "Promise.all("))
+}

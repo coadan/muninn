@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 12
+const sessionStoreSchemaVersion = 13
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionNormalizer interface {
@@ -225,6 +225,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			operation_continues INTEGER NOT NULL DEFAULT 0,
 			targets TEXT NOT NULL DEFAULT '[]',
 			inline_bytes INTEGER NOT NULL DEFAULT 0,
+			concurrent_batch INTEGER NOT NULL DEFAULT 0,
 			UNIQUE(session_id, sequence)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sources_provider_path ON sources(provider, source_path)`,
@@ -267,6 +268,23 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 	var existing string
 	err := store.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&existing)
 	reindexSources := err == nil && existing != fmt.Sprint(sessionStoreSchemaVersion)
+	if err == nil && existing != fmt.Sprint(sessionStoreSchemaVersion) {
+		switch existing {
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12":
+			var concurrentBatchColumn int
+			if err := store.db.QueryRowContext(
+				ctx,
+				`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'concurrent_batch'`,
+			).Scan(&concurrentBatchColumn); err != nil {
+				return fmt.Errorf("inspect Muninn concurrent batch state: %w", err)
+			}
+			if concurrentBatchColumn == 0 {
+				if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN concurrent_batch INTEGER NOT NULL DEFAULT 0`); err != nil {
+					return fmt.Errorf("migrate Muninn concurrent batch state: %w", err)
+				}
+			}
+		}
+	}
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := store.db.ExecContext(ctx, `INSERT INTO metadata(key, value) VALUES('schema_version', ?)`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
@@ -336,6 +354,10 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
 	case existing == "11":
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
+	case existing == "12":
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
@@ -512,8 +534,8 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		reasoning_tokens, total_tokens, selector_digests, owned_operations,
 		operation_task,
 		operation_attribution_ambiguous,
-		operation_continues, targets, inline_bytes
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		operation_continues, targets, inline_bytes, concurrent_batch
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -566,6 +588,7 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 			boolInt(event.OperationContinues),
 			string(targets),
 			event.InlineBytes,
+			boolInt(event.ConcurrentBatch),
 		); err != nil {
 			return fmt.Errorf("insert indexed session event: %w", err)
 		}
@@ -599,7 +622,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.reasoning_tokens, events.total_tokens, events.selector_digests,
 		events.owned_operations, events.operation_task,
 		events.operation_attribution_ambiguous,
-		events.operation_continues, events.targets, events.inline_bytes
+		events.operation_continues, events.targets, events.inline_bytes,
+		events.concurrent_batch
 		FROM sessions
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
@@ -633,6 +657,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			operationTask                 string
 			operationAttributionAmbiguous int
 			operationContinues            int
+			concurrentBatch               int
 			targets                       string
 		)
 		err := rows.Scan(
@@ -667,6 +692,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&operationContinues,
 			&targets,
 			&event.InlineBytes,
+			&concurrentBatch,
 		)
 		if err != nil {
 			return report, fmt.Errorf("read indexed session event: %w", err)
@@ -688,6 +714,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		event.Truncated = truncated != 0
 		event.OperationAttributionAmbiguous = operationAttributionAmbiguous != 0
 		event.OperationContinues = operationContinues != 0
+		event.ConcurrentBatch = concurrentBatch != 0
 		_ = json.Unmarshal([]byte(selectorDigests), &event.SelectorDigests)
 		_ = json.Unmarshal([]byte(ownedOperations), &event.OwnedOperations)
 		event.OperationTask = operationTask

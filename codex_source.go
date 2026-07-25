@@ -17,6 +17,7 @@ type indexedCodexDescriptor struct {
 	OwnedOperations               []string
 	OperationAttributionAmbiguous bool
 	EmitsSessionMarker            bool
+	ConcurrentBatch               bool
 }
 
 func parseCodexNormalizedSession(path string) (normalizedSession, error) {
@@ -104,6 +105,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					SelectorDigests:         codexSelectorDigests(name, payload.Arguments, payload.Input),
 					CommandCandidates:       codexCommandInvocations(name, payload.Arguments, payload.Input),
 					EmitsSessionMarker:      codexEmitsExplicitSessionMarker(name, payload.Input),
+					ConcurrentBatch:         codexConcurrentToolBatch(name, payload.Input),
 				}
 				descriptor.OperationAttributionAmbiguous = len(descriptor.CommandCandidates) > 1
 				continuation := false
@@ -151,6 +153,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					CommandCandidates:             descriptor.CommandCandidates,
 					OwnedOperations:               descriptor.OwnedOperations,
 					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
+					ConcurrentBatch:               descriptor.ConcurrentBatch,
 					TargetCandidates: append(
 						codexReadTargetCandidates(name, payload.Arguments, payload.Input),
 						codexEditTargetCandidates(name, payload.Input)...,
@@ -204,6 +207,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					OwnedOperations:               descriptor.OwnedOperations,
 					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
 					OperationContinues:            len(continuationReferences) > 0,
+					ConcurrentBatch:               descriptor.ConcurrentBatch,
 				})
 				if descriptor.Family != "" {
 					for _, reference := range continuationReferences {

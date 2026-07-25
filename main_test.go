@@ -985,6 +985,17 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 				OwnedOperations:               []string{"bwb/status-env", "bwb/cli"},
 				OperationAttributionAmbiguous: true,
 			},
+			{
+				OccurredAt:      generatedAt.Add(-15 * time.Second),
+				Kind:            sessionEventToolOutput,
+				ToolName:        "exec",
+				Family:          "mixed shell",
+				Shape:           "tool exec",
+				OutputBytes:     70_000,
+				CallOccurredAt:  generatedAt.Add(-45 * time.Second),
+				OwnedOperations: []string{"bwb/status-env"},
+				ConcurrentBatch: true,
+			},
 		},
 	}
 	record, err := sessionRecordFromNormalized(session, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt, ownershipCatalog{})
@@ -1007,7 +1018,10 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 	if _, exists := record.OversizedOutputs["bwb/status-env"]; exists {
 		t.Fatalf("ambiguous bundled output must not be charged to an owned operation: %#v", record.OversizedOutputs)
 	}
-	if len(record.OversizedOutputs) != 3 {
+	if got := record.OversizedOutputs["concurrent tool batch"]; got.Calls != 1 || got.OutputBytes != 70_000 {
+		t.Fatalf("concurrent batch output should use its shared stage context: %#v", got)
+	}
+	if len(record.OversizedOutputs) != 4 {
 		t.Fatalf("below-threshold output should be absent: %#v", record.OversizedOutputs)
 	}
 	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)

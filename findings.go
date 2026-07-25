@@ -136,10 +136,14 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		if locallyControlledOutputContext(context, config.OwnedTools) {
 			control = "local"
 		}
+		title := "individual tool calls return oversized output: " + context
+		if context == "concurrent tool batch" {
+			title = "concurrent tool batches exceed the shared output budget"
+		}
 		findings = append(findings, sessionFinding{
 			Category: "output-cost",
 			Control:  control,
-			Title:    "individual tool calls return oversized output: " + context,
+			Title:    title,
 			Evidence: fmt.Sprintf("%s calls returned %s bytes (~%s visible tokens) across %s sessions; largest call %s bytes",
 				formatCodexCount(int64(metrics.Calls)),
 				formatCodexCount(metrics.OutputBytes),
@@ -1150,6 +1154,9 @@ func locallyControlledOutputContext(context string, ownedTools []ownedToolConfig
 }
 
 func oversizedOutputAction(context, control string) string {
+	if context == "concurrent tool batch" {
+		return "Keep independent calls concurrent, but lower each nested call's output limit so the combined stage stays below the shared output budget; inspect every partial result."
+	}
 	if control == "local" {
 		return "Lower this locally controlled operation's default output and return a compact summary with explicit focused follow-ups."
 	}

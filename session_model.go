@@ -52,6 +52,7 @@ type normalizedSessionEvent struct {
 	OperationTask                 string
 	OperationAttributionAmbiguous bool
 	OperationContinues            bool
+	ConcurrentBatch               bool
 	TargetCandidates              []string
 	Targets                       []string
 	InlineBytes                   int64
@@ -447,7 +448,10 @@ func recordOversizedOutput(record codexSessionRecord, event normalizedSessionEve
 	if event.OperationAttributionAmbiguous {
 		ownedOperations = nil
 	}
-	context := oversizedOutputContext(event, ownedOperations)
+	context := "concurrent tool batch"
+	if !event.ConcurrentBatch {
+		context = oversizedOutputContext(event, ownedOperations)
+	}
 	metrics := record.OversizedOutputs[context]
 	metrics.Calls++
 	metrics.OutputBytes += event.OutputBytes
