@@ -81,6 +81,11 @@ by most recent supporting activity, show a privacy-safe relative `Last seen`
 age, and retain the exact timestamp in JSON. This keeps already-fixed
 historical friction from outranking current work.
 
+Checkpoint comparisons require the same rolling lookback or resolved
+`--since-commit` boundary, task filter, archive inclusion, and finding focus.
+Muninn rejects mismatched cohorts with the exact `--since` correction instead
+of labeling incomparable rates as improvements or regressions.
+
 Use `--operations <owned-tool>` for a bounded drill-down that contains only
 that locally controlled tool's configured operation IDs, calls, sessions,
 output, failures, truncations, and fixed failure-reason labels. This is the

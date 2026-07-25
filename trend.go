@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
+	"time"
 )
 
 type trendMetric struct {
@@ -12,6 +14,133 @@ type trendMetric struct {
 	Current           float64
 	LowerIsBetter     bool
 	PercentageDisplay bool
+}
+
+func validateSessionTrendComparison(
+	baseline,
+	current codexSessionInsightsReport,
+	checkpointName string,
+) error {
+	baseScope, err := normalizedTrendScope(baseline)
+	if err != nil {
+		return fmt.Errorf("checkpoint %q has invalid analysis scope: %w", checkpointName, err)
+	}
+	currentScope, err := normalizedTrendScope(current)
+	if err != nil {
+		return fmt.Errorf("current analysis has invalid scope: %w", err)
+	}
+	if baseScope.WindowKind != currentScope.WindowKind {
+		return fmt.Errorf(
+			"checkpoint %q uses %s, but current analysis uses %s; rerun with the checkpoint's window mode or create a matched checkpoint",
+			checkpointName,
+			formatTrendWindowKind(baseScope.WindowKind),
+			formatTrendWindowKind(currentScope.WindowKind),
+		)
+	}
+	switch baseScope.WindowKind {
+	case "lookback":
+		if baseScope.LookbackSeconds != currentScope.LookbackSeconds {
+			return fmt.Errorf(
+				"checkpoint %q uses a %s lookback, but current analysis uses %s; rerun with --since %s or create a matched checkpoint",
+				checkpointName,
+				formatTrendLookback(baseScope.LookbackSeconds),
+				formatTrendLookback(currentScope.LookbackSeconds),
+				formatTrendLookback(baseScope.LookbackSeconds),
+			)
+		}
+	case "since-commit":
+		if baseline.Since != current.Since {
+			return fmt.Errorf(
+				"checkpoint %q and current analysis resolve to different --since-commit boundaries; rerun from the checkpoint's commit boundary or create a matched checkpoint",
+				checkpointName,
+			)
+		}
+	default:
+		return fmt.Errorf("unsupported window kind %q", baseScope.WindowKind)
+	}
+	if baseScope.Task != currentScope.Task {
+		return fmt.Errorf(
+			"checkpoint %q uses task scope %s, but current analysis uses %s; rerun with the same --task scope or create a matched checkpoint",
+			checkpointName,
+			formatTrendScopeValue(baseScope.Task, "all tasks"),
+			formatTrendScopeValue(currentScope.Task, "all tasks"),
+		)
+	}
+	if baseScope.IncludeArchived != currentScope.IncludeArchived {
+		return fmt.Errorf(
+			"checkpoint %q and current analysis differ on --include-archived; rerun with the same archive scope or create a matched checkpoint",
+			checkpointName,
+		)
+	}
+	if baseScope.Focus != currentScope.Focus {
+		return fmt.Errorf(
+			"checkpoint %q uses finding focus %s, but current analysis uses %s; rerun with the same --focus scope or create a matched checkpoint",
+			checkpointName,
+			formatTrendScopeValue(baseScope.Focus, "all findings"),
+			formatTrendScopeValue(currentScope.Focus, "all findings"),
+		)
+	}
+	return nil
+}
+
+func normalizedTrendScope(report codexSessionInsightsReport) (sessionAnalysisScope, error) {
+	scope := report.AnalysisScope
+	if scope.WindowKind != "" {
+		if scope.WindowKind == "lookback" && scope.LookbackSeconds <= 0 {
+			return sessionAnalysisScope{}, fmt.Errorf("lookback must be positive")
+		}
+		scope.Focus = normalizeTrendFocus(scope.Focus)
+		return scope, nil
+	}
+	generatedAt, err := time.Parse(time.RFC3339, report.GeneratedAt)
+	if err != nil {
+		return sessionAnalysisScope{}, fmt.Errorf("parse generated time: %w", err)
+	}
+	since, err := time.Parse(time.RFC3339, report.Since)
+	if err != nil {
+		return sessionAnalysisScope{}, fmt.Errorf("parse since time: %w", err)
+	}
+	if !generatedAt.After(since) {
+		return sessionAnalysisScope{}, fmt.Errorf("analysis window is not positive")
+	}
+	return sessionAnalysisScope{
+		WindowKind:      "lookback",
+		LookbackSeconds: int64(generatedAt.Sub(since) / time.Second),
+	}, nil
+}
+
+func normalizeTrendFocus(focus string) string {
+	focus = strings.ToLower(strings.TrimSpace(focus))
+	if focus == "friction" {
+		return ""
+	}
+	return focus
+}
+
+func formatTrendWindowKind(kind string) string {
+	if kind == "since-commit" {
+		return "--since-commit"
+	}
+	return "a rolling lookback"
+}
+
+func formatTrendLookback(seconds int64) string {
+	duration := time.Duration(seconds) * time.Second
+	if duration > 0 && duration%(7*24*time.Hour) == 0 {
+		return fmt.Sprintf("%dw", duration/(7*24*time.Hour))
+	}
+	if duration > 0 && duration%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%dd", duration/(24*time.Hour))
+	}
+	return duration.String()
+}
+
+func formatTrendScopeValue(value, empty string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = empty
+	}
+	return fmt.Sprintf("%q", value)
 }
 
 func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointName string) {
