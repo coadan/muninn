@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 28
+const codexSessionInsightsSchemaVersion = 29
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -181,6 +181,7 @@ type codexSessionInsightsReport struct {
 	Provider       string                         `json:"provider"`
 	GeneratedAt    string                         `json:"generatedAt"`
 	Since          string                         `json:"since"`
+	AnalysisScope  sessionAnalysisScope           `json:"analysisScope"`
 	WorkspaceRoot  string                         `json:"-"`
 	SessionDirs    []string                       `json:"-"`
 	Instructions   repositoryInstructionFootprint `json:"instructions"`
@@ -193,6 +194,14 @@ type codexSessionInsightsReport struct {
 	Delegation     delegationAnalysis             `json:"delegation"`
 	taskEpisodes   []codexTaskEpisode
 	sessionRecords []codexSessionRecord
+}
+
+type sessionAnalysisScope struct {
+	WindowKind      string `json:"windowKind"`
+	LookbackSeconds int64  `json:"lookbackSeconds,omitempty"`
+	Task            string `json:"task,omitempty"`
+	IncludeArchived bool   `json:"includeArchived,omitempty"`
+	Focus           string `json:"focus,omitempty"`
 }
 
 type codexSessionRecord struct {
@@ -692,7 +701,10 @@ func cmdCodexSessions(root string, args []string) error {
 	}
 	now := time.Now().UTC()
 	since := time.Time{}
+	windowKind := "lookback"
+	lookbackSeconds := int64(0)
 	if reference := strings.TrimSpace(*sinceCommit); reference != "" {
+		windowKind = "since-commit"
 		since, err = resolveSinceCommit(resolvedRepoRoot, reference)
 		if err != nil {
 			return err
@@ -703,6 +715,7 @@ func cmdCodexSessions(root string, args []string) error {
 			return fmt.Errorf("invalid --since value %q: %w", *sinceRaw, err)
 		}
 		since = now.Add(-lookback)
+		lookbackSeconds = int64(lookback / time.Second)
 	}
 	config, err := loadRepositoryConfig(resolvedRepoRoot, *configPath)
 	if err != nil {
@@ -753,6 +766,13 @@ func cmdCodexSessions(root string, args []string) error {
 		}
 	}
 	report.Provider = source.Name()
+	report.AnalysisScope = sessionAnalysisScope{
+		WindowKind:      windowKind,
+		LookbackSeconds: lookbackSeconds,
+		Task:            strings.TrimSpace(*taskFilter),
+		IncludeArchived: *includeArchived,
+		Focus:           normalizeTrendFocus(*focus),
+	}
 	report.Instructions = inspectRepositoryInstructions(resolvedRepoRoot, source.Name())
 	repositoryKey := ownershipSelectorDigest("repo", resolvedRepoRoot)
 	if store != nil {
@@ -770,6 +790,9 @@ func cmdCodexSessions(root string, args []string) error {
 	if name := strings.TrimSpace(*compareName); name != "" {
 		loaded, err := store.loadCheckpoint(context.Background(), name, source.Name(), repositoryKey)
 		if err != nil {
+			return err
+		}
+		if err := validateSessionTrendComparison(loaded, report, name); err != nil {
 			return err
 		}
 		baseline = &loaded
