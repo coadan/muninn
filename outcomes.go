@@ -1468,6 +1468,7 @@ func taskCostDiagnosticOperations(operations map[string]int) map[string]int {
 	filtered := make(map[string]int, len(operations))
 	for operation, calls := range operations {
 		name := operation[strings.LastIndex(operation, "/")+1:]
+		name = strings.TrimSuffix(name, "-here")
 		switch name {
 		case "git-add", "git-commit", "git-push", "pr", "publish", "worktree-land":
 			continue

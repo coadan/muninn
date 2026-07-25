@@ -103,16 +103,20 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 
 func TestTaskCostDiagnosticOperationsExcludesDeliveryBookkeeping(t *testing.T) {
 	got := taskCostDiagnosticOperations(map[string]int{
-		"bwb/git-add":        1,
-		"bwb/git-commit":     1,
-		"bwb/git-push":       1,
-		"bwb/pr":             1,
-		"bwb/publish":        1,
-		"repo/worktree-land": 1,
-		"bwb/test":           2,
+		"bwb/git-add":          1,
+		"bwb/git-commit":       1,
+		"bwb/git-push":         1,
+		"bwb/pr":               1,
+		"bwb/publish":          1,
+		"bwb/publish-here":     1,
+		"bwb/pr-here":          1,
+		"bwb/git-push-here":    1,
+		"repo/worktree-land":   1,
+		"repo/publish-preview": 3,
+		"bwb/test":             2,
 	})
-	if len(got) != 1 || got["bwb/test"] != 2 {
-		t.Fatalf("diagnostic operations=%#v want only bwb/test", got)
+	if len(got) != 2 || got["bwb/test"] != 2 || got["repo/publish-preview"] != 3 {
+		t.Fatalf("diagnostic operations=%#v want test and non-delivery preview", got)
 	}
 }
 
