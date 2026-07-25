@@ -17,6 +17,7 @@ var ownedTaskLabelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,79}
 type ownedOperationConfig struct {
 	ID                     string   `json:"id"`
 	Args                   []string `json:"args"`
+	ExpectedWait           bool     `json:"expectedWait,omitempty"`
 	ExpectedFailureReasons []string `json:"expectedFailureReasons,omitempty"`
 }
 
@@ -35,6 +36,7 @@ type ownershipCatalog struct {
 	byDigest         map[string][]string
 	operations       []ownedOperationRule
 	expectedFailures map[string]map[string]struct{}
+	expectedWaits    map[string]struct{}
 	taskMarkers      map[string][]string
 }
 
@@ -105,6 +107,7 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 	catalog := ownershipCatalog{
 		byDigest:         map[string][]string{},
 		expectedFailures: map[string]map[string]struct{}{},
+		expectedWaits:    map[string]struct{}{},
 		taskMarkers:      map[string][]string{},
 	}
 	for _, config := range configs {
@@ -135,6 +138,9 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 						catalog.expectedFailures[key][strings.ToLower(strings.TrimSpace(reason))] = struct{}{}
 					}
 				}
+				if operation.ExpectedWait {
+					catalog.expectedWaits[id+"/"+operationID] = struct{}{}
+				}
 			}
 		}
 		for _, toolCall := range config.ToolCalls {
@@ -143,6 +149,11 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 		}
 	}
 	return catalog
+}
+
+func (catalog ownershipCatalog) operationWaitExpected(operation string) bool {
+	_, ok := catalog.expectedWaits[operation]
+	return ok
 }
 
 func (catalog ownershipCatalog) operationFailureExpected(operation, reason string) bool {

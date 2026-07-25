@@ -279,7 +279,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
 			ownedOperations := eventOperations
-			recordProgressWait(record, event, ownedOperations)
+			recordProgressWait(record, event, ownedOperations, ownership)
 			recordOversizedOutput(record, event, ownedOperations)
 			for _, operation := range ownedOperations {
 				target := record.OwnedOperations
@@ -473,7 +473,7 @@ func oversizedOutputContext(event normalizedSessionEvent, ownedOperations []stri
 const progressStallMinimum = 20 * time.Second
 const progressStallMaximumOutputBytes = 256
 
-func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent, ownedOperations []string) {
+func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent, ownedOperations []string, ownership ownershipCatalog) {
 	if event.CallOccurredAt.IsZero() || !event.OccurredAt.After(event.CallOccurredAt) {
 		return
 	}
@@ -483,7 +483,8 @@ func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent,
 	}
 	context := progressWaitContext(event, ownedOperations)
 	target := record.ProgressStalls
-	if expectedProgressWait(event, ownedOperations) {
+	expected := expectedProgressWait(event, ownedOperations, ownership)
+	if expected {
 		target = record.ExpectedWaits
 	}
 	metrics := target[context]
@@ -491,7 +492,7 @@ func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent,
 	metrics.Seconds += int64(duration.Seconds())
 	target[context] = metrics
 	kind := "progress-stall"
-	if expectedProgressWait(event, ownedOperations) {
+	if expected {
 		kind = "expected-wait"
 	}
 	touchSessionActivity(record.Activity, kind, context, event.OccurredAt)
@@ -516,13 +517,14 @@ func progressWaitContext(event normalizedSessionEvent, ownedOperations []string)
 	return "(unknown)"
 }
 
-func expectedProgressWait(event normalizedSessionEvent, ownedOperations []string) bool {
+func expectedProgressWait(event normalizedSessionEvent, ownedOperations []string, ownership ownershipCatalog) bool {
 	switch event.Family {
 	case "tests", "build, lint, or install", "review":
 		return true
 	}
 	for _, operation := range ownedOperations {
-		if operation == "bwb/comments" ||
+		if ownership.operationWaitExpected(operation) ||
+			operation == "bwb/comments" ||
 			strings.HasPrefix(operation, "bwb/comments-") ||
 			operation == "bwb/test" ||
 			strings.HasPrefix(operation, "bwb/test-") {

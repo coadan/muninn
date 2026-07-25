@@ -907,12 +907,22 @@ func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
 	events = append(events, eventPair(generatedAt.Add(-90*time.Second), "other shell", []string{"bwb/comments-resolve"}, 0)...)
 	events = append(events, eventPair(generatedAt.Add(-time.Minute), "tests", nil, 0)...)
 	events = append(events, eventPair(generatedAt.Add(-45*time.Second), "other shell", []string{"bwb/test-nses"}, 0)...)
+	events = append(events, eventPair(generatedAt.Add(-30*time.Second), "other shell", []string{"bwb/publish"}, 0)...)
 	session := normalizedSession{
 		Provider: "codex",
 		CWD:      workspaceRoot,
 		Events:   events,
 	}
-	record, err := sessionRecordFromNormalized(session, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt, ownershipCatalog{})
+	ownership := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "bwb",
+		Executables: []string{"bwb"},
+		Operations: []ownedOperationConfig{{
+			ID:           "publish",
+			Args:         []string{"publish"},
+			ExpectedWait: true,
+		}},
+	}})
+	record, err := sessionRecordFromNormalized(session, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt, ownership)
 	if err != nil {
 		t.Fatalf("normalize session: %v", err)
 	}
@@ -930,6 +940,9 @@ func TestProgressWaitsSeparateCandidateStallsFromExpectedWork(t *testing.T) {
 	}
 	if got := record.ExpectedWaits["bwb/test-nses"]; got.Calls != 1 || got.Seconds != 30 {
 		t.Fatalf("owned test wait=%#v want one call and 30 seconds", got)
+	}
+	if got := record.ExpectedWaits["bwb/publish"]; got.Calls != 1 || got.Seconds != 30 {
+		t.Fatalf("configured publish wait=%#v want one call and 30 seconds", got)
 	}
 	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)
 	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
@@ -1690,6 +1703,7 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 			"operations": [{
 				"id": "comments-wait",
 				"args": ["comments", "--wait"],
+				"expectedWait": true,
 				"expectedFailureReasons": ["timeout"]
 			}],
 			"recommendation": "Improve the local CLI first."
@@ -1713,6 +1727,9 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	}
 	if got := config.OwnedTools[0].Operations[0].ExpectedFailureReasons; !reflect.DeepEqual(got, []string{"timeout"}) {
 		t.Fatalf("expected failure reasons missing: %#v", got)
+	}
+	if !config.OwnedTools[0].Operations[0].ExpectedWait {
+		t.Fatalf("expected wait marker missing: %#v", config.OwnedTools[0].Operations[0])
 	}
 	if len(config.SuppressSignals) != 1 || config.SuppressSignals[0] != "session-loop/progress-stall/bwb/api-start" {
 		t.Fatalf("signal suppressions were not normalized: %#v", config.SuppressSignals)
