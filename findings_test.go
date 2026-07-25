@@ -247,6 +247,11 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 		Seconds:  300,
 		Sessions: 3,
 	}
+	report.Summary.RapidPolls["bwb/test-nses"] = codexWaitMetrics{
+		Calls:    8,
+		Seconds:  40,
+		Sessions: 1,
+	}
 	report.Summary.ProgressStalls["mixed shell"] = codexWaitMetrics{
 		Calls:    20,
 		Seconds:  900,
@@ -275,6 +280,12 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 	}
 	if _, exists := bySignal["session-loop/progress-stall/mixed-shell"]; exists {
 		t.Fatalf("unattributed waits should remain metrics, not actionable findings: %#v", findings)
+	}
+	rapidSignal := "agent-interface/rapid-poll/bwb/test-nses"
+	if finding, ok := bySignal[rapidSignal]; !ok ||
+		!strings.Contains(finding.Action, "30-second wait") ||
+		!strings.Contains(finding.Evidence, "8 continuation polls") {
+		t.Fatalf("rapid polling finding mismatch: %#v", finding)
 	}
 }
 

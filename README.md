@@ -128,6 +128,8 @@ Muninn highlights:
 - fresh-token and visible tool-output volume
 - long low-output tool waits, with tests, builds, and review waits reported
   separately from candidate progress stalls
+- rapid continuation polling reported separately from necessary wait duration,
+  so short resume loops can be reduced without treating the work as stalled
 - individual tool outputs of at least 30,000 bytes, capped to three actionable
   findings with privacy-safe context attribution; compound shell calls use a
   bounded command-family shape instead of collapsing into `mixed shell`
