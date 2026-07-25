@@ -15,7 +15,9 @@ func TestAnalyzeCompletionEpisodesUsesDistributionsNotAverages(t *testing.T) {
 			EndedAt:   time.Unix(10, 0),
 			Completed: true,
 			Tokens: codexTokenUsage{
+				CachedInputTokens:   2 * fresh,
 				UncachedInputTokens: fresh,
+				OutputTokens:        fresh / 10,
 			},
 			ToolCalls: int(fresh / 10),
 		})
@@ -27,8 +29,17 @@ func TestAnalyzeCompletionEpisodesUsesDistributionsNotAverages(t *testing.T) {
 	if analysis.ToolUsingCompleted != 5 || analysis.ResponseOnlyCompleted != 0 {
 		t.Fatalf("tool-using episode cohort mismatch: %#v", analysis)
 	}
-	if analysis.FreshTokens.P50 != 30 || analysis.FreshTokens.P75 != 40 ||
-		analysis.FreshTokens.P90 != 100 || analysis.FreshTokens.Max != 100 {
+	if analysis.CachedInputTokens.P50 != 60 || analysis.CachedInputTokens.P90 != 200 {
+		t.Fatalf("cached-input distribution mismatch: %#v", analysis.CachedInputTokens)
+	}
+	if analysis.UncachedInputTokens.P50 != 30 || analysis.UncachedInputTokens.P90 != 100 {
+		t.Fatalf("uncached-input distribution mismatch: %#v", analysis.UncachedInputTokens)
+	}
+	if analysis.ModelOutputTokens.P50 != 3 || analysis.ModelOutputTokens.P90 != 10 {
+		t.Fatalf("model-output distribution mismatch: %#v", analysis.ModelOutputTokens)
+	}
+	if analysis.FreshTokens.P50 != 33 || analysis.FreshTokens.P75 != 44 ||
+		analysis.FreshTokens.P90 != 110 || analysis.FreshTokens.Max != 110 {
 		t.Fatalf("fresh-token distribution mismatch: %#v", analysis.FreshTokens)
 	}
 	if analysis.TopDecileFreshTokenShare != 0.5 {

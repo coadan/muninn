@@ -115,3 +115,47 @@ func TestValidateSessionTrendComparisonTreatsBroadFrictionFocusAsDefault(t *test
 		t.Fatalf("broad friction focus should match default findings: %v", err)
 	}
 }
+
+func TestCompletedTaskTrendUsesTokenSplitForCurrentSchemas(t *testing.T) {
+	baseline := codexSessionInsightsReport{SchemaVersion: 30}
+	current := codexSessionInsightsReport{SchemaVersion: 30}
+	baseline.Outcomes = completionEpisodeAnalysis{
+		ToolUsingCompleted:  20,
+		CachedInputTokens:   outcomeDistribution{P50: 100, P90: 200},
+		UncachedInputTokens: outcomeDistribution{P50: 50, P90: 100},
+		ModelOutputTokens:   outcomeDistribution{P50: 10, P90: 20},
+		ToolCalls:           outcomeDistribution{P50: 10, P90: 30},
+		DurationSeconds:     outcomeDistribution{P50: 60, P90: 180},
+		FailedCalls:         outcomeDistribution{P90: 2},
+		Compactions:         outcomeDistribution{P90: 1},
+	}
+	current.Outcomes = baseline.Outcomes
+	current.Outcomes.CachedInputTokens.P50 = 80
+	current.Outcomes.ToolCalls.P90 = 40
+
+	metrics := completedTaskTrendMetrics(baseline, current)
+	if len(metrics) != 12 {
+		t.Fatalf("completed-task metrics=%d want 12: %#v", len(metrics), metrics)
+	}
+	label, improved, regressed, unchanged := summarizeTrendDirections(metrics)
+	if label != "mixed" || improved != 1 || regressed != 1 || unchanged != 10 {
+		t.Fatalf("direction=%q %d/%d/%d want mixed 1/1/10", label, improved, regressed, unchanged)
+	}
+}
+
+func TestCompletedTaskTrendSupportsLegacyFreshTokenCheckpoint(t *testing.T) {
+	baseline := codexSessionInsightsReport{SchemaVersion: 29}
+	current := codexSessionInsightsReport{SchemaVersion: 30}
+	baseline.Outcomes = completionEpisodeAnalysis{
+		ToolUsingCompleted: 10,
+		FreshTokens:        outcomeDistribution{P50: 100, P90: 300},
+	}
+	current.Outcomes = completionEpisodeAnalysis{
+		ToolUsingCompleted: 10,
+		FreshTokens:        outcomeDistribution{P50: 90, P90: 250},
+	}
+	metrics := completedTaskTrendMetrics(baseline, current)
+	if len(metrics) != 8 || metrics[0].Name != "fresh tokens p50" || metrics[1].Name != "fresh tokens p90" {
+		t.Fatalf("legacy metrics=%#v", metrics)
+	}
+}
