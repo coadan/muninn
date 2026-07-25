@@ -187,6 +187,11 @@ their preferred tooling surface:
         {
           "id": "status",
           "args": ["task", "*", "status"]
+        },
+        {
+          "id": "review-wait",
+          "args": ["review", "--wait"],
+          "expectedFailureReasons": ["timeout"]
         }
       ],
       "recommendation": "Prefer improving this locally controlled surface."
@@ -208,6 +213,11 @@ repository name.
 Owned-tool attribution lets Muninn prioritize fixes with a short local path.
 Optional operation patterns use anchored argument prefixes with `*` matching
 one privacy-safe variable segment and `**` matching zero or more segments.
+`expectedFailureReasons` accepts exact fixed Muninn failure labels for
+operation outcomes that are intentionally non-actionable, such as an outer
+tool-call timeout while a review waiter remains pending. The failures remain
+in metrics and drill-down reports but do not create an actionable operation
+finding or refresh its friction timestamp.
 When patterns overlap, Muninn attributes an invocation only to the most
 specific match; equally specific matches are retained when one command
 deliberately carries multiple classified flags. Reports retain only configured

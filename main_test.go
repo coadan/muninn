@@ -524,6 +524,50 @@ func TestOwnedOperationClassificationPrefersSpecificRule(t *testing.T) {
 	}
 }
 
+func TestConfiguredExpectedOwnedOperationFailureRemainsQueryableWithoutFriction(t *testing.T) {
+	generatedAt := time.Date(2026, 7, 25, 3, 0, 0, 0, time.UTC)
+	ownership := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "bwb",
+		Executables: []string{"bwb"},
+		Operations: []ownedOperationConfig{{
+			ID:                     "comments-wait",
+			Args:                   []string{"task", "*", "comments", "**", "--wait"},
+			ExpectedFailureReasons: []string{"timeout"},
+		}},
+	}})
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      t.TempDir(),
+		Events: []normalizedSessionEvent{{
+			OccurredAt:      generatedAt,
+			CallOccurredAt:  generatedAt.Add(-time.Minute),
+			Kind:            sessionEventToolOutput,
+			ToolName:        "exec_command",
+			Failed:          true,
+			FailureReason:   "timeout",
+			OwnedOperations: []string{"bwb/comments-wait"},
+		}},
+	}
+	record, err := sessionRecordFromNormalized(session, session.CWD, generatedAt.Add(-time.Hour), generatedAt, ownership)
+	if err != nil {
+		t.Fatalf("normalize configured expected failure: %v", err)
+	}
+	if got := record.OwnedOperationFailureReasons["bwb/comments-wait"]["timeout"]; got != 1 {
+		t.Fatalf("configured expected failure was not retained: %#v", record.OwnedOperationFailureReasons)
+	}
+	if got := record.Activity[sessionActivityKey("owned-operation-friction", "bwb/comments-wait")]; !got.IsZero() {
+		t.Fatalf("configured expected failure refreshed friction activity: %s", got)
+	}
+	reasons := map[string]codexOccurrenceMetrics{
+		"timeout":                   {Count: 3, Sessions: 1},
+		"transient service failure": {Count: 1, Sessions: 1},
+	}
+	actionable, expected := ownedOperationFailureCounts(ownership, "bwb/comments-wait", reasons)
+	if actionable != 1 || expected != 3 {
+		t.Fatalf("failure split=(%d,%d) want (1,3)", actionable, expected)
+	}
+}
+
 func TestOwnedOperationClassificationRetainsSpecificTies(t *testing.T) {
 	catalog := newOwnershipCatalog([]ownedToolConfig{{
 		ID:          "bwb",
@@ -683,7 +727,7 @@ func TestOwnedOperationFailureReasonsSeparateExpectedFailures(t *testing.T) {
 	}
 	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)
 	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
-	actionable, expected := ownedOperationFailureCounts("bwb/test", report.Summary.OwnedOperationFailureReasons["bwb/test"])
+	actionable, expected := ownedOperationFailureCounts(ownershipCatalog{}, "bwb/test", report.Summary.OwnedOperationFailureReasons["bwb/test"])
 	if actionable != 0 || expected != 1 {
 		t.Fatalf("failure split=(%d,%d) want (0,1)", actionable, expected)
 	}
@@ -1533,6 +1577,11 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 			"id": "bwb",
 			"repository": "breyta-workbench",
 			"executables": ["bwb"],
+			"operations": [{
+				"id": "comments-wait",
+				"args": ["comments", "--wait"],
+				"expectedFailureReasons": ["timeout"]
+			}],
 			"recommendation": "Improve the local CLI first."
 		}]
 	}`
@@ -1549,8 +1598,35 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	if len(config.OwnedTools) != 1 || config.OwnedTools[0].ID != "bwb" {
 		t.Fatalf("owned tooling config missing: %#v", config)
 	}
+	if got := config.OwnedTools[0].Operations[0].ExpectedFailureReasons; !reflect.DeepEqual(got, []string{"timeout"}) {
+		t.Fatalf("expected failure reasons missing: %#v", got)
+	}
 	if len(config.SuppressSignals) != 1 || config.SuppressSignals[0] != "session-loop/progress-stall/bwb/api-start" {
 		t.Fatalf("signal suppressions were not normalized: %#v", config.SuppressSignals)
+	}
+}
+
+func TestLoadRepositoryConfigRejectsInvalidExpectedFailureReasons(t *testing.T) {
+	for _, reasons := range []string{`[""]`, `["timeout", " TIMEOUT "]`} {
+		root := t.TempDir()
+		override := `{
+			"schemaVersion": 1,
+			"ownedTools": [{
+				"id": "bwb",
+				"executables": ["bwb"],
+				"operations": [{
+					"id": "comments-wait",
+					"args": ["comments", "--wait"],
+					"expectedFailureReasons": ` + reasons + `
+				}]
+			}]
+		}`
+		if err := os.WriteFile(filepath.Join(root, ".muninn.json"), []byte(override), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		if _, err := loadRepositoryConfig(root, ""); err == nil || !strings.Contains(err.Error(), "expectedFailureReasons") {
+			t.Fatalf("invalid expected failure reasons %s error=%v", reasons, err)
+		}
 	}
 }
 

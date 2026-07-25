@@ -14,8 +14,9 @@ var shellCommandSubstitutionExecutablePattern = regexp.MustCompile(`\$\(\s*([A-Z
 var shellCommandSubstitutionPattern = regexp.MustCompile(`\$\(([^)]*)\)`)
 
 type ownedOperationConfig struct {
-	ID   string   `json:"id"`
-	Args []string `json:"args"`
+	ID                     string   `json:"id"`
+	Args                   []string `json:"args"`
+	ExpectedFailureReasons []string `json:"expectedFailureReasons,omitempty"`
 }
 
 type ownedToolConfig struct {
@@ -29,8 +30,9 @@ type ownedToolConfig struct {
 }
 
 type ownershipCatalog struct {
-	byDigest   map[string][]string
-	operations []ownedOperationRule
+	byDigest         map[string][]string
+	operations       []ownedOperationRule
+	expectedFailures map[string]map[string]struct{}
 }
 
 type ownedOperationRule struct {
@@ -75,13 +77,27 @@ func validateOwnedToolConfig(configs []ownedToolConfig) error {
 				return errors.New("ownedTools operation ids must be unique within each tool")
 			}
 			operationIDs[operationID] = struct{}{}
+			expectedReasons := map[string]struct{}{}
+			for _, reason := range operation.ExpectedFailureReasons {
+				normalized := strings.ToLower(strings.TrimSpace(reason))
+				if normalized == "" {
+					return errors.New("ownedTools operation expectedFailureReasons must not contain empty values")
+				}
+				if _, exists := expectedReasons[normalized]; exists {
+					return errors.New("ownedTools operation expectedFailureReasons must be unique")
+				}
+				expectedReasons[normalized] = struct{}{}
+			}
 		}
 	}
 	return nil
 }
 
 func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
-	catalog := ownershipCatalog{byDigest: map[string][]string{}}
+	catalog := ownershipCatalog{
+		byDigest:         map[string][]string{},
+		expectedFailures: map[string]map[string]struct{}{},
+	}
 	for _, config := range configs {
 		id := strings.TrimSpace(config.ID)
 		for _, executable := range config.Executables {
@@ -91,12 +107,22 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 				catalog.byDigest[digest] = appendUniqueString(catalog.byDigest[digest], id)
 			}
 			for _, operation := range config.Operations {
+				operationID := strings.TrimSpace(operation.ID)
 				catalog.operations = append(catalog.operations, ownedOperationRule{
 					ToolID:      id,
-					OperationID: strings.TrimSpace(operation.ID),
+					OperationID: operationID,
 					Executable:  normalizedExecutable,
 					Args:        normalizeOperationPattern(operation.Args),
 				})
+				if len(operation.ExpectedFailureReasons) > 0 {
+					key := id + "/" + operationID
+					if catalog.expectedFailures[key] == nil {
+						catalog.expectedFailures[key] = map[string]struct{}{}
+					}
+					for _, reason := range operation.ExpectedFailureReasons {
+						catalog.expectedFailures[key][strings.ToLower(strings.TrimSpace(reason))] = struct{}{}
+					}
+				}
 			}
 		}
 		for _, toolCall := range config.ToolCalls {
@@ -105,6 +131,15 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 		}
 	}
 	return catalog
+}
+
+func (catalog ownershipCatalog) operationFailureExpected(operation, reason string) bool {
+	if ownedOperationExpectedFailure(operation, reason) {
+		return true
+	}
+	reasons := catalog.expectedFailures[operation]
+	_, ok := reasons[strings.ToLower(strings.TrimSpace(reason))]
+	return ok
 }
 
 func normalizeOperationPattern(pattern []string) []string {
