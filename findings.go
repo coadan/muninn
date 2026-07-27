@@ -117,6 +117,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		if formatted := formatOwnedOperationActionableReasons(ownership, operation, reasons); formatted != "" {
 			evidence += "; actionable reasons: " + formatted
 		}
+		evidence += recentOwnedOperationEvidence(report, ownership, operation)
 		findings = append(findings, sessionFinding{
 			Category: "owned-operation",
 			Control:  "local",
@@ -1280,6 +1281,58 @@ func ownedOperationFindingLastSeen(
 		}
 	}
 	return sessionFindingLastSeen(report, "owned-operation", operation)
+}
+
+func recentOwnedOperationEvidence(
+	report codexSessionInsightsReport,
+	ownership ownershipCatalog,
+	operation string,
+) string {
+	generatedAt, generatedErr := time.Parse(time.RFC3339, report.GeneratedAt)
+	since, sinceErr := time.Parse(time.RFC3339, report.Since)
+	const recentWindow = 24 * time.Hour
+	if generatedErr != nil || sinceErr != nil || generatedAt.Sub(since) < 2*recentWindow {
+		return ""
+	}
+
+	cutoff := generatedAt.Add(-recentWindow)
+	calls := 0
+	sessions := 0
+	actionableFailures := 0
+	truncatedCalls := 0
+	outputBytes := int64(0)
+	for _, record := range report.sessionRecords {
+		activity := record.Activity[sessionActivityKey("owned-operation", operation)]
+		if activity.IsZero() || activity.Before(cutoff) {
+			continue
+		}
+		exact := record.OwnedOperations[operation]
+		ambiguous := record.OwnedOperationAmbiguous[operation]
+		recordCalls := exact.Calls + ambiguous.Calls
+		if recordCalls == 0 {
+			continue
+		}
+		calls += recordCalls
+		sessions++
+		truncatedCalls += exact.TruncatedCalls + ambiguous.TruncatedCalls
+		outputBytes += exact.OutputBytes + ambiguous.OutputBytes
+		for reason, count := range record.OwnedOperationFailureReasons[operation] {
+			if !ownership.operationFailureExpected(operation, reason) {
+				actionableFailures += count
+			}
+		}
+	}
+	if calls == 0 {
+		return "; recent 24h sessions: no calls"
+	}
+	return fmt.Sprintf(
+		"; recent 24h sessions: %s calls/%s sessions, %s actionable failures, %s truncations, ~%s output tokens",
+		formatCodexCount(int64(calls)),
+		formatCodexCount(int64(sessions)),
+		formatCodexCount(int64(actionableFailures)),
+		formatCodexCount(int64(truncatedCalls)),
+		formatCodexCount(estimatedTokens(outputBytes)),
+	)
 }
 
 func formatOwnedOperationActionableReasons(ownership ownershipCatalog, operation string, reasons map[string]codexOccurrenceMetrics) string {
