@@ -14,6 +14,27 @@ type trendMetric struct {
 	Current           float64
 	LowerIsBetter     bool
 	PercentageDisplay bool
+	BaselineSample    int
+	CurrentSample     int
+	MinimumSample     int
+}
+
+func previousLookbackWindow(
+	currentSince,
+	currentUntil time.Time,
+	lookbackSeconds int64,
+) (time.Time, time.Time, error) {
+	if lookbackSeconds <= 0 {
+		return time.Time{}, time.Time{}, fmt.Errorf("previous-period comparison requires a positive lookback")
+	}
+	if !currentUntil.After(currentSince) {
+		return time.Time{}, time.Time{}, fmt.Errorf("current analysis window is not positive")
+	}
+	lookback := time.Duration(lookbackSeconds) * time.Second
+	if currentUntil.Sub(currentSince) != lookback {
+		return time.Time{}, time.Time{}, fmt.Errorf("current analysis window does not match its lookback")
+	}
+	return currentSince.Add(-lookback), currentSince, nil
 }
 
 func validateSessionTrendComparison(
@@ -146,6 +167,10 @@ func formatTrendScopeValue(value, empty string) string {
 func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointName string) {
 	base := baseline.Summary
 	now := current.Summary
+	baseRework := base.DeliveryRework
+	nowRework := now.DeliveryRework
+	baseQuality := base.DownstreamQuality
+	nowQuality := now.DownstreamQuality
 	metrics := []trendMetric{
 		{
 			Name:              "completion ratio",
@@ -154,9 +179,33 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			PercentageDisplay: true,
 		},
 		{
-			Name:          "tool calls / session",
+			Name:          "tool roundtrips / session",
 			Baseline:      ratio(float64(base.ToolCalls), float64(base.Sessions)),
 			Current:       ratio(float64(now.ToolCalls), float64(now.Sessions)),
+			LowerIsBetter: true,
+		},
+		{
+			Name:          "cross-call transitions / task",
+			Baseline:      ratio(float64(totalCrossCallTransitions(base.CrossCallTransitions)), float64(baseline.Outcomes.ToolUsingCompleted)),
+			Current:       ratio(float64(totalCrossCallTransitions(now.CrossCallTransitions)), float64(current.Outcomes.ToolUsingCompleted)),
+			LowerIsBetter: true,
+		},
+		{
+			Name:          "repeated transitions / task",
+			Baseline:      ratio(float64(repeatedCrossCallTransitions(base.CrossCallTransitions)), float64(baseline.Outcomes.ToolUsingCompleted)),
+			Current:       ratio(float64(repeatedCrossCallTransitions(now.CrossCallTransitions)), float64(current.Outcomes.ToolUsingCompleted)),
+			LowerIsBetter: true,
+		},
+		{
+			Name:          "rapid polls / task",
+			Baseline:      ratio(float64(totalWaitCalls(base.RapidPolls)), float64(baseline.Outcomes.ToolUsingCompleted)),
+			Current:       ratio(float64(totalWaitCalls(now.RapidPolls)), float64(current.Outcomes.ToolUsingCompleted)),
+			LowerIsBetter: true,
+		},
+		{
+			Name:          "progress stalls / task",
+			Baseline:      ratio(float64(totalWaitCalls(base.ProgressStalls)), float64(baseline.Outcomes.ToolUsingCompleted)),
+			Current:       ratio(float64(totalWaitCalls(now.ProgressStalls)), float64(current.Outcomes.ToolUsingCompleted)),
 			LowerIsBetter: true,
 		},
 		{
@@ -184,17 +233,70 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			LowerIsBetter: true,
 		},
 		{
-			Name:              "downstream delivery failures",
-			Baseline:          ratio(float64(base.DownstreamQuality.DeliveriesWithFailure), float64(base.DownstreamQuality.Deliveries)),
-			Current:           ratio(float64(now.DownstreamQuality.DeliveriesWithFailure), float64(now.DownstreamQuality.Deliveries)),
+			Name:              "pre-delivery test evidence",
+			Baseline:          ratio(float64(baseRework.DeliveriesWithPreTests), float64(baseRework.Deliveries)),
+			Current:           ratio(float64(nowRework.DeliveriesWithPreTests), float64(nowRework.Deliveries)),
+			PercentageDisplay: true,
+			BaselineSample:    baseRework.Deliveries,
+			CurrentSample:     nowRework.Deliveries,
+			MinimumSample:     10,
+		},
+		{
+			Name:              "deliveries needing review fixes",
+			Baseline:          ratio(float64(baseRework.DeliveriesWithRework), float64(baseRework.Deliveries)),
+			Current:           ratio(float64(nowRework.DeliveriesWithRework), float64(nowRework.Deliveries)),
 			LowerIsBetter:     true,
 			PercentageDisplay: true,
+			BaselineSample:    baseRework.Deliveries,
+			CurrentSample:     nowRework.Deliveries,
+			MinimumSample:     10,
+		},
+		{
+			Name:           "review-to-edit cycles / delivery",
+			Baseline:       ratio(float64(baseRework.ReviewToEditCycles), float64(baseRework.Deliveries)),
+			Current:        ratio(float64(nowRework.ReviewToEditCycles), float64(nowRework.Deliveries)),
+			LowerIsBetter:  true,
+			BaselineSample: baseRework.Deliveries,
+			CurrentSample:  nowRework.Deliveries,
+			MinimumSample:  10,
+		},
+		{
+			Name:              "downstream delivery failures",
+			Baseline:          ratio(float64(baseQuality.DeliveriesWithFailure), float64(baseQuality.Deliveries)),
+			Current:           ratio(float64(nowQuality.DeliveriesWithFailure), float64(nowQuality.Deliveries)),
+			LowerIsBetter:     true,
+			PercentageDisplay: true,
+			BaselineSample:    baseQuality.Deliveries,
+			CurrentSample:     nowQuality.Deliveries,
+			MinimumSample:     10,
+		},
+		{
+			Name:           "follow-up edits / delivery",
+			Baseline:       ratio(float64(baseQuality.FollowUpEditCycles), float64(baseQuality.Deliveries)),
+			Current:        ratio(float64(nowQuality.FollowUpEditCycles), float64(nowQuality.Deliveries)),
+			LowerIsBetter:  true,
+			BaselineSample: baseQuality.Deliveries,
+			CurrentSample:  nowQuality.Deliveries,
+			MinimumSample:  10,
+		},
+		{
+			Name:              "reverted deliveries",
+			Baseline:          ratio(float64(baseQuality.Reverts), float64(baseQuality.Deliveries)),
+			Current:           ratio(float64(nowQuality.Reverts), float64(nowQuality.Deliveries)),
+			LowerIsBetter:     true,
+			PercentageDisplay: true,
+			BaselineSample:    baseQuality.Deliveries,
+			CurrentSample:     nowQuality.Deliveries,
+			MinimumSample:     10,
 		},
 		{
 			Name:              "successful recovery redeliveries",
-			Baseline:          ratio(float64(base.DownstreamQuality.RecoveredDeliveries), float64(base.DownstreamQuality.RedeliveryAttempts)),
-			Current:           ratio(float64(now.DownstreamQuality.RecoveredDeliveries), float64(now.DownstreamQuality.RedeliveryAttempts)),
+			Baseline:          ratio(float64(baseQuality.RecoveredDeliveries), float64(baseQuality.RedeliveryAttempts)),
+			Current:           ratio(float64(nowQuality.RecoveredDeliveries), float64(nowQuality.RedeliveryAttempts)),
 			PercentageDisplay: true,
+			BaselineSample:    baseQuality.RedeliveryAttempts,
+			CurrentSample:     nowQuality.RedeliveryAttempts,
+			MinimumSample:     10,
 		},
 	}
 	if baseline.SchemaVersion >= 28 && current.SchemaVersion >= 28 {
@@ -205,25 +307,12 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			LowerIsBetter: true,
 		})
 	}
-	fmt.Printf("\nTrend from checkpoint %q:\n", checkpointName)
+	fmt.Printf("\nPerformance comparison against %q:\n", checkpointName)
 	printCompletedTaskTrend(baseline, current)
 	fmt.Printf("\nSession and quality rates:\n")
 	fmt.Printf("%-32s %12s %12s %12s\n", "RATE", "BASELINE", "CURRENT", "CHANGE")
 	for _, metric := range metrics {
-		change := metric.Current - metric.Baseline
-		direction := "unchanged"
-		const epsilon = 0.0001
-		if math.Abs(change) > epsilon {
-			improved := change > 0
-			if metric.LowerIsBetter {
-				improved = change < 0
-			}
-			if improved {
-				direction = "improved"
-			} else {
-				direction = "regressed"
-			}
-		}
+		direction := materialTrendDirection(metric)
 		if metric.PercentageDisplay {
 			fmt.Printf("%-32s %11.1f%% %11.1f%% %12s\n",
 				metric.Name,
@@ -266,8 +355,8 @@ func completedTaskTrendMetrics(baseline, current codexSessionInsightsReport) []t
 		)
 	}
 	return append(metrics,
-		trendMetric{Name: "tool calls p50", Baseline: float64(base.ToolCalls.P50), Current: float64(now.ToolCalls.P50), LowerIsBetter: true},
-		trendMetric{Name: "tool calls p90", Baseline: float64(base.ToolCalls.P90), Current: float64(now.ToolCalls.P90), LowerIsBetter: true},
+		trendMetric{Name: "tool roundtrips p50", Baseline: float64(base.ToolCalls.P50), Current: float64(now.ToolCalls.P50), LowerIsBetter: true},
+		trendMetric{Name: "tool roundtrips p90", Baseline: float64(base.ToolCalls.P90), Current: float64(now.ToolCalls.P90), LowerIsBetter: true},
 		trendMetric{Name: "duration seconds p50", Baseline: float64(base.DurationSeconds.P50), Current: float64(now.DurationSeconds.P50), LowerIsBetter: true},
 		trendMetric{Name: "duration seconds p90", Baseline: float64(base.DurationSeconds.P90), Current: float64(now.DurationSeconds.P90), LowerIsBetter: true},
 		trendMetric{Name: "failed calls p90", Baseline: float64(base.FailedCalls.P90), Current: float64(now.FailedCalls.P90), LowerIsBetter: true},
@@ -275,7 +364,38 @@ func completedTaskTrendMetrics(baseline, current codexSessionInsightsReport) []t
 	)
 }
 
+func totalCrossCallTransitions(transitions map[string]codexTransitionMetrics) int {
+	total := 0
+	for _, metrics := range transitions {
+		total += metrics.Count
+	}
+	return total
+}
+
+func repeatedCrossCallTransitions(transitions map[string]codexTransitionMetrics) int {
+	total := 0
+	for transition, metrics := range transitions {
+		from, to, ok := strings.Cut(transition, " -> ")
+		if ok && from == to {
+			total += metrics.Count
+		}
+	}
+	return total
+}
+
+func totalWaitCalls(waits map[string]codexWaitMetrics) int {
+	total := 0
+	for _, metrics := range waits {
+		total += metrics.Calls
+	}
+	return total
+}
+
 func materialTrendDirection(metric trendMetric) string {
+	if metric.MinimumSample > 0 &&
+		(metric.BaselineSample < metric.MinimumSample || metric.CurrentSample < metric.MinimumSample) {
+		return "insufficient"
+	}
 	change := metric.Current - metric.Baseline
 	scale := math.Max(math.Abs(metric.Baseline), 1)
 	if math.Abs(change)/scale < 0.01 {
@@ -319,6 +439,14 @@ func printCompletedTaskTrend(baseline, current codexSessionInsightsReport) {
 	metrics := completedTaskTrendMetrics(baseline, current)
 	if len(metrics) == 0 {
 		fmt.Printf("Completed-task direction: insufficient completed tool-task evidence.\n")
+		return
+	}
+	if baseline.Outcomes.ToolUsingCompleted < 10 || current.Outcomes.ToolUsingCompleted < 10 {
+		fmt.Printf(
+			"Completed-task direction: insufficient evidence (%s baseline, %s current; need at least 10 each).\n",
+			formatCodexCount(int64(baseline.Outcomes.ToolUsingCompleted)),
+			formatCodexCount(int64(current.Outcomes.ToolUsingCompleted)),
+		)
 		return
 	}
 	fmt.Printf(

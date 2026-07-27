@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 31
+const codexSessionInsightsSchemaVersion = 32
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -535,6 +535,7 @@ Examples:
   muninn
   muninn analyze --repo .
   muninn analyze --repo /path/to/repository --since 24h
+  muninn analyze --repo . --since 72h --compare-previous
   muninn analyze --repo . --since-commit HEAD~3
   muninn analyze --repo . --task my-worktree
   muninn analyze --repo . --since 14d --include-archived
@@ -616,6 +617,7 @@ func cmdCodexSessions(root string, args []string) error {
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
 	checkpointName := fs.String("checkpoint", "", "save this analysis as a named trend checkpoint")
 	compareName := fs.String("compare", "", "compare this analysis with a named checkpoint")
+	comparePrevious := fs.Bool("compare-previous", false, "compare with the immediately preceding non-overlapping lookback")
 	quietOutput := fs.Bool("quiet", false, "suppress report output after saving a checkpoint")
 	overviewOutput := fs.Bool("overview", false, "show aggregate family totals only")
 	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
@@ -626,11 +628,12 @@ func cmdCodexSessions(root string, args []string) error {
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(
 		fs,
-		"muninn analyze [--provider codex] [--repo <path>] [--since <duration>] [--sessions-dir <path>] [--task <task-id>] [--operations <owned-tool-or-operation>] [--include-archived] [--json] [--limit <n>]",
+		"muninn analyze [--provider codex] [--repo <path>] [--since <duration>] [--compare-previous] [--sessions-dir <path>] [--task <task-id>] [--operations <owned-tool-or-operation>] [--include-archived] [--json] [--limit <n>]",
 		"Summarize token usage and tool-output attribution without exposing session content or command text.",
 		[]string{
 			"muninn analyze --repo .",
 			"muninn analyze --repo . --since 24h",
+			"muninn analyze --repo . --since 72h --compare-previous",
 			"muninn analyze --repo . --since 24h --operations repository-cli",
 			"muninn analyze --repo . --since 24h --operations repository-cli/test",
 			"muninn analyze --repo . --since 24h --operations repository-cli --details",
@@ -662,14 +665,27 @@ func cmdCodexSessions(root string, args []string) error {
 	if strings.TrimSpace(*sinceCommit) != "" && sinceWasSet {
 		return errors.New("--since and --since-commit are mutually exclusive")
 	}
+	if *comparePrevious && strings.TrimSpace(*sinceCommit) != "" {
+		return errors.New("--compare-previous requires a rolling --since lookback")
+	}
+	if *comparePrevious && strings.TrimSpace(*compareName) != "" {
+		return errors.New("--compare-previous and --compare are mutually exclusive")
+	}
+	if *comparePrevious && strings.TrimSpace(*checkpointName) != "" {
+		return errors.New("--compare-previous and --checkpoint are mutually exclusive")
+	}
+	if *comparePrevious && strings.TrimSpace(*operationsTool) != "" {
+		return errors.New("--compare-previous cannot be combined with --operations")
+	}
 	if *noCache && (*forceRefresh || strings.TrimSpace(*checkpointName) != "" || strings.TrimSpace(*compareName) != "") {
 		return errors.New("--no-cache cannot be combined with --refresh, --checkpoint, or --compare")
 	}
-	if *jsonOutput && strings.TrimSpace(*compareName) != "" {
-		return errors.New("--compare currently requires human output")
+	if *jsonOutput && (strings.TrimSpace(*compareName) != "" || *comparePrevious) {
+		return errors.New("--compare and --compare-previous currently require human output")
 	}
 	if *quietOutput && (*jsonOutput ||
 		strings.TrimSpace(*compareName) != "" ||
+		*comparePrevious ||
 		*overviewOutput ||
 		*findingsOutput ||
 		*detailsOutput ||
@@ -728,12 +744,19 @@ func cmdCodexSessions(root string, args []string) error {
 		return err
 	}
 	ownership := newOwnershipCatalog(config.OwnedTools)
-	var report codexSessionInsightsReport
 	var store *sessionStore
+	var analyzeWindow func(time.Time, time.Time) (codexSessionInsightsReport, error)
 	if *noCache {
-		report, err = source.Analyze(sessionDirs, resolvedRepoRoot, since, now, strings.TrimSpace(*taskFilter), ownership, sessionMetadata)
-		if err != nil {
-			return err
+		analyzeWindow = func(windowSince, windowUntil time.Time) (codexSessionInsightsReport, error) {
+			return source.Analyze(
+				sessionDirs,
+				resolvedRepoRoot,
+				windowSince,
+				windowUntil,
+				strings.TrimSpace(*taskFilter),
+				ownership,
+				sessionMetadata,
+			)
 		}
 	} else {
 		normalizer, ok := source.(sessionNormalizer)
@@ -755,21 +778,24 @@ func cmdCodexSessions(root string, args []string) error {
 		if *forceRefresh && !*jsonOutput {
 			fmt.Fprintln(os.Stderr, formatRefreshCompletion(stats))
 		}
-		report, err = store.analyze(
-			context.Background(),
-			source.Name(),
-			sessionDirs,
-			resolvedRepoRoot,
-			since,
-			now,
-			strings.TrimSpace(*taskFilter),
-			ownership,
-			stats,
-			sessionMetadata,
-		)
-		if err != nil {
-			return err
+		analyzeWindow = func(windowSince, windowUntil time.Time) (codexSessionInsightsReport, error) {
+			return store.analyze(
+				context.Background(),
+				source.Name(),
+				sessionDirs,
+				resolvedRepoRoot,
+				windowSince,
+				windowUntil,
+				strings.TrimSpace(*taskFilter),
+				ownership,
+				stats,
+				sessionMetadata,
+			)
 		}
+	}
+	report, err := analyzeWindow(since, now)
+	if err != nil {
+		return err
 	}
 	report.Provider = source.Name()
 	report.AnalysisScope = sessionAnalysisScope{
@@ -793,6 +819,7 @@ func cmdCodexSessions(root string, args []string) error {
 		return err
 	}
 	var baseline *codexSessionInsightsReport
+	baselineLabel := strings.TrimSpace(*compareName)
 	if name := strings.TrimSpace(*compareName); name != "" {
 		loaded, err := store.loadCheckpoint(context.Background(), name, source.Name(), repositoryKey)
 		if err != nil {
@@ -802,6 +829,26 @@ func cmdCodexSessions(root string, args []string) error {
 			return err
 		}
 		baseline = &loaded
+	}
+	if *comparePrevious {
+		previousSince, previousUntil, err := previousLookbackWindow(since, now, lookbackSeconds)
+		if err != nil {
+			return err
+		}
+		previous, err := analyzeWindow(previousSince, previousUntil)
+		if err != nil {
+			return err
+		}
+		previous.Provider = source.Name()
+		previous.AnalysisScope = report.AnalysisScope
+		previous.Instructions = report.Instructions
+		previous.Findings = buildSessionFindings(previous, config)
+		previous.Findings, err = filterSessionFindings(previous.Findings, *focus)
+		if err != nil {
+			return err
+		}
+		baseline = &previous
+		baselineLabel = "previous non-overlapping " + formatTrendLookback(lookbackSeconds)
 	}
 	if name := strings.TrimSpace(*checkpointName); name != "" {
 		if err := store.saveCheckpoint(context.Background(), name, source.Name(), repositoryKey, report); err != nil {
@@ -838,7 +885,7 @@ func cmdCodexSessions(root string, args []string) error {
 	}
 	printCodexSessionInsights(report, config, *limit, outputSelection.View)
 	if baseline != nil {
-		printSessionTrend(*baseline, report, strings.TrimSpace(*compareName))
+		printSessionTrend(*baseline, report, baselineLabel)
 	}
 	if name := strings.TrimSpace(*checkpointName); name != "" {
 		fmt.Printf("\nSaved checkpoint %q.\n", name)
@@ -1064,6 +1111,10 @@ func finishSessionInsightsReport(report *codexSessionInsightsReport, taskMap map
 		return report.Tasks[i].Task < report.Tasks[j].Task
 	})
 	report.Outcomes = analyzeCompletionEpisodes(report.taskEpisodes)
+	report.Outcomes.FileHotspots = analyzeFileHotspots(
+		report.taskEpisodes,
+		report.Summary.DeliveryRework.ReworkTargets,
+	)
 	report.Profiles = analyzeModelEffortProfiles(report.sessionRecords)
 	report.Delegation = analyzeDelegation(report.sessionRecords)
 }
@@ -2243,6 +2294,9 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		formatCodexCount(summary.ToolOutputTokens),
 	)
 	printCompletionEpisodeAnalysis(report.Outcomes)
+	if view == "details" {
+		printFileHotspots(report.Outcomes.FileHotspots, limit)
+	}
 	printModelEffortAnalysis(report.Profiles)
 	printDelegationAnalysis(report.Delegation)
 	printDeliveryReworkAnalysis(summary.DeliveryRework)

@@ -23,6 +23,7 @@ This runs the test suite and installs `muninn` into `$(go env GOPATH)/bin`.
 ```bash
 muninn analyze --repo .
 muninn analyze --repo . --since 24h
+muninn analyze --repo . --since 72h --compare-previous
 muninn checkpoint before-change --repo .
 muninn analyze --repo . --compare before-change
 ```
@@ -36,6 +37,10 @@ muninn analyze --repo . --focus structure
 muninn analyze --repo . --focus quality
 muninn analyze --repo . --details
 ```
+
+`--compare-previous` compares the current rolling lookback with the immediately
+preceding window of the same size. The cohorts do not overlap, and the
+comparison leads with completed-task duration and outer tool roundtrips.
 
 Muninn does not report prompts, messages, raw commands, raw tool output,
 absolute paths, secrets, or provider session identifiers.

@@ -17,6 +17,17 @@ muninn checkpoint before-change --repo . --since 14d
 muninn analyze --repo . --since 14d --compare before-change
 ```
 
+For a quick directional check without a saved baseline, compare adjacent,
+non-overlapping windows:
+
+```bash
+muninn analyze --repo . --since 72h --compare-previous
+```
+
+Treat a faster period as an improvement only when delivery quality is stable or
+better. Fewer roundtrips with more review-driven fixes, downstream failures, or
+reverts means work moved later in the lifecycle rather than disappeared.
+
 Comparisons require the same lookback or resolved `--since-commit` boundary,
 task filter, archive selection, and focus. Muninn rejects mismatched cohorts
 instead of presenting them as improvement or regression.
@@ -66,4 +77,3 @@ file size alone is not sufficient evidence. Before restructuring:
 3. compare the current route with the proposed route;
 4. make the smallest change that creates a clearer ownership or navigation
    boundary.
-

@@ -102,6 +102,46 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFileHotspotsCorrelatesDemandCostAndReviewFixes(t *testing.T) {
+	start := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	episodes := []codexTaskEpisode{
+		{
+			StartedAt: start,
+			EndedAt:   start.Add(2 * time.Minute),
+			Completed: true,
+			ToolCalls: 8,
+			Targets:   map[string]int{"src/runtime.ts": 2, "src/one-off.ts": 1},
+		},
+		{
+			StartedAt: start,
+			EndedAt:   start.Add(10 * time.Minute),
+			Completed: true,
+			ToolCalls: 40,
+			Targets:   map[string]int{"src/runtime.ts": 3},
+		},
+		{
+			StartedAt: start,
+			EndedAt:   start.Add(time.Minute),
+			Completed: true,
+			ToolCalls: 4,
+			Targets:   map[string]int{"src/other.ts": 1},
+		},
+	}
+	hotspots := analyzeFileHotspots(episodes, map[string]int{"src/runtime.ts": 2})
+	if len(hotspots) != 1 {
+		t.Fatalf("hotspots=%#v want one repeated target", hotspots)
+	}
+	got := hotspots[0]
+	if got.Target != "src/runtime.ts" || got.CompletedTasks != 2 || got.EditCalls != 5 {
+		t.Fatalf("hotspot identity mismatch: %#v", got)
+	}
+	if got.TaskShare != 2.0/3.0 || got.ToolRoundtrips.P50 != 8 ||
+		got.ToolRoundtrips.P90 != 40 || got.DurationSeconds.P90 != 600 ||
+		got.PostReviewEditCalls != 2 {
+		t.Fatalf("hotspot correlation mismatch: %#v", got)
+	}
+}
+
 func TestTaskCostDiagnosticOperationsExcludesDeliveryBookkeeping(t *testing.T) {
 	got := taskCostDiagnosticOperations(map[string]int{
 		"bwb/git-add":          1,
