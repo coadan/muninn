@@ -1,5 +1,7 @@
 # Muninn
 
+![Muninn logo](assets/muninn-logo.png)
+
 Muninn is a privacy-safe CLI for finding avoidable cost and friction in coding
 agent sessions. It turns local session metadata into actionable signals about
 tooling, instructions, code navigation, verification, and delivery rework.
