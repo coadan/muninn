@@ -542,12 +542,12 @@ Examples:
   muninn checkpoint before-tooling-change --repo .
   muninn analyze --repo . --compare before-tooling-change
   muninn analyze --repo . --overview
-  muninn analyze --repo . --since 24h --operations bwb
+  muninn analyze --repo . --since 24h --operations repository-cli
   muninn analyze --repo . --focus structure
   muninn analyze --repo . --details
   muninn analyze --repo . --json
-  muninn failures --repo . --operation bwb/comments-wait --since 14d
-  muninn feedback add --category roundtrip --target bwb/pr --signal existing-pr-create-failed
+  muninn failures --repo . --operation repository-cli/test --since 14d
+  muninn feedback add --category roundtrip --target repository-cli/publish --signal existing-change-create-failed
 `)
 }
 
@@ -631,9 +631,9 @@ func cmdCodexSessions(root string, args []string) error {
 		[]string{
 			"muninn analyze --repo .",
 			"muninn analyze --repo . --since 24h",
-			"muninn analyze --repo . --since 24h --operations bwb",
-			"muninn analyze --repo . --since 24h --operations bwb/test-nses",
-			"muninn analyze --repo . --since 24h --operations bwb --details",
+			"muninn analyze --repo . --since 24h --operations repository-cli",
+			"muninn analyze --repo . --since 24h --operations repository-cli/test",
+			"muninn analyze --repo . --since 24h --operations repository-cli --details",
 			"muninn analyze --repo . --focus structure --details",
 			"muninn analyze --repo . --task my-worktree",
 			"muninn analyze --repo . --since 14d --include-archived --limit 20",

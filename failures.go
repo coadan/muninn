@@ -50,7 +50,7 @@ func cmdFailures(root string, args []string) error {
 	}
 	storePath := fs.String("db", defaultStorePath, "local privacy-safe SQLite index path")
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
-	operation := fs.String("operation", "", "configured owned operation ID, for example bwb/comments-wait")
+	operation := fs.String("operation", "", "configured owned operation ID, for example repository-cli/test")
 	reason := fs.String("reason", "", "only include this fixed failure-reason label")
 	task := fs.String("task", "", "only include failures attributed to this exact worktree/task ID")
 	limit := fs.Int("limit", 20, "maximum failure events to return (1-100)")
@@ -60,9 +60,9 @@ func cmdFailures(root string, args []string) error {
 		"muninn failures --operation <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>] [--json]",
 		"Inspect bounded, privacy-safe failure events for one configured owned operation.",
 		[]string{
-			"muninn failures --repo . --operation bwb/comments-wait --since 14d",
-			"muninn failures --repo . --operation bwb/test-nses --task installer-create-api-connections",
-			"muninn failures --repo . --operation bwb/test-nses --reason \"test harness protocol\" --json",
+			"muninn failures --repo . --operation repository-cli/test --since 14d",
+			"muninn failures --repo . --operation repository-cli/test --task task-id",
+			"muninn failures --repo . --operation repository-cli/test --reason \"test harness protocol\" --json",
 		},
 	)
 	if err := fs.Parse(args); err != nil {
