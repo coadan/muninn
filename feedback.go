@@ -103,7 +103,7 @@ func normalizeFeedbackSource(raw string) (string, error) {
 func normalizeFeedbackTarget(raw string) (string, error) {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	if !feedbackTargetPattern.MatchString(value) || strings.Contains(value, "..") || strings.Contains(value, "//") {
-		return "", fmt.Errorf("--target must be a privacy-safe logical ID such as bwb/pr or heimdal/session")
+		return "", fmt.Errorf("--target must be a privacy-safe logical ID such as repository-cli/publish or heimdal/session")
 	}
 	return value, nil
 }
@@ -344,7 +344,7 @@ func cmdFeedbackAdd(root string, args []string) error {
 		"muninn feedback add --category <category> --target <logical-id> --signal <slug> [flags]",
 		"Record normalized friction feedback without storing prose, commands, output, paths, or session IDs.",
 		[]string{
-			"muninn feedback add --category roundtrip --target bwb/pr --signal existing-pr-create-failed",
+			"muninn feedback add --category roundtrip --target repository-cli/publish --signal existing-change-create-failed",
 			"muninn feedback --category interface --target heimdal/session --signal reconnect-needs-custom-script --source codex",
 		},
 	)
