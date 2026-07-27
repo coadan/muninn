@@ -1232,6 +1232,17 @@ type completionEpisodeAnalysis struct {
 	TailDrivers              taskCostTailDrivers          `json:"tailDrivers"`
 	Phases                   map[string]taskPhaseAnalysis `json:"phases,omitempty"`
 	TailPhases               []taskPhaseTailAssociation   `json:"tailPhases,omitempty"`
+	FileHotspots             []fileHotspotMetrics         `json:"fileHotspots,omitempty"`
+}
+
+type fileHotspotMetrics struct {
+	Target              string              `json:"target"`
+	CompletedTasks      int                 `json:"completedTasks"`
+	EditCalls           int                 `json:"editCalls"`
+	TaskShare           float64             `json:"taskShare"`
+	ToolRoundtrips      outcomeDistribution `json:"toolRoundtrips"`
+	DurationSeconds     outcomeDistribution `json:"durationSeconds"`
+	PostReviewEditCalls int                 `json:"postReviewEditCalls"`
 }
 
 type taskPhaseAnalysis struct {
@@ -1322,6 +1333,107 @@ func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAna
 	analysis.Phases = analyzeTaskPhases(eligible)
 	analysis.TailPhases = analyzeTaskPhaseTailAssociations(eligible)
 	return analysis
+}
+
+func analyzeFileHotspots(
+	episodes []codexTaskEpisode,
+	reworkTargets map[string]int,
+) []fileHotspotMetrics {
+	type observations struct {
+		tasks      int
+		editCalls  int
+		roundtrips []int64
+		durations  []int64
+	}
+	eligibleTasks := 0
+	byTarget := map[string]*observations{}
+	for _, episode := range episodes {
+		if !episode.Completed || episode.LeftCensored || episode.ToolCalls == 0 {
+			continue
+		}
+		eligibleTasks++
+		for target, calls := range episode.Targets {
+			if calls <= 0 {
+				continue
+			}
+			label := deliveryTargetLabel(target)
+			current := byTarget[label]
+			if current == nil {
+				current = &observations{}
+				byTarget[label] = current
+			}
+			current.tasks++
+			current.editCalls += calls
+			current.roundtrips = append(current.roundtrips, int64(episode.ToolCalls))
+			current.durations = append(current.durations, taskEpisodeDuration(episode))
+		}
+	}
+	reworkByTarget := map[string]int{}
+	for target, calls := range reworkTargets {
+		reworkByTarget[deliveryTargetLabel(target)] += calls
+	}
+	var hotspots []fileHotspotMetrics
+	for target, current := range byTarget {
+		if current.tasks < 2 {
+			continue
+		}
+		hotspots = append(hotspots, fileHotspotMetrics{
+			Target:              target,
+			CompletedTasks:      current.tasks,
+			EditCalls:           current.editCalls,
+			TaskShare:           ratio(float64(current.tasks), float64(eligibleTasks)),
+			ToolRoundtrips:      summarizeOutcomeDistribution(current.roundtrips),
+			DurationSeconds:     summarizeOutcomeDistribution(current.durations),
+			PostReviewEditCalls: reworkByTarget[target],
+		})
+	}
+	sort.Slice(hotspots, func(i, j int) bool {
+		if hotspots[i].CompletedTasks != hotspots[j].CompletedTasks {
+			return hotspots[i].CompletedTasks > hotspots[j].CompletedTasks
+		}
+		if hotspots[i].PostReviewEditCalls != hotspots[j].PostReviewEditCalls {
+			return hotspots[i].PostReviewEditCalls > hotspots[j].PostReviewEditCalls
+		}
+		if hotspots[i].EditCalls != hotspots[j].EditCalls {
+			return hotspots[i].EditCalls > hotspots[j].EditCalls
+		}
+		return hotspots[i].Target < hotspots[j].Target
+	})
+	return hotspots
+}
+
+func printFileHotspots(hotspots []fileHotspotMetrics, limit int) {
+	if len(hotspots) == 0 {
+		return
+	}
+	if limit > 0 && len(hotspots) > limit {
+		hotspots = hotspots[:limit]
+	}
+	fmt.Println("\nFile edit hotspots (frequency is demand; correlate cost and post-review edits before acting):")
+	fmt.Printf(
+		"%-48s %7s %7s %7s %13s %15s %10s\n",
+		"TARGET",
+		"TASKS",
+		"SHARE",
+		"EDITS",
+		"RT P50/P90",
+		"TIME P50/P90",
+		"POST-REVIEW",
+	)
+	for _, hotspot := range hotspots {
+		fmt.Printf(
+			"%-48s %7s %6.0f%% %7s %6s/%-6s %7s/%-7s %10s\n",
+			truncateCodexLabel(hotspot.Target, 48),
+			formatCodexCount(int64(hotspot.CompletedTasks)),
+			100*hotspot.TaskShare,
+			formatCodexCount(int64(hotspot.EditCalls)),
+			formatCodexCount(hotspot.ToolRoundtrips.P50),
+			formatCodexCount(hotspot.ToolRoundtrips.P90),
+			formatDurationSeconds(hotspot.DurationSeconds.P50),
+			formatDurationSeconds(hotspot.DurationSeconds.P90),
+			formatCodexCount(int64(hotspot.PostReviewEditCalls)),
+		)
+	}
 }
 
 func analyzeTaskPhases(episodes []codexTaskEpisode) map[string]taskPhaseAnalysis {
@@ -1701,7 +1813,7 @@ func printCompletionEpisodeAnalysis(analysis completionEpisodeAnalysis) {
 		return
 	}
 	fmt.Printf(
-		"Completed tool-task outcomes p50/p75/p90: fresh tokens %s/%s/%s; tool calls %s/%s/%s; duration %s/%s/%s\n",
+		"Completed tool-task outcomes p50/p75/p90: fresh tokens %s/%s/%s; tool roundtrips %s/%s/%s; duration %s/%s/%s\n",
 		formatCodexCount(analysis.FreshTokens.P50),
 		formatCodexCount(analysis.FreshTokens.P75),
 		formatCodexCount(analysis.FreshTokens.P90),

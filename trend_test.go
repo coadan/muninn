@@ -14,6 +14,36 @@ func trendTestReport(since, generatedAt time.Time, scope sessionAnalysisScope) c
 
 const tTempWorkspace = "/workspace"
 
+func TestPreviousLookbackWindowIsAdjacentAndNonOverlapping(t *testing.T) {
+	currentUntil := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	currentSince := currentUntil.Add(-72 * time.Hour)
+	previousSince, previousUntil, err := previousLookbackWindow(
+		currentSince,
+		currentUntil,
+		int64((72*time.Hour)/time.Second),
+	)
+	if err != nil {
+		t.Fatalf("previousLookbackWindow returned error: %v", err)
+	}
+	if previousUntil != currentSince {
+		t.Fatalf("previous end=%s want current start=%s", previousUntil, currentSince)
+	}
+	if previousSince != currentSince.Add(-72*time.Hour) {
+		t.Fatalf("previous start=%s", previousSince)
+	}
+}
+
+func TestPreviousLookbackWindowRejectsMismatchedScope(t *testing.T) {
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	if _, _, err := previousLookbackWindow(
+		now.Add(-24*time.Hour),
+		now,
+		int64((72*time.Hour)/time.Second),
+	); err == nil {
+		t.Fatal("mismatched lookback unexpectedly accepted")
+	}
+}
+
 func TestValidateSessionTrendComparisonAcceptsMatchedLookbackScope(t *testing.T) {
 	now := time.Date(2026, 7, 25, 4, 0, 0, 0, time.UTC)
 	scope := sessionAnalysisScope{WindowKind: "lookback", LookbackSeconds: int64((7 * 24 * time.Hour) / time.Second)}
@@ -157,5 +187,25 @@ func TestCompletedTaskTrendSupportsLegacyFreshTokenCheckpoint(t *testing.T) {
 	metrics := completedTaskTrendMetrics(baseline, current)
 	if len(metrics) != 8 || metrics[0].Name != "fresh tokens p50" || metrics[1].Name != "fresh tokens p90" {
 		t.Fatalf("legacy metrics=%#v", metrics)
+	}
+}
+
+func TestRoundtripTrendHelpersCountTransitionsAndWaits(t *testing.T) {
+	transitions := map[string]codexTransitionMetrics{
+		"file reads -> file reads": {Count: 4},
+		"file reads -> search":     {Count: 3},
+		"search -> search":         {Count: 2},
+	}
+	if got := totalCrossCallTransitions(transitions); got != 9 {
+		t.Fatalf("total transitions=%d want 9", got)
+	}
+	if got := repeatedCrossCallTransitions(transitions); got != 6 {
+		t.Fatalf("repeated transitions=%d want 6", got)
+	}
+	if got := totalWaitCalls(map[string]codexWaitMetrics{
+		"tests": {Calls: 5},
+		"poll":  {Calls: 2},
+	}); got != 7 {
+		t.Fatalf("wait calls=%d want 7", got)
 	}
 }
