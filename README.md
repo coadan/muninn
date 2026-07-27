@@ -2,9 +2,9 @@
 
 <img src="assets/muninn-logo.png" alt="Muninn logo" width="512">
 
-Muninn is a privacy-safe CLI for finding avoidable cost and friction in coding
-agent sessions. It turns local session metadata into actionable signals about
-tooling, instructions, code navigation, verification, and delivery rework.
+Muninn is a CLI for finding avoidable cost and friction in coding agent
+sessions. It turns local session metadata into actionable signals about tooling,
+instructions, code navigation, verification, and delivery rework.
 
 Muninn currently ingests Codex sessions. Its normalized analysis is designed
 to support additional providers without coupling reports to provider-specific
@@ -51,7 +51,6 @@ absolute paths, secrets, or provider session identifiers.
 - [Analysis and reports](docs/analysis.md)
 - [Repository configuration](docs/repository-configuration.md)
 - [Improvement workflow](docs/improvement-workflow.md)
-- [Privacy and data model](docs/privacy.md)
 
 Run `muninn help` for the complete command surface.
 
