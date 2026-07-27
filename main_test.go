@@ -663,6 +663,30 @@ func TestConfiguredExpectedOwnedOperationFailureRemainsQueryableWithoutFriction(
 	}
 }
 
+func TestExpectedWaitTreatsInterruptedProcessAsExpectedFailure(t *testing.T) {
+	ownership := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "bwb",
+		Executables: []string{"bwb"},
+		Operations: []ownedOperationConfig{
+			{
+				ID:           "publish",
+				Args:         []string{"publish", "--wait"},
+				ExpectedWait: true,
+			},
+			{
+				ID:   "status",
+				Args: []string{"status"},
+			},
+		},
+	}})
+	if !ownership.operationFailureExpected("bwb/publish", "interrupted process") {
+		t.Fatal("expected wait interruption was actionable")
+	}
+	if ownership.operationFailureExpected("bwb/status", "interrupted process") {
+		t.Fatal("non-wait interruption was expected")
+	}
+}
+
 func TestOwnedOperationClassificationRetainsSpecificTies(t *testing.T) {
 	catalog := newOwnershipCatalog([]ownedToolConfig{{
 		ID:          "bwb",

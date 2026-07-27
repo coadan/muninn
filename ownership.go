@@ -160,6 +160,10 @@ func (catalog ownershipCatalog) operationFailureExpected(operation, reason strin
 	if ownedOperationExpectedFailure(operation, reason) {
 		return true
 	}
+	if catalog.operationWaitExpected(operation) &&
+		strings.EqualFold(strings.TrimSpace(reason), "interrupted process") {
+		return true
+	}
 	reasons := catalog.expectedFailures[operation]
 	_, ok := reasons[strings.ToLower(strings.TrimSpace(reason))]
 	return ok

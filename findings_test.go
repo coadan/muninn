@@ -185,6 +185,70 @@ func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing
 	}
 }
 
+func TestBuildSessionFindingsShowsRecentOwnedOperationEvidence(t *testing.T) {
+	generatedAt := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	report := newSessionInsightsReport(
+		"codex",
+		nil,
+		t.TempDir(),
+		generatedAt.Add(-14*24*time.Hour),
+		generatedAt,
+	)
+	report.Summary.OwnedOperations["bwb/run"] = codexOwnedOperationMetrics{
+		Calls:          23,
+		Sessions:       2,
+		FailedCalls:    5,
+		TruncatedCalls: 2,
+		OutputBytes:    43_000,
+	}
+	report.Summary.OwnedOperationFailureReasons["bwb/run"] = map[string]codexOccurrenceMetrics{
+		"timeout": {Count: 5, Sessions: 1},
+	}
+	activityKey := sessionActivityKey("owned-operation", "bwb/run")
+	report.sessionRecords = []codexSessionRecord{
+		{
+			OwnedOperations: map[string]codexToolMetrics{
+				"bwb/run": {
+					Calls:          20,
+					FailedCalls:    5,
+					TruncatedCalls: 2,
+					OutputBytes:    40_000,
+				},
+			},
+			OwnedOperationFailureReasons: map[string]map[string]int{
+				"bwb/run": {"timeout": 5},
+			},
+			Activity: map[string]time.Time{
+				activityKey: generatedAt.Add(-72 * time.Hour),
+			},
+		},
+		{
+			OwnedOperations: map[string]codexToolMetrics{
+				"bwb/run": {Calls: 3, OutputBytes: 3_000},
+			},
+			OwnedOperationFailureReasons: map[string]map[string]int{},
+			Activity: map[string]time.Time{
+				activityKey: generatedAt.Add(-time.Hour),
+			},
+		},
+	}
+
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 {
+		t.Fatalf("owned-operation finding mismatch: %#v", findings)
+	}
+	for _, want := range []string{
+		"recent 24h sessions: 3 calls/1 sessions",
+		"0 actionable failures",
+		"0 truncations",
+		"~750 output tokens",
+	} {
+		if !strings.Contains(findings[0].Evidence, want) {
+			t.Fatalf("recent evidence %q missing %q", findings[0].Evidence, want)
+		}
+	}
+}
+
 func TestBuildSessionFindingsDoesNotConfuseOperationDemandWithFriction(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.ToolOutputTokens = 2_000_000
