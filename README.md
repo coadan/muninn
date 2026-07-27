@@ -56,6 +56,7 @@ absolute paths, secrets, or provider session identifiers.
 - [Analysis and reports](docs/analysis.md)
 - [Repository configuration](docs/repository-configuration.md)
 - [Improvement workflow](docs/improvement-workflow.md)
+- [Privacy and data model](docs/privacy.md)
 
 Run `muninn help` for the complete command surface.
 
