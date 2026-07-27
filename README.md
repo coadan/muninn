@@ -6,6 +6,11 @@ Muninn is a CLI for finding avoidable cost and friction in coding agent
 sessions. It turns local session metadata into actionable signals about tooling,
 instructions, code navigation, verification, and delivery rework.
 
+Better prompts and agent guidance only address one axis of agent performance.
+Other failure modes come from tool interfaces, repository structure, runtime
+feedback, test setup, and delivery workflows. Muninn helps distinguish these
+causes so the improvement targets the system that produced the friction.
+
 Muninn currently ingests Codex sessions. Its normalized analysis is designed
 to support additional providers without coupling reports to provider-specific
 formats.
