@@ -55,11 +55,12 @@ candidates. Evidence orders interventions within a priority tier; unlike
 signal categories are not treated as one numeric scale.
 
 Failures, output, waits, and delivery evidence for one configured local
-operation consolidate at the tool owner. Multiple findings for one exact file
-owner also consolidate: delivery quality outranks task cost, which outranks
-navigation-only evidence. Component signal IDs remain visible. A
-navigation-only owner remains medium confidence until cost or quality evidence
-corroborates it.
+operation consolidate at that exact operation. The compact queue leads with
+one operation per tool while retaining other operations later in the queue.
+Multiple findings for one exact file owner also consolidate: delivery quality
+outranks task cost, which outranks navigation-only evidence. Component signal
+IDs remain visible. A navigation-only owner remains medium confidence until
+cost or quality evidence corroborates it.
 
 Historical edit evidence only creates a current-owner intervention while that
 repository-relative target still exists. Deleting or moving an owner therefore

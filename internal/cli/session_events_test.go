@@ -38,6 +38,7 @@ func TestCodexToolFailureReasonUsesFixedPrivacySafeLabels(t *testing.T) {
 		"--api override is disabled unless you provide a service-account API key": "local CLI targeting",
 		"parse-error: missing test result sentinel":                               "test harness protocol",
 		"nREPL eval failed before reporting test results":                         "test harness protocol",
+		"verification changed files after staging; inspect changes and rerun":     "verification changed staged state",
 		"GraphQL: Head sha can't be blank, No commits between main and task/x":    "PR branch state",
 		"unknown nREPL target \"test\"":                                           "unsupported command target",
 		"Unknown option: --path":                                                  "unsupported command option",
