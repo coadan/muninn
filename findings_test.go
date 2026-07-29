@@ -98,6 +98,29 @@ func TestDiversifySessionFindingsKeepsHighestImpactWithinCategory(t *testing.T) 
 	}
 }
 
+func TestBundledDiscoveryRequiresCrossSessionEvidenceForMediumConfidence(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.MixedShellShapes["search -> file reads"] = codexToolMetrics{
+		Calls:       11,
+		Sessions:    1,
+		OutputBytes: 240_000,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "discovery" ||
+		findings[0].Confidence != "low" || findings[0].Sessions != 1 {
+		t.Fatalf("single-session discovery was overconfident: %#v", findings)
+	}
+
+	metrics := report.Summary.MixedShellShapes["search -> file reads"]
+	metrics.Sessions = 2
+	report.Summary.MixedShellShapes["search -> file reads"] = metrics
+	findings = buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Confidence != "medium" ||
+		!strings.Contains(findings[0].Evidence, "at least 2 sessions") {
+		t.Fatalf("cross-session discovery confidence mismatch: %#v", findings)
+	}
+}
+
 func TestCodexInlineOrchestrationExcludesEdits(t *testing.T) {
 	large := strings.Repeat("x", 5000)
 	if got := codexInlineOrchestrationBytes("exec", "", large); got != int64(len(large)) {
@@ -932,6 +955,7 @@ func TestBuildSessionFindingsAttributesDownstreamFailureToMissingFreshCheck(t *t
 		RedeliveryAttempts:           2,
 		RecoveredDeliveries:          1,
 		Sessions:                     3,
+		FailureSessions:              2,
 		FailureChecks:                map[string]int{"repo/test-unit": 4},
 		Cohorts: map[string]downstreamCohortMetrics{
 			"packages/runtime": {
@@ -963,7 +987,9 @@ func TestBuildSessionFindingsKeepsSourceCohortWhenFreshChecksStillFail(t *testin
 		DeliveriesWithFailure:        3,
 		FailedDeliveriesWithPreTests: 2,
 		FailureRuns:                  3,
+		FollowUpEditCycles:           2,
 		Sessions:                     3,
+		FailureSessions:              2,
 		FailureChecks:                map[string]int{"repo/test-unit": 3},
 		Cohorts: map[string]downstreamCohortMetrics{
 			"packages/runtime": {
@@ -971,6 +997,7 @@ func TestBuildSessionFindingsKeepsSourceCohortWhenFreshChecksStillFail(t *testin
 				DeliveriesWithFailure:        3,
 				FailedDeliveriesWithPreTests: 2,
 				FailureRuns:                  3,
+				FollowUpEditCycles:           2,
 			},
 		},
 	}
@@ -983,6 +1010,38 @@ func TestBuildSessionFindingsKeepsSourceCohortWhenFreshChecksStillFail(t *testin
 		finding.Target != "packages/runtime" ||
 		!strings.Contains(finding.Action, "source boundary") {
 		t.Fatalf("source-backed downstream finding mismatch: %#v", finding)
+	}
+}
+
+func TestBuildSessionFindingsDoesNotConfirmUncorrectedPostDeliveryFailures(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.DownstreamQuality = downstreamQualityMetrics{
+		Deliveries:            40,
+		DeliveriesWithFailure: 12,
+		FailureRuns:           30,
+		Reverts:               1,
+		Sessions:              8,
+		FailureSessions:       3,
+		FailureChecks:         map[string]int{"tests": 30},
+		Cohorts: map[string]downstreamCohortMetrics{
+			"scripts": {
+				Deliveries:            8,
+				DeliveriesWithFailure: 4,
+				FailureRuns:           12,
+			},
+		},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 {
+		t.Fatalf("expected one post-delivery association: %#v", findings)
+	}
+	finding := findings[0]
+	if finding.Title != "post-delivery check failures have limited correction evidence" ||
+		finding.Confidence != "medium" || finding.Sessions != 3 ||
+		!strings.Contains(finding.Why, "1 matching") ||
+		!strings.Contains(finding.Why, "not yet confirmed as recurring delivery escapes") ||
+		!strings.Contains(finding.Action, "Confirm that the next post-delivery tests failure") {
+		t.Fatalf("uncorrected post-delivery failure was overclaimed: %#v", finding)
 	}
 }
 

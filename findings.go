@@ -803,6 +803,8 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		(downstream.DeliveriesWithFailure >= 2 || downstream.Reverts > 0) {
 		lever := "source code"
 		confidence := "medium"
+		title := "delivered changes repeatedly fail downstream checks"
+		why := ""
 		action := "Strengthen the focused source boundary and check that should prevent this failure before delivery, then compare the downstream failure rate."
 		if downstream.FailedDeliveriesWithPreTests*2 < downstream.DeliveriesWithFailure {
 			lever = "tooling"
@@ -845,6 +847,25 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				action = "Fix the recurring downstream failure at its owning source or verification boundary and require the failed check to pass before redelivery."
 			}
 		}
+		correctionObservations := downstream.FollowUpEditCycles +
+			downstream.RedeliveryAttempts +
+			downstream.Reverts
+		observedCorrection := correctionObservations >= 2 &&
+			correctionObservations*5 >= downstream.DeliveriesWithFailure
+		if !observedCorrection {
+			title = "post-delivery check failures have limited correction evidence"
+			confidence = "medium"
+			why = fmt.Sprintf(
+				"Only %s matching follow-up edit, redelivery, or revert observations were found for %s affected deliveries, so the aggregate is not yet confirmed as recurring delivery escapes.",
+				formatCodexCount(int64(correctionObservations)),
+				formatCodexCount(int64(downstream.DeliveriesWithFailure)),
+			)
+			if check != "" {
+				action = "Confirm that the next post-delivery " + check + " failure belongs to the preceding change before changing verification policy."
+			} else {
+				action = "Confirm that the next post-delivery check failure belongs to the preceding change before changing verification policy."
+			}
+		}
 		lastSeen := sessionFindingLastSeen(report, "downstream-failure", "")
 		if lastSeen == "" {
 			lastSeen = sessionFindingLastSeen(report, "downstream-revert", "")
@@ -852,12 +873,12 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		findings = append(findings, sessionFinding{
 			Category: "delivery-quality",
 			Control:  "repository",
-			Title:    "delivered changes repeatedly fail downstream checks",
+			Title:    title,
 			Evidence: fmt.Sprintf(
 				"%s/%s deliveries failed downstream across %s sessions, with %s failure runs, %s follow-up edit cycles, %s/%s recovery redeliveries, %s reverts, and fresh tests before %s/%s failures%s%s",
 				formatCodexCount(int64(downstream.DeliveriesWithFailure)),
 				formatCodexCount(int64(downstream.Deliveries)),
-				formatCodexCount(int64(downstream.Sessions)),
+				formatCodexCount(int64(downstream.FailureSessions)),
 				formatCodexCount(int64(downstream.FailureRuns)),
 				formatCodexCount(int64(downstream.FollowUpEditCycles)),
 				formatCodexCount(int64(downstream.RecoveredDeliveries)),
@@ -869,8 +890,9 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				checkEvidence,
 			),
 			Action:     action,
+			Why:        why,
 			Count:      downstream.DeliveriesWithFailure,
-			Sessions:   downstream.Sessions,
+			Sessions:   downstream.FailureSessions,
 			Target:     target,
 			LastSeen:   lastSeen,
 			Lever:      lever,
@@ -882,18 +904,25 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 
 	searchRead := codexMixedSearchReadMetrics(summary.MixedShellShapes)
 	if searchRead.Calls >= 10 && searchRead.EstimatedOutputTokens >= 50_000 {
+		confidence := "medium"
+		if searchRead.Sessions < 2 {
+			confidence = "low"
+		}
 		findings = append(findings, sessionFinding{
 			Category: "discovery",
 			Control:  "repository",
 			Title:    "bundled search/read discovery remains output-heavy",
-			Evidence: fmt.Sprintf("%s calls returned ~%s visible output tokens",
+			Evidence: fmt.Sprintf("%s calls returned ~%s visible output tokens across at least %s",
 				formatCodexCount(int64(searchRead.Calls)),
 				formatCodexCount(searchRead.EstimatedOutputTokens),
+				formatCodexCountNoun(int64(searchRead.Sessions), "session"),
 			),
-			Action:   config.Actions.SourceContext,
-			Count:    searchRead.Calls,
-			LastSeen: latestSearchReadActivity(report),
-			score:    250 + searchRead.Calls + int(searchRead.EstimatedOutputTokens/10_000),
+			Action:     config.Actions.SourceContext,
+			Count:      searchRead.Calls,
+			Sessions:   searchRead.Sessions,
+			LastSeen:   latestSearchReadActivity(report),
+			Confidence: confidence,
+			score:      250 + searchRead.Calls + int(searchRead.EstimatedOutputTokens/10_000),
 		})
 	}
 

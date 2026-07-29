@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 53
+const codexSessionInsightsSchemaVersion = 54
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -87,6 +87,7 @@ type codexAggregateMetrics struct {
 
 type codexToolMetrics struct {
 	Calls                 int   `json:"calls"`
+	Sessions              int   `json:"sessions"`
 	FailedCalls           int   `json:"failedCalls"`
 	TruncatedCalls        int   `json:"truncatedCalls"`
 	OutputBytes           int64 `json:"outputBytes"`
@@ -1946,6 +1947,9 @@ func addCodexFailureContexts(target map[string]map[string]codexOccurrenceMetrics
 func addCodexToolMetricsValue(target map[string]codexToolMetrics, key string, addition codexToolMetrics) {
 	value := target[key]
 	value.Calls += addition.Calls
+	if addition.Calls > 0 {
+		value.Sessions++
+	}
 	value.FailedCalls += addition.FailedCalls
 	value.TruncatedCalls += addition.TruncatedCalls
 	value.OutputBytes += addition.OutputBytes
@@ -2399,6 +2403,7 @@ func codexMixedSearchReadMetrics(shapes map[string]codexToolMetrics) codexToolMe
 			continue
 		}
 		result.Calls += metrics.Calls
+		result.Sessions = max(result.Sessions, metrics.Sessions)
 		result.FailedCalls += metrics.FailedCalls
 		result.TruncatedCalls += metrics.TruncatedCalls
 		result.OutputBytes += metrics.OutputBytes

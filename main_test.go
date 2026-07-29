@@ -1068,11 +1068,13 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 
 func TestCodexMixedSearchReadMetricsAggregatesOnlyRelevantShapes(t *testing.T) {
 	got := codexMixedSearchReadMetrics(map[string]codexToolMetrics{
-		"search -> file reads":          {Calls: 2, FailedCalls: 1, OutputBytes: 400},
-		"file reads -> search -> tests": {Calls: 3, TruncatedCalls: 2, OutputBytes: 800},
+		"search -> file reads":          {Calls: 2, Sessions: 2, FailedCalls: 1, OutputBytes: 400},
+		"file reads -> search -> tests": {Calls: 3, Sessions: 4, TruncatedCalls: 2, OutputBytes: 800},
 		"git inspect -> file reads":     {Calls: 9, OutputBytes: 10_000},
 	})
-	if got.Calls != 5 || got.FailedCalls != 1 || got.TruncatedCalls != 2 || got.OutputBytes != 1200 || got.EstimatedOutputTokens != 300 {
+	if got.Calls != 5 || got.Sessions != 4 || got.FailedCalls != 1 ||
+		got.TruncatedCalls != 2 || got.OutputBytes != 1200 ||
+		got.EstimatedOutputTokens != 300 {
 		t.Fatalf("unexpected search/read aggregate: %#v", got)
 	}
 }
