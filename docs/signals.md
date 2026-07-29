@@ -39,11 +39,11 @@ remain drill-down evidence but do not establish attributable friction.
 Definite and ambiguous bundled failures, truncation, and output cost remain
 separate.
 
-Tool-level failure and truncation findings require recurrence across sessions,
-unless at least five definite events occur in one session. Successful
-operation output must exceed both a 50,000-token floor and the cohort-relative
-cost threshold; output-only operation findings remain medium priority rather
-than inheriting highest priority solely from local ownership.
+Tool- and operation-level failure and truncation findings require recurrence
+across sessions, unless at least five definite events occur in one session.
+Successful operation output must exceed both a 50,000-token floor and the
+cohort-relative cost threshold; output-only operation findings remain medium
+priority rather than inheriting highest priority solely from local ownership.
 
 Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned tool's

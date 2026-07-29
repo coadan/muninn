@@ -492,6 +492,52 @@ func TestBuildSessionFindingsRequiresRecurringOwnedToolFriction(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsRequiresRecurringOwnedOperationFriction(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.OwnedOperations["repo/worktree-land"] = codexOwnedOperationMetrics{
+		Calls: 12, Sessions: 2, FailedCalls: 2,
+	}
+	report.Summary.OwnedOperationFailureReasons["repo/worktree-land"] = map[string]codexOccurrenceMetrics{
+		"other non-zero exit": {Count: 2, Sessions: 1},
+	}
+	report.sessionRecords = []codexSessionRecord{
+		{
+			OwnedOperations: map[string]codexToolMetrics{
+				"repo/worktree-land": {Calls: 2, FailedCalls: 2},
+			},
+			OwnedOperationFailureReasons: map[string]map[string]int{
+				"repo/worktree-land": {"other non-zero exit": 2},
+			},
+		},
+		{
+			OwnedOperations: map[string]codexToolMetrics{
+				"repo/worktree-land": {Calls: 10},
+			},
+		},
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("one-session owned-operation failures became recurring friction: %#v", findings)
+	}
+
+	report.Summary.OwnedOperations["repo/worktree-land"] = codexOwnedOperationMetrics{
+		Calls: 13, Sessions: 2, FailedCalls: 3,
+	}
+	report.Summary.OwnedOperationFailureReasons["repo/worktree-land"] = map[string]codexOccurrenceMetrics{
+		"other non-zero exit": {Count: 3, Sessions: 2},
+	}
+	report.sessionRecords[1].OwnedOperations["repo/worktree-land"] = codexToolMetrics{
+		Calls: 11, FailedCalls: 1,
+	}
+	report.sessionRecords[1].OwnedOperationFailureReasons = map[string]map[string]int{
+		"repo/worktree-land": {"other non-zero exit": 1},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 ||
+		!strings.Contains(findings[0].Evidence, "3 actionable failures across 2 failure sessions") {
+		t.Fatalf("cross-session owned-operation friction missing: %#v", findings)
+	}
+}
+
 func TestBuildSessionFindingsShowsRecentOwnedOperationEvidence(t *testing.T) {
 	generatedAt := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	report := newSessionInsightsReport(
