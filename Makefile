@@ -1,16 +1,29 @@
-.PHONY: test build install
+.PHONY: check format-check test vet build install
 
 BINARY := muninn
 DIST := dist/$(BINARY)
 
+check: format-check test vet
+
+format-check:
+	@unformatted="$$(gofmt -l $$(find cmd internal -type f -name '*.go'))"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "Go files require gofmt:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
 test:
 	go test ./...
+
+vet:
+	go vet ./...
 
 build:
 	mkdir -p dist
 	go build -o $(DIST) ./cmd/muninn
 
-install: test build
+install: check build
 	@target="$$(go env GOPATH)/bin/$(BINARY)"; \
 	mkdir -p "$$(dirname "$$target")"; \
 	tmp="$${target}.tmp.$$$$"; \

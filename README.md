@@ -106,9 +106,8 @@ Run `muninn --help` for the complete command surface.
 ## Development
 
 ```bash
-go test ./...
-go vet ./...
-go build ./cmd/muninn
+make check
+make build
 ```
 
 Muninn is released under the [MIT License](LICENSE).
