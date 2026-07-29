@@ -42,8 +42,9 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
   privacy-safe command, continuation, output, and failure interpretation.
 - `store.go`, `session_index.go`, `session_query.go`, and `failure_store.go`:
   SQLite lifecycle, derived indexing, analysis reads, and failure timelines.
-- `findings.go`, `interventions.go`, `outcomes.go`, and `trend.go`: evidence,
-  prioritization, outcome cohorts, and comparison.
+- `findings.go`, `interventions.go`, `discovery_evidence.go`, `outcomes.go`,
+  and `trend.go`: signals, prioritization, bounded drill-down evidence, outcome
+  cohorts, and comparison.
 - `report_print.go` and `report_json.go`: human and machine rendering.
 
 ## Storage

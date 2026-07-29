@@ -55,6 +55,7 @@ type compactSessionInsightsReport struct {
 	Diagnostics   compactDiagnosticSummary       `json:"diagnostics"`
 	Interventions []sessionIntervention          `json:"interventions"`
 	Findings      []sessionFinding               `json:"findings"`
+	FocusEvidence *discoveryFocusEvidence        `json:"focusEvidence,omitempty"`
 }
 
 func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
@@ -64,7 +65,7 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 	}
 	summary := report.Summary
 	outcomes := report.Outcomes
-	return compactSessionInsightsReport{
+	compact := compactSessionInsightsReport{
 		SchemaVersion: report.SchemaVersion,
 		DetailLevel:   "summary",
 		Provider:      report.Provider,
@@ -114,4 +115,9 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 		Interventions: report.Interventions,
 		Findings:      report.Findings,
 	}
+	if report.AnalysisScope.Focus == "discovery" {
+		evidence := buildDiscoveryFocusEvidence(summary, 5)
+		compact.FocusEvidence = &evidence
+	}
+	return compact
 }

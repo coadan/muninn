@@ -288,8 +288,8 @@ func resolveAnalyzeOutputSelection(
 			selection.OperationLimit = 0
 		}
 	case focus != "":
-		// Focused findings already include their full evidence. Accepting
-		// --details here avoids a help/retry roundtrip without expanding output.
+		// Focused views add bounded evidence where it helps act on the finding.
+		// Accept --details without requiring a help/retry roundtrip.
 		selection.View = "focused"
 	case details:
 		selection.View = "details"

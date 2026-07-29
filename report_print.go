@@ -22,6 +22,9 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 			formatCodexCount(summary.FreshTokens),
 		)
 		printSessionInterventions(report.Interventions, limit)
+		if view == "focused" && report.AnalysisScope.Focus == "discovery" {
+			printDiscoveryFocusEvidence(buildDiscoveryFocusEvidence(summary, limit))
+		}
 		return
 	}
 	fmt.Printf("Sessions: %s (%s complete, %s incomplete)\n",
@@ -185,6 +188,38 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	fmt.Println("- Token counts are rollout totals, not billing amounts. Fresh-token proxy excludes cached input but does not apply model prices.")
 	if view == "details" {
 		printSessionFindings(report.Findings, limit)
+	}
+}
+
+func printDiscoveryFocusEvidence(evidence discoveryFocusEvidence) {
+	if len(evidence.ReadTargets) == 0 && len(evidence.SearchReadShapes) == 0 {
+		return
+	}
+	fmt.Println("\nDiscovery evidence:")
+	if len(evidence.ReadTargets) > 0 {
+		fmt.Println("  Ranked repository read targets:")
+		for _, target := range evidence.ReadTargets {
+			fmt.Printf(
+				"  - %s: %s, %s, %s, %s\n",
+				target.Target,
+				formatCodexCountNoun(int64(target.Reads), "read"),
+				formatCodexCountNoun(int64(target.SearchReadLoops), "search/read loop"),
+				formatCodexCountNoun(int64(target.Sessions), "session"),
+				formatCodexCountNoun(int64(target.RediscoverySessions), "rediscovery session"),
+			)
+		}
+	}
+	if len(evidence.SearchReadShapes) > 0 {
+		fmt.Println("  Highest-output bundled search/read shapes:")
+		for _, shape := range evidence.SearchReadShapes {
+			fmt.Printf(
+				"  - %s: %s, %s, ~%s visible output tokens\n",
+				shape.Shape,
+				formatCodexCountNoun(int64(shape.Calls), "call"),
+				formatCodexCountNoun(int64(shape.Sessions), "session"),
+				formatCodexCount(shape.EstimatedOutputTokens),
+			)
+		}
 	}
 }
 

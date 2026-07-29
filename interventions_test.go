@@ -199,6 +199,40 @@ func TestFindingsViewPrintsCompactInterventionQueue(t *testing.T) {
 	}
 }
 
+func TestFocusedDiscoveryViewPrintsBoundedActionEvidence(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.AnalysisScope.Focus = "discovery"
+	report.Summary.ReadTargets["owner.go"] = codexTargetMetrics{
+		Reads: 12, SearchReadLoops: 4, Sessions: 2, RediscoverySessions: 2,
+	}
+	report.Summary.ReadTargets["hidden.go"] = codexTargetMetrics{
+		Reads: 11, SearchReadLoops: 3, Sessions: 1, RediscoverySessions: 1,
+	}
+	report.Summary.MixedShellShapes["search -> file reads"] = codexToolMetrics{
+		Calls: 6, Sessions: 2, OutputBytes: 40_000,
+	}
+
+	out, err := captureStdout(t, func() error {
+		printCodexSessionInsights(report, defaultRepositoryConfig(), 1, "focused")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Discovery evidence:",
+		"owner.go: 12 reads, 4 search/read loops, 2 sessions, 2 rediscovery sessions",
+		"search -> file reads: 6 calls, 2 sessions, ~10,000 visible output tokens",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("focused discovery output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "hidden.go") {
+		t.Fatalf("focused discovery output ignored limit:\n%s", out)
+	}
+}
+
 func captureStdout(t *testing.T, run func() error) (string, error) {
 	t.Helper()
 	read, write, err := os.Pipe()
