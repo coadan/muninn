@@ -176,12 +176,13 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				formatCodexCountNoun(int64(metrics.Sessions), "session"),
 				formatCodexCount(metrics.MaxOutputBytes),
 			),
-			Action:   oversizedOutputAction(context, control),
-			Count:    metrics.Calls,
-			Sessions: metrics.Sessions,
-			Target:   context,
-			LastSeen: sessionFindingLastSeen(report, "oversized-output", context),
-			score:    600 + metrics.Calls + int(metrics.OutputBytes/10_000),
+			Action:     oversizedOutputAction(context, control),
+			Count:      metrics.Calls,
+			Sessions:   metrics.Sessions,
+			Target:     context,
+			LastSeen:   sessionFindingLastSeen(report, "oversized-output", context),
+			Confidence: oversizedOutputFindingConfidence(metrics),
+			score:      600 + metrics.Calls + int(metrics.OutputBytes/10_000),
 		})
 	}
 
@@ -956,6 +957,13 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	return diversifySessionFindings(findings)
 }
 
+func oversizedOutputFindingConfidence(metrics codexOversizedOutputMetrics) string {
+	if metrics.Sessions >= 2 || metrics.MaxOutputBytes >= 4*oversizedOutputMinimumBytes {
+		return "medium"
+	}
+	return "low"
+}
+
 func expectedContinuationContext(context string) bool {
 	switch context {
 	case "tests", "build, lint, or install", "review":
@@ -1395,8 +1403,12 @@ func assignAndSuppressSessionFindingSignals(findings []sessionFinding, suppressi
 	result := make([]sessionFinding, 0, len(findings))
 	for _, finding := range findings {
 		finding.Signal = sessionFindingSignal(finding)
+		defaultLever, defaultConfidence := sessionFindingLever(finding)
 		if finding.Lever == "" {
-			finding.Lever, finding.Confidence = sessionFindingLever(finding)
+			finding.Lever = defaultLever
+		}
+		if finding.Confidence == "" {
+			finding.Confidence = defaultConfidence
 		}
 		if _, hidden := suppressed[finding.Signal]; hidden {
 			continue
