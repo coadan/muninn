@@ -107,7 +107,56 @@ func buildSessionInterventions(findings []sessionFinding) []sessionIntervention 
 		}
 		return interventions[i].ID < interventions[j].ID
 	})
-	return interventions
+	return diversifySessionInterventions(interventions)
+}
+
+func diversifySessionInterventions(interventions []sessionIntervention) []sessionIntervention {
+	result := make([]sessionIntervention, 0, len(interventions))
+	deferred := make([]sessionIntervention, 0)
+	ownerSelected := false
+	selectedTools := map[string]bool{}
+	preferredOperation := map[string]string{}
+	for _, intervention := range interventions {
+		if !strings.HasPrefix(intervention.ID, "intervention/operation/") {
+			continue
+		}
+		tool := sessionInterventionTool(intervention.ID)
+		if preferredOperation[tool] == "" {
+			preferredOperation[tool] = intervention.ID
+		}
+	}
+	for _, intervention := range interventions {
+		if strings.HasPrefix(intervention.ID, "intervention/owner/") {
+			if ownerSelected {
+				deferred = append(deferred, intervention)
+				continue
+			}
+			ownerSelected = true
+		}
+		if tool := sessionInterventionTool(intervention.ID); tool != "" {
+			if preferred := preferredOperation[tool]; preferred != "" && intervention.ID != preferred {
+				deferred = append(deferred, intervention)
+				continue
+			}
+			if selectedTools[tool] {
+				deferred = append(deferred, intervention)
+				continue
+			}
+			selectedTools[tool] = true
+		}
+		result = append(result, intervention)
+	}
+	return append(result, deferred...)
+}
+
+func sessionInterventionTool(id string) string {
+	for _, prefix := range []string{"intervention/tool/", "intervention/operation/"} {
+		if target, found := strings.CutPrefix(id, prefix); found {
+			tool, _, _ := strings.Cut(target, "/")
+			return tool
+		}
+	}
+	return ""
 }
 
 func interventionFindingPriority(finding sessionFinding) int {
@@ -142,13 +191,12 @@ func sessionInterventionKey(finding sessionFinding, dominantPhases map[string]bo
 		return signalID("intervention", "tool", finding.Target)
 	}
 	if finding.Category == "owned-operation" {
-		tool, _, _ := strings.Cut(finding.Target, "/")
-		return signalID("intervention", "tool", tool)
+		return signalID("intervention", "operation", finding.Target)
 	}
 	if finding.Control == "local" && finding.Lever == "tooling" {
 		tool, operation, found := strings.Cut(finding.Target, "/")
 		if found && strings.TrimSpace(tool) != "" && strings.TrimSpace(operation) != "" {
-			return signalID("intervention", "tool", tool)
+			return signalID("intervention", "operation", finding.Target)
 		}
 	}
 	if phase, ok := compactionPhaseFinding(finding); ok {
