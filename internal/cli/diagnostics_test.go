@@ -20,7 +20,8 @@ func TestSessionStorePreservesNormalizedDiagnosticFailure(t *testing.T) {
 			{
 				Sequence: 1, OccurredAt: failedAt, Kind: sessionEventToolOutput,
 				Diagnostic: &normalizedDiagnosticObservation{
-					Status: "failed", Source: "heimdal", Target: "target", Finished: failedAt,
+					Status: "failed", Source: "heimdal", Target: "target",
+					TargetLabels: []string{"tests/browser/flow.spec.ts"}, Finished: failedAt,
 					Failure: &normalizedDiagnosticFailure{
 						Source: "heimdal", Classification: "infrastructure", FailureSource: "runner",
 						FailureClass: "error", Fingerprint: "digest", FixturePhase: "fixture-startup",
@@ -70,6 +71,9 @@ func TestSessionStorePreservesNormalizedDiagnosticFailure(t *testing.T) {
 	}
 	if report.Diagnostics.Failures[0].PostFailureTokens.TotalTokens != 50 {
 		t.Fatalf("stored cost missing: %#v", report.Diagnostics.Failures[0])
+	}
+	if strings.Join(report.Diagnostics.Failures[0].TargetLabels, ",") != "tests/browser/flow.spec.ts" {
+		t.Fatalf("stored target label missing: %#v", report.Diagnostics.Failures[0])
 	}
 }
 
@@ -209,11 +213,14 @@ func TestParseHeimdalDiagnosticFailureClassifiesExecutedTest(t *testing.T) {
 	}
 }
 
-func TestParseHeimdalDiagnosticObservationKeepsOnlyPassedTargetDigest(t *testing.T) {
+func TestParseHeimdalDiagnosticObservationExposesOnlySafeTestFileLabel(t *testing.T) {
 	report := `{
 	  "status":"passed",
 	  "finished_at":"2026-07-27T09:00:00Z",
-	  "invocation":{"test_files":["tests/browser/auth.spec.ts"],"grep":"enters onboarding"}
+	  "invocation":{
+	    "test_files":["tests/browser/auth.spec.ts","../secret","/tmp/private.spec.ts","C:\\private.spec.ts"],
+	    "grep":"enters onboarding"
+	  }
 	}`
 	got := parseHeimdalDiagnosticObservation(report)
 	if got == nil || got.Status != "passed" || got.Source != "heimdal" || len(got.Target) != 16 {
@@ -221,6 +228,13 @@ func TestParseHeimdalDiagnosticObservationKeepsOnlyPassedTargetDigest(t *testing
 	}
 	if strings.Contains(got.Target, "auth") || got.Failure != nil {
 		t.Fatalf("passed target retained raw identity: %#v", got)
+	}
+	targetLabels := strings.Join(got.TargetLabels, ",")
+	if targetLabels != "tests/browser/auth.spec.ts" ||
+		strings.Contains(targetLabels, "onboarding") ||
+		strings.Contains(targetLabels, "secret") ||
+		strings.Contains(targetLabels, "private") {
+		t.Fatalf("target label was not bounded to safe relative test files: %#v", got)
 	}
 }
 
@@ -234,12 +248,14 @@ func TestAnalyzeDiagnosticFailuresGroupsFingerprintAndProfiles(t *testing.T) {
 	records := []codexSessionRecord{
 		{DiagnosticFailures: []diagnosticFailureEpisode{{
 			normalizedDiagnosticFailure: failure, Model: "gpt-5.6", ReasoningEffort: "high",
-			AgentKind: "root", EndedAt: failedAt.Add(2 * time.Minute),
+			TargetLabels: []string{"tests/browser/flow.spec.ts"},
+			AgentKind:    "root", EndedAt: failedAt.Add(2 * time.Minute),
 			Tokens: normalizedTokenUsage{TotalTokens: 120}, ToolCalls: 4,
 		}}},
 		{DiagnosticFailures: []diagnosticFailureEpisode{{
 			normalizedDiagnosticFailure: failure, Model: "gpt-5.6", ReasoningEffort: "high",
-			AgentKind: "root", EndedAt: failedAt.Add(time.Minute),
+			TargetLabels: []string{"tests/browser/flow.spec.ts"},
+			AgentKind:    "root", EndedAt: failedAt.Add(time.Minute),
 			Tokens: normalizedTokenUsage{TotalTokens: 80}, ToolCalls: 2,
 		}}},
 	}
@@ -250,7 +266,8 @@ func TestAnalyzeDiagnosticFailuresGroupsFingerprintAndProfiles(t *testing.T) {
 	aggregate := got.Failures[0]
 	if aggregate.Occurrences != 2 || aggregate.Sessions != 2 ||
 		aggregate.PostFailureTokens.TotalTokens != 200 || aggregate.PostFailureCalls != 6 ||
-		aggregate.PostFailureSecs != 180 || len(aggregate.Profiles) != 1 {
+		aggregate.PostFailureSecs != 180 || len(aggregate.Profiles) != 1 ||
+		strings.Join(aggregate.TargetLabels, ",") != "tests/browser/flow.spec.ts" {
 		t.Fatalf("unexpected aggregate: %#v", aggregate)
 	}
 	if strings.Contains(aggregate.Fingerprint, "stable") {
@@ -269,7 +286,8 @@ func TestDiagnosticFindingRequiresCrossSessionRecurrence(t *testing.T) {
 	failure := diagnosticFailureAggregate{
 		Source: "heimdal", Classification: "infrastructure", FailureSource: "runner",
 		Fingerprint: "digest", FixturePhase: "fixture-startup", DiagnosticStatus: "pending",
-		Lever: "tooling", Occurrences: 2, Sessions: 1,
+		TargetLabels: []string{"tests/browser/flow.spec.ts"},
+		Lever:        "tooling", Occurrences: 2, Sessions: 1,
 	}
 	report.Diagnostics = diagnosticFailureAnalysis{Available: true, Failures: []diagnosticFailureAggregate{failure}}
 	for _, finding := range buildSessionFindings(report, defaultRepositoryConfig()) {
@@ -280,7 +298,13 @@ func TestDiagnosticFindingRequiresCrossSessionRecurrence(t *testing.T) {
 	report.Diagnostics.Failures[0].Sessions = 2
 	found := false
 	for _, finding := range buildSessionFindings(report, defaultRepositoryConfig()) {
-		found = found || finding.Category == "diagnostic-failure"
+		if finding.Category == "diagnostic-failure" {
+			found = true
+			if finding.Target != "digest" ||
+				!strings.Contains(finding.Evidence, "target tests/browser/flow.spec.ts") {
+				t.Fatalf("diagnostic finding lost stable identity or safe owner label: %#v", finding)
+			}
+		}
 	}
 	if !found {
 		t.Fatal("cross-session diagnostic recurrence was not actionable")

@@ -367,17 +367,22 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		} else if failure.Lever == "tests/instructions" {
 			action = "Repair test selection or concise workflow guidance so the intended behavior runs and produces evidence."
 		}
+		targetEvidence := ""
+		if len(failure.TargetLabels) > 0 {
+			targetEvidence = "; target " + formatDiagnosticTargetLabels(failure.TargetLabels)
+		}
 		findings = append(findings, sessionFinding{
 			Category: "diagnostic-failure",
 			Control:  "repository",
 			Title:    failure.Classification + " failure fingerprint recurs in " + failure.Source,
 			Evidence: fmt.Sprintf(
-				"%s occurrences across %s sessions; phase %s; source %s; diagnostic %s; post-failure cost %s tool calls, %s fresh tokens, %s",
+				"%s occurrences across %s sessions; phase %s; source %s; diagnostic %s%s; post-failure cost %s tool calls, %s fresh tokens, %s",
 				formatCodexCount(int64(failure.Occurrences)),
 				formatCodexCount(int64(failure.Sessions)),
 				failure.FixturePhase,
 				failure.FailureSource,
 				failure.DiagnosticStatus,
+				targetEvidence,
 				formatCodexCount(int64(failure.PostFailureCalls)),
 				formatCodexCount(diagnosticFreshTokens(failure.PostFailureTokens)),
 				formatDurationSeconds(failure.PostFailureSecs),

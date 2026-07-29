@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type normalizedDiagnosticFailure struct {
@@ -24,16 +26,18 @@ type normalizedDiagnosticFailure struct {
 }
 
 type normalizedDiagnosticObservation struct {
-	Status   string                       `json:"status"`
-	Source   string                       `json:"source"`
-	Target   string                       `json:"target,omitempty"`
-	Finished time.Time                    `json:"finishedAt"`
-	Failure  *normalizedDiagnosticFailure `json:"failure,omitempty"`
+	Status       string                       `json:"status"`
+	Source       string                       `json:"source"`
+	Target       string                       `json:"target,omitempty"`
+	TargetLabels []string                     `json:"targetLabels,omitempty"`
+	Finished     time.Time                    `json:"finishedAt"`
+	Failure      *normalizedDiagnosticFailure `json:"failure,omitempty"`
 }
 
 type diagnosticFailureEpisode struct {
 	normalizedDiagnosticFailure
 	Target          string
+	TargetLabels    []string
 	Model           string
 	ReasoningEffort string
 	AgentKind       string
@@ -57,6 +61,7 @@ type diagnosticFailureAggregate struct {
 	FailureClass      string                  `json:"failureClass"`
 	Fingerprint       string                  `json:"fingerprint"`
 	Target            string                  `json:"target,omitempty"`
+	TargetLabels      []string                `json:"targetLabels,omitempty"`
 	FixturePhase      string                  `json:"fixturePhase"`
 	DiagnosticStatus  string                  `json:"diagnosticStatus"`
 	Lever             string                  `json:"lever"`
@@ -71,6 +76,7 @@ type diagnosticFailureAggregate struct {
 	Profiles          []diagnosticCostProfile `json:"profiles,omitempty"`
 	sessionKeys       map[int]struct{}
 	profiles          map[string]*diagnosticCostProfile
+	targetLabels      map[string]struct{}
 }
 
 type diagnosticPassAggregate struct {
@@ -162,15 +168,17 @@ func parseHeimdalDiagnosticObservation(text string) *normalizedDiagnosticObserva
 	}
 	finishedAt, _ := time.Parse(time.RFC3339Nano, report.FinishedAt)
 	target := diagnosticTarget("heimdal", report.Invocation.TestFiles, report.Invocation.Grep)
+	targetLabels := diagnosticTestFiles(report.Invocation.TestFiles)
 	if report.Status == "passed" {
 		if target == "" {
 			return nil
 		}
 		return &normalizedDiagnosticObservation{
-			Status:   "passed",
-			Source:   "heimdal",
-			Target:   target,
-			Finished: finishedAt,
+			Status:       "passed",
+			Source:       "heimdal",
+			Target:       target,
+			TargetLabels: targetLabels,
+			Finished:     finishedAt,
 		}
 	}
 	if report.Status != "failed" || report.PrimaryFailure == nil {
@@ -216,10 +224,11 @@ func parseHeimdalDiagnosticObservation(text string) *normalizedDiagnosticObserva
 		}
 	}
 	return &normalizedDiagnosticObservation{
-		Status:   "failed",
-		Source:   "heimdal",
-		Target:   target,
-		Finished: finishedAt,
+		Status:       "failed",
+		Source:       "heimdal",
+		Target:       target,
+		TargetLabels: targetLabels,
+		Finished:     finishedAt,
 		Failure: &normalizedDiagnosticFailure{
 			Source:           "heimdal",
 			Classification:   classification,
@@ -257,14 +266,7 @@ func diagnosticFingerprint(source, raw string) string {
 }
 
 func diagnosticTarget(source string, testFiles []string, grep string) string {
-	parts := make([]string, 0, len(testFiles)+1)
-	for _, file := range testFiles {
-		file = strings.TrimSpace(strings.ReplaceAll(file, "\\", "/"))
-		if file != "" && !strings.HasPrefix(file, "/") && !strings.Contains(file, "..") {
-			parts = append(parts, file)
-		}
-	}
-	sort.Strings(parts)
+	parts := diagnosticTestFiles(testFiles)
 	if grep = strings.TrimSpace(grep); grep != "" {
 		parts = append(parts, grep)
 	}
@@ -272,6 +274,53 @@ func diagnosticTarget(source string, testFiles []string, grep string) string {
 		return ""
 	}
 	return diagnosticFingerprint(source+"-target", strings.Join(parts, "\x00"))
+}
+
+func diagnosticTestFiles(testFiles []string) []string {
+	unique := map[string]struct{}{}
+	for _, file := range testFiles {
+		file = strings.TrimSpace(strings.ReplaceAll(file, "\\", "/"))
+		if file == "" || len(file) > 240 || strings.HasPrefix(file, "/") ||
+			(len(file) >= 2 && file[1] == ':') {
+			continue
+		}
+		unsafe := false
+		for _, char := range file {
+			if unicode.IsControl(char) {
+				unsafe = true
+				break
+			}
+		}
+		for _, segment := range strings.Split(file, "/") {
+			if segment == ".." {
+				unsafe = true
+				break
+			}
+		}
+		clean := path.Clean(file)
+		if unsafe || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			continue
+		}
+		unique[clean] = struct{}{}
+	}
+	files := make([]string, 0, len(unique))
+	for file := range unique {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	return files
+}
+
+func formatDiagnosticTargetLabels(labels []string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	sort.Strings(labels)
+	const shown = 3
+	if len(labels) <= shown {
+		return strings.Join(labels, ", ")
+	}
+	return fmt.Sprintf("%s (+%d more)", strings.Join(labels[:shown], ", "), len(labels)-shown)
 }
 
 func analyzeDiagnosticFailures(records []codexSessionRecord) diagnosticFailureAnalysis {
@@ -298,8 +347,12 @@ func analyzeDiagnosticFailures(records []codexSessionRecord) diagnosticFailureAn
 					Lever:            episode.Lever,
 					sessionKeys:      map[int]struct{}{},
 					profiles:         map[string]*diagnosticCostProfile{},
+					targetLabels:     map[string]struct{}{},
 				}
 				byFingerprint[episode.Fingerprint] = current
+			}
+			for _, label := range episode.TargetLabels {
+				current.targetLabels[label] = struct{}{}
 			}
 			current.Occurrences++
 			current.sessionKeys[sessionIndex] = struct{}{}
@@ -348,6 +401,12 @@ func analyzeDiagnosticFailures(records []codexSessionRecord) diagnosticFailureAn
 	analysis := diagnosticFailureAnalysis{Available: len(byFingerprint) > 0 || len(byPassTarget) > 0}
 	for _, aggregate := range byFingerprint {
 		aggregate.Sessions = len(aggregate.sessionKeys)
+		labels := make([]string, 0, len(aggregate.targetLabels))
+		for label := range aggregate.targetLabels {
+			labels = append(labels, label)
+		}
+		sort.Strings(labels)
+		aggregate.TargetLabels = labels
 		for _, profile := range aggregate.profiles {
 			aggregate.Profiles = append(aggregate.Profiles, *profile)
 		}
@@ -356,6 +415,7 @@ func analyzeDiagnosticFailures(records []codexSessionRecord) diagnosticFailureAn
 		})
 		aggregate.sessionKeys = nil
 		aggregate.profiles = nil
+		aggregate.targetLabels = nil
 		analysis.Failures = append(analysis.Failures, *aggregate)
 	}
 	for _, pass := range byPassTarget {
@@ -552,12 +612,17 @@ func printDiagnosticFailureAnalysis(analysis diagnosticFailureAnalysis) {
 	}
 	fmt.Println("\nStructured diagnostic failures:")
 	for _, failure := range analysis.Failures {
+		target := ""
+		if len(failure.TargetLabels) > 0 {
+			target = " · target " + formatDiagnosticTargetLabels(failure.TargetLabels)
+		}
 		fmt.Printf(
-			"- %s · %s · %s/%s · %s occurrences in %s sessions · post-failure %s calls, %s fresh tokens, %s · lever %s\n",
+			"- %s · %s · %s/%s%s · %s occurrences in %s sessions · post-failure %s calls, %s fresh tokens, %s · lever %s\n",
 			failure.Fingerprint,
 			failure.Classification,
 			failure.FixturePhase,
 			failure.FailureSource,
+			target,
 			formatCodexCount(int64(failure.Occurrences)),
 			formatCodexCount(int64(failure.Sessions)),
 			formatCodexCount(int64(failure.PostFailureCalls)),
