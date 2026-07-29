@@ -155,9 +155,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			touchSessionActivity(record.Activity, "diagnostic-pass", event.Diagnostic.Target, event.OccurredAt)
 		}
 		if event.Diagnostic != nil && event.Diagnostic.Failure != nil {
-			failedAt := event.Diagnostic.Failure.FailedAt
-			if failedAt.IsZero() || failedAt.After(event.OccurredAt) {
-				failedAt = event.OccurredAt
+			observedAt := event.OccurredAt
+			if observedAt.IsZero() {
+				observedAt = event.Diagnostic.Failure.FailedAt
 			}
 			activeDiagnostic = &diagnosticFailureEpisode{
 				normalizedDiagnosticFailure: *event.Diagnostic.Failure,
@@ -167,7 +167,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				AgentKind:                   record.AgentKind,
 				EndedAt:                     event.OccurredAt,
 			}
-			activeDiagnostic.FailedAt = failedAt
+			// Recovery cost starts when the agent observes the report. The
+			// provider's failure timestamp may describe a stale artifact.
+			activeDiagnostic.FailedAt = observedAt
 			touchSessionActivity(record.Activity, "diagnostic-failure", event.Diagnostic.Failure.Fingerprint, event.OccurredAt)
 		}
 		if record.StartedAt.IsZero() || event.OccurredAt.Before(record.StartedAt) {

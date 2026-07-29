@@ -153,9 +153,11 @@ review, failure, follow-up edits, or reverts. It falls back to repository-wide
 quality rates when matched delivery evidence is insufficient.
 
 Diagnostic fingerprints are compared by post-failure fresh tokens, tool calls,
-and elapsed time per occurrence. Post-failure attribution ends at the next
-diagnostic observation, task completion, or 30 minutes without activity, so a
-later task in the same long-lived session is not counted as repair work. States
+and elapsed time per occurrence. Recovery cost starts when the agent observes
+the diagnostic report, not at an older artifact timestamp. Attribution ends at
+the next diagnostic observation, task completion, or 30 minutes without
+activity, so a later task in the same long-lived session is not counted as
+repair work. States
 are `improving`, `unchanged`,
 `regressed`, `new`, `resolved`, or `not-observed`. `resolved` requires a
 current passed Heimdal report for the same rehashed test target; disappearance
