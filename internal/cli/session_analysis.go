@@ -118,7 +118,11 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 		addCodexToolMetricsValue(summary.ToolMetricsByName, name, metrics)
 	}
 	addCodexOwnedOperationTaskMetrics(report.operationTasks, record.OwnedOperationTasks)
-	report.taskEpisodes = append(report.taskEpisodes, record.TaskEpisodes...)
+	sessionOrdinal := len(report.sessionRecords)
+	for _, episode := range record.TaskEpisodes {
+		episode.sessionOrdinal = sessionOrdinal
+		report.taskEpisodes = append(report.taskEpisodes, episode)
+	}
 
 	task := taskMap[record.Task]
 	if task == nil {

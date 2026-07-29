@@ -68,18 +68,36 @@ func TestBuildCausalFindingsAttributesCompactionPressureToPhase(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Outcomes.Phases = map[string]taskPhaseAnalysis{
 		"discovery": {
-			Episodes:          8,
-			TotalCompactions:  6,
-			TotalFreshTokens:  90_000,
-			TotalOutputTokens: 20_000,
-			TotalToolCalls:    80,
+			Episodes:           8,
+			Sessions:           3,
+			CompactionSessions: 2,
+			TotalCompactions:   6,
+			TotalFreshTokens:   90_000,
+			TotalOutputTokens:  20_000,
+			TotalToolCalls:     80,
 		},
-		"editing": {Episodes: 8, TotalCompactions: 2},
+		"editing": {Episodes: 8, Sessions: 3, CompactionSessions: 2, TotalCompactions: 2},
 	}
 	findings := buildCausalFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 ||
 		findings[0].Title != "context compactions concentrate in phase: discovery" ||
-		!strings.Contains(findings[0].Evidence, "6/8 compactions") {
+		!strings.Contains(findings[0].Evidence, "6/8 compactions") ||
+		!strings.Contains(findings[0].Evidence, "across 2 sessions") {
 		t.Fatalf("compaction finding mismatch: %#v", findings)
+	}
+}
+
+func TestBuildCausalFindingsRequiresCrossSessionCompactionPressure(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Outcomes.Phases = map[string]taskPhaseAnalysis{
+		"discovery": {
+			Episodes:           12,
+			Sessions:           1,
+			CompactionSessions: 1,
+			TotalCompactions:   8,
+		},
+	}
+	if findings := buildCausalFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("one long session became cross-session compaction friction: %#v", findings)
 	}
 }

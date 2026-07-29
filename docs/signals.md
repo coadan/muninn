@@ -73,8 +73,9 @@ remains in the metrics without competing with concentrated wait/resume loops.
 Generic compaction findings require at least two compactions per affected
 session, a pattern spanning at least five sessions and 20% of the cohort, or a
 five-compaction single-session burst. Evidence reports fresh-token and cache
-cost for affected sessions only. Phase-specific compaction evidence remains
-available for completed tasks.
+cost for affected sessions only. Phase-specific compaction findings require
+pressure in at least two sessions; their evidence reports both completed-task
+episodes and actual session recurrence.
 
 Concurrent-batch output findings retain the number of nested calls, never
 their code or arguments. Evidence reports average visible output per nested
