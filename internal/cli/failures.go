@@ -50,33 +50,38 @@ func cmdFailures(root string, args []string) error {
 	}
 	storePath := fs.String("db", defaultStorePath, "local privacy-safe SQLite index path")
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
-	operation := fs.String("operation", "", "configured owned operation ID, for example repository-cli/test")
 	reason := fs.String("reason", "", "only include this fixed failure-reason label")
 	task := fs.String("task", "", "only include failures attributed to this exact worktree/task ID")
 	limit := fs.Int("limit", 20, "maximum failure events to return (1-100)")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	setFlagSetUsage(
 		fs,
-		"muninn failures --operation <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>] [--json]",
+		"muninn failures <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>] [--json]",
 		"Inspect bounded, privacy-safe failure events for one configured owned operation.",
 		[]string{
-			"muninn failures --repo . --operation repository-cli/test --since 14d",
-			"muninn failures --repo . --operation repository-cli/test --task task-id",
-			"muninn failures --repo . --operation repository-cli/test --reason \"test harness protocol\" --json",
+			"muninn failures repository-cli/test --repo . --since 14d",
+			"muninn failures repository-cli/test --repo . --task task-id",
+			"muninn failures repository-cli/test --repo . --reason \"test harness protocol\" --json",
 		},
 	)
-	if err := fs.Parse(args); err != nil {
+	if len(args) == 0 {
+		return errors.New("usage: muninn failures <tool/operation> [flags]")
+	}
+	if isHelpToken(args[0]) {
+		return fs.Parse(args)
+	}
+	selectedOperation := strings.TrimSpace(args[0])
+	if selectedOperation == "" || strings.HasPrefix(selectedOperation, "-") {
+		return errors.New("usage: muninn failures <tool/operation> [flags]")
+	}
+	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: muninn failures --operation <tool/operation> [flags]")
+		return errors.New("usage: muninn failures <tool/operation> [flags]")
 	}
 	if *limit < 1 || *limit > 100 {
 		return errors.New("--limit must be between 1 and 100")
-	}
-	selectedOperation := strings.TrimSpace(*operation)
-	if selectedOperation == "" {
-		return errors.New("--operation is required")
 	}
 	lookback, err := parseCodexLookback(*sinceRaw)
 	if err != nil {
@@ -103,7 +108,7 @@ func cmdFailures(root string, args []string) error {
 		if len(operations) == 0 {
 			return errors.New("repository config has no owned operations; add ownedTools.operations to .muninn.json")
 		}
-		return fmt.Errorf("unknown --operation %q (available: %s)", selectedOperation, strings.Join(operations, ", "))
+		return fmt.Errorf("unknown operation %q (available: %s)", selectedOperation, strings.Join(operations, ", "))
 	}
 	ownership := newOwnershipCatalog(config.OwnedTools)
 	store, err := openSessionStore(*storePath)

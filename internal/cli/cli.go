@@ -73,7 +73,7 @@ func printCodexHelp() {
 
 Usage:
   muninn analyze [flags]
-  muninn failures --operation <tool/operation> [flags]
+  muninn failures <tool/operation> [flags]
 
 Available Commands:
   analyze   Analyze agent-session cost and friction for a repository
@@ -99,6 +99,6 @@ Examples:
   muninn analyze --repo . --focus structure
   muninn analyze --repo . --details
   muninn analyze --repo . --json
-  muninn failures --repo . --operation repository-cli/test --since 14d
+  muninn failures repository-cli/test --repo . --since 14d
 `)
 }

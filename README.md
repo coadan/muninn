@@ -66,7 +66,7 @@ The main surface has two commands:
 - `muninn analyze` returns a ranked intervention queue that consolidates
   related findings, and supports focused evidence, owned-operation drill-down,
   and adjacent-period comparison. `--details` exposes the constituent findings.
-- `muninn failures --operation <tool/operation>` returns a bounded failure
+- `muninn failures <tool/operation>` returns a bounded failure
   timeline for one configured locally controlled operation.
 
 Narrow the analysis when investigating a specific kind of friction:
@@ -77,7 +77,7 @@ muninn analyze --repo . --focus structure
 muninn analyze --repo . --focus quality
 muninn analyze --repo . --operation repository-cli/test
 muninn analyze --repo . --details
-muninn failures --repo . --operation repository-cli/test --since 14d
+muninn failures repository-cli/test --repo . --since 14d
 ```
 
 `--compare previous` compares the current rolling lookback with the immediately
