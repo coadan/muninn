@@ -70,17 +70,18 @@ func buildCausalFindings(
 			Control:  "repository",
 			Title:    "context compactions concentrate in phase: " + compactionPhase,
 			Evidence: fmt.Sprintf(
-				"%s/%s compactions in completed tool tasks occurred during %s; that phase used %s fresh tokens, ~%s visible output tokens, and %s tool calls",
+				"%s/%s compactions in completed tool tasks occurred during %s across %s; that phase used %s fresh tokens, ~%s visible output tokens, and %s tool calls",
 				formatCodexCount(compactionMetrics.TotalCompactions),
 				formatCodexCount(observedCompactions),
 				compactionPhase,
+				formatCodexCountNoun(int64(compactionMetrics.CompactionSessions), "session"),
 				formatCodexCount(compactionMetrics.TotalFreshTokens),
 				formatCodexCount(compactionMetrics.TotalOutputTokens),
 				formatCodexCount(compactionMetrics.TotalToolCalls),
 			),
 			Action:     compactionPhaseAction(compactionPhase),
 			Count:      int(compactionMetrics.TotalCompactions),
-			Sessions:   compactionMetrics.Episodes,
+			Sessions:   compactionMetrics.CompactionSessions,
 			Target:     compactionPhase,
 			LastSeen:   report.GeneratedAt,
 			Lever:      "repository workflow",
@@ -198,6 +199,7 @@ func dominantCompactionPhase(
 		}
 	}
 	if dominant.TotalCompactions < 4 ||
+		dominant.CompactionSessions < 2 ||
 		ratio(float64(dominant.TotalCompactions), float64(total)) < 0.40 {
 		return "", taskPhaseAnalysis{}, total
 	}

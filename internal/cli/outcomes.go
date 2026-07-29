@@ -34,6 +34,7 @@ type codexTaskEpisode struct {
 	delivered         bool
 	reworkActive      bool
 	editSinceDelivery bool
+	sessionOrdinal    int
 }
 
 type taskPhaseCost struct {
@@ -1366,6 +1367,8 @@ type fileHotspotMetrics struct {
 
 type taskPhaseAnalysis struct {
 	Episodes             int                 `json:"episodes"`
+	Sessions             int                 `json:"sessions"`
+	CompactionSessions   int                 `json:"compactionSessions"`
 	TotalFreshTokens     int64               `json:"totalFreshTokens"`
 	TotalToolCalls       int64               `json:"totalToolCalls"`
 	TotalOutputTokens    int64               `json:"totalOutputTokens"`
@@ -1759,14 +1762,22 @@ func printFileHotspots(hotspots []fileHotspotMetrics, limit int) {
 func analyzeTaskPhases(episodes []codexTaskEpisode) map[string]taskPhaseAnalysis {
 	type phaseValues struct {
 		freshTokens, toolCalls, outputTokens, durations, failures, compactions []int64
+		sessions, compactionSessions                                           map[int]struct{}
 	}
 	values := map[string]*phaseValues{}
 	for _, episode := range episodes {
 		for phase, metrics := range episode.Phases {
 			current := values[phase]
 			if current == nil {
-				current = &phaseValues{}
+				current = &phaseValues{
+					sessions:           map[int]struct{}{},
+					compactionSessions: map[int]struct{}{},
+				}
 				values[phase] = current
+			}
+			current.sessions[episode.sessionOrdinal] = struct{}{}
+			if metrics.Compactions > 0 {
+				current.compactionSessions[episode.sessionOrdinal] = struct{}{}
 			}
 			current.freshTokens = append(current.freshTokens, phaseFreshTokens(metrics))
 			current.toolCalls = append(current.toolCalls, int64(metrics.ToolCalls))
@@ -1780,6 +1791,8 @@ func analyzeTaskPhases(episodes []codexTaskEpisode) map[string]taskPhaseAnalysis
 	for phase, current := range values {
 		analysis[phase] = taskPhaseAnalysis{
 			Episodes:             len(current.freshTokens),
+			Sessions:             len(current.sessions),
+			CompactionSessions:   len(current.compactionSessions),
 			TotalFreshTokens:     sumInt64(current.freshTokens),
 			TotalToolCalls:       sumInt64(current.toolCalls),
 			TotalOutputTokens:    sumInt64(current.outputTokens),
