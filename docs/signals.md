@@ -60,6 +60,12 @@ Rapid-poll findings likewise require at least three short continuation polls
 per affected session and at least five polls overall. Occasional early polling
 remains in the metrics without competing with concentrated wait/resume loops.
 
+Generic compaction findings require at least two compactions per affected
+session, a pattern spanning at least five sessions and 20% of the cohort, or a
+five-compaction single-session burst. Evidence reports fresh-token and cache
+cost for affected sessions only. Phase-specific compaction evidence remains
+available for completed tasks.
+
 ## Intervention construction
 
 An intervention contains:
