@@ -22,7 +22,9 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
 
 - Work directly on `main` unless the user requests another branch.
 - Commit coherent slices and reinstall after user-visible CLI changes.
-- Run `gofmt` and `go test ./...` before committing.
+- Format changed Go files, then run `make check`; use `make install` after a
+  user-visible CLI change. These are the canonical verification/install
+  surfaces; do not reread the Makefile for their syntax.
 - Use `apply_patch` for source edits.
 - Do not add a review gate unless the user requests one.
 
@@ -84,10 +86,13 @@ Keep dependencies, waits/resumes, approvals, adaptive investigations,
 conflicting mutations, and builds or mutations that write the same outputs
 sequential. Do not split otherwise batchable inspections across outer calls.
 
-Keep each nested call's output bounded. Prefer focused queries and per-call
-output limits; broad outputs that can truncate task evidence are not a valid
-efficiency gain. If a result is truncated, narrow or page only that result
-instead of rerunning the whole batch.
+Keep the combined planned output budget for one parallel inspection stage at
+or below 12,000 tokens, normally 2,000-4,000 per nested call. Run an
+independently high-output owner sequentially instead of letting it crowd out
+the other results. Prefer focused queries and per-call output limits; broad
+outputs that can truncate task evidence are not a valid efficiency gain. If a
+result is truncated, narrow or page only that result instead of rerunning the
+whole batch.
 
 ## Context-Efficient Coding
 
