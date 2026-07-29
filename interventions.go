@@ -14,11 +14,13 @@ type sessionIntervention struct {
 	Action            string   `json:"action"`
 	Lever             string   `json:"lever"`
 	Confidence        string   `json:"confidence"`
+	Priority          string   `json:"priority"`
 	PrimarySignal     string   `json:"primarySignal"`
 	SupportingSignals []string `json:"supportingSignals,omitempty"`
 	FindingCount      int      `json:"findingCount"`
 	LastSeen          string   `json:"lastSeen,omitempty"`
 	score             int
+	priority          int
 }
 
 func buildSessionInterventions(findings []sessionFinding) []sessionIntervention {
@@ -43,8 +45,10 @@ func buildSessionInterventions(findings []sessionFinding) []sessionIntervention 
 		members := groups[key]
 		primary := members[0]
 		maxScore := primary.score
+		maxPriority := interventionFindingPriority(primary)
 		for _, candidate := range members[1:] {
 			maxScore = max(maxScore, candidate.score)
+			maxPriority = max(maxPriority, interventionFindingPriority(candidate))
 			if interventionPrimaryPriority(candidate) > interventionPrimaryPriority(primary) ||
 				(interventionPrimaryPriority(candidate) == interventionPrimaryPriority(primary) &&
 					sessionFindingHigherImpact(candidate, primary)) {
@@ -75,14 +79,19 @@ func buildSessionInterventions(findings []sessionFinding) []sessionIntervention 
 			Action:            primary.Action,
 			Lever:             primary.Lever,
 			Confidence:        primary.Confidence,
+			Priority:          interventionPriorityLabel(maxPriority),
 			PrimarySignal:     primary.Signal,
 			SupportingSignals: supporting,
 			FindingCount:      len(members),
 			LastSeen:          latestInterventionFinding(members),
 			score:             maxScore + 75*(len(members)-1),
+			priority:          maxPriority,
 		})
 	}
 	sort.Slice(interventions, func(i, j int) bool {
+		if interventions[i].priority != interventions[j].priority {
+			return interventions[i].priority > interventions[j].priority
+		}
 		if interventions[i].score != interventions[j].score {
 			return interventions[i].score > interventions[j].score
 		}
@@ -95,6 +104,33 @@ func buildSessionInterventions(findings []sessionFinding) []sessionIntervention 
 		return interventions[i].ID < interventions[j].ID
 	})
 	return interventions
+}
+
+func interventionFindingPriority(finding sessionFinding) int {
+	switch {
+	case finding.Control == "local" && finding.Confidence == "high":
+		return 4
+	case finding.Confidence == "high",
+		finding.Control == "local" && finding.Confidence == "medium":
+		return 3
+	case finding.Confidence == "medium":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func interventionPriorityLabel(priority int) string {
+	switch priority {
+	case 4:
+		return "highest"
+	case 3:
+		return "high"
+	case 2:
+		return "medium"
+	default:
+		return "low"
+	}
 }
 
 func sessionInterventionKey(finding sessionFinding, dominantPhases map[string]bool) string {
@@ -175,7 +211,7 @@ func printSessionInterventions(interventions []sessionIntervention, limit int) {
 		rows = rows[:limit]
 	}
 	for _, intervention := range rows {
-		fmt.Printf("- [%s/%s] %s\n", intervention.Lever, intervention.Confidence, intervention.Title)
+		fmt.Printf("- [%s priority · %s/%s] %s\n", intervention.Priority, intervention.Lever, intervention.Confidence, intervention.Title)
 		fmt.Printf("  Intervention: %s\n", intervention.ID)
 		fmt.Printf("  Primary signal: %s\n", intervention.PrimarySignal)
 		fmt.Printf("  Evidence: %s.\n", strings.TrimSuffix(intervention.Evidence, "."))

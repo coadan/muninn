@@ -67,6 +67,32 @@ func TestBuildSessionInterventionsGroupsOwnedOperationsUnderTool(t *testing.T) {
 	}
 }
 
+func TestBuildSessionInterventionsRanksActionabilityBeforeRawCategoryScore(t *testing.T) {
+	findings := []sessionFinding{
+		{
+			Category: "session-loop", Signal: "session-loop/large", Title: "large generic cost",
+			Control: "repository", Lever: "instructions/docs", Confidence: "medium", score: 100_000,
+		},
+		{
+			Category: "diagnostic-failure", Signal: "diagnostic-failure/repeated", Title: "repeated failure",
+			Control: "repository", Lever: "source code", Confidence: "high", score: 1_000,
+		},
+		{
+			Category: "owned-operation", Signal: "owned-operation/cli/check", Target: "cli/check",
+			Title: "owned operation friction", Control: "local", Lever: "tooling", Confidence: "high", score: 500,
+		},
+	}
+	got := buildSessionInterventions(findings)
+	if len(got) != 3 {
+		t.Fatalf("interventions=%#v", got)
+	}
+	if got[0].ID != "intervention/tool/cli" || got[0].Priority != "highest" ||
+		got[1].ID != "intervention/diagnostic-failure/repeated" || got[1].Priority != "high" ||
+		got[2].ID != "intervention/session-loop/large" || got[2].Priority != "medium" {
+		t.Fatalf("actionability ordering mismatch: %#v", got)
+	}
+}
+
 func TestFindingsViewPrintsCompactInterventionQueue(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.Sessions = 4
