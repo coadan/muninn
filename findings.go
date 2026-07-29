@@ -597,17 +597,18 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Category: "session-loop",
 			Control:  "local",
 			Title:    "progress stalls while waiting on: " + context,
-			Evidence: fmt.Sprintf("%s low-output waits consumed %s across %s sessions; waits for tests, builds, local reviews, and remote GitHub review were classified separately",
+			Evidence: fmt.Sprintf("%s low-output waits consumed %s across %s; waits for tests, builds, local reviews, and remote GitHub review were classified separately",
 				formatCodexCount(int64(metrics.Calls)),
 				formatDurationSeconds(metrics.Seconds),
-				formatCodexCount(int64(metrics.Sessions)),
+				formatCodexCountNoun(int64(metrics.Sessions), "session"),
 			),
-			Action:   "Remove redundant polling, emit useful bounded progress, or make this operation asynchronous/resumable when the wait is not intrinsically required.",
-			Count:    metrics.Calls,
-			Sessions: metrics.Sessions,
-			Target:   context,
-			LastSeen: sessionFindingLastSeen(report, "progress-stall", context),
-			score:    440 + metrics.Sessions*20 + metrics.Calls*5 + int(metrics.Seconds/10),
+			Action:     "Remove redundant polling, emit useful bounded progress, or make this operation asynchronous/resumable when the wait is not intrinsically required.",
+			Count:      metrics.Calls,
+			Sessions:   metrics.Sessions,
+			Target:     context,
+			LastSeen:   sessionFindingLastSeen(report, "progress-stall", context),
+			Confidence: recurringPatternConfidence(metrics.Sessions),
+			score:      440 + metrics.Sessions*20 + metrics.Calls*5 + int(metrics.Seconds/10),
 		})
 	}
 
@@ -999,6 +1000,13 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 
 func oversizedOutputFindingConfidence(metrics codexOversizedOutputMetrics) string {
 	if metrics.Sessions >= 2 || metrics.MaxOutputBytes >= 4*oversizedOutputMinimumBytes {
+		return "medium"
+	}
+	return "low"
+}
+
+func recurringPatternConfidence(sessions int) string {
+	if sessions >= 2 {
 		return "medium"
 	}
 	return "low"

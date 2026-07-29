@@ -86,7 +86,9 @@ least half of those sessions. Per-category caps retain the highest-impact
 evidence rather than merely the most recent evidence.
 
 Output-heavy bundled discovery remains low confidence when observed in only
-one session; cross-session recurrence is required for medium confidence.
+one session; cross-session recurrence is required for medium confidence. The
+same rule prevents an isolated locally owned progress stall from becoming a
+high-priority intervention merely because its tool is locally controlled.
 
 Delegated sessions are classified by their strongest observable work mode:
 implementation, delivery, verification, research/review, other tool work, or
