@@ -93,6 +93,28 @@ func TestBuildSessionInterventionsRanksActionabilityBeforeRawCategoryScore(t *te
 	}
 }
 
+func TestBuildSessionInterventionsUsesPriorityDriverAsPrimaryEvidence(t *testing.T) {
+	findings := []sessionFinding{
+		{
+			Category: "verification-loop", Signal: "verification-loop/repair", Target: "check",
+			Title: "large repair loop", Control: "repository", Lever: "unknown",
+			Confidence: "medium", score: 100_000,
+		},
+		{
+			Category: "verification-loop", Signal: "verification-loop/repeated", Target: "check",
+			Title: "repeated check", Control: "repository", Lever: "tooling",
+			Confidence: "high", Action: "reuse the terminal result", score: 500,
+		},
+	}
+	got := buildSessionInterventions(findings)
+	if len(got) != 1 || got[0].Priority != "high" ||
+		got[0].PrimarySignal != "verification-loop/repeated" ||
+		got[0].Confidence != "high" || got[0].Lever != "tooling" ||
+		got[0].Action != "reuse the terminal result" {
+		t.Fatalf("priority driver was not primary evidence: %#v", got)
+	}
+}
+
 func TestFindingsViewPrintsCompactInterventionQueue(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.Sessions = 4

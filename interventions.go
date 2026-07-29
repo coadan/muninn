@@ -49,9 +49,13 @@ func buildSessionInterventions(findings []sessionFinding) []sessionIntervention 
 		for _, candidate := range members[1:] {
 			maxScore = max(maxScore, candidate.score)
 			maxPriority = max(maxPriority, interventionFindingPriority(candidate))
-			if interventionPrimaryPriority(candidate) > interventionPrimaryPriority(primary) ||
-				(interventionPrimaryPriority(candidate) == interventionPrimaryPriority(primary) &&
-					sessionFindingHigherImpact(candidate, primary)) {
+			candidatePriority := interventionFindingPriority(candidate)
+			primaryPriority := interventionFindingPriority(primary)
+			if candidatePriority > primaryPriority ||
+				(candidatePriority == primaryPriority &&
+					(interventionPrimaryPriority(candidate) > interventionPrimaryPriority(primary) ||
+						(interventionPrimaryPriority(candidate) == interventionPrimaryPriority(primary) &&
+							sessionFindingHigherImpact(candidate, primary)))) {
 				primary = candidate
 			}
 		}
