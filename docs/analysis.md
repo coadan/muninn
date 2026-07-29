@@ -27,6 +27,8 @@ events, so long-lived work remains in the selected cohort.
 The default report is compact JSON containing a bounded queue of distinct
 interventions. Related findings that point to the same locally controlled
 tool, owner, discovery workflow, or verification workflow are consolidated.
+Each intervention includes a `focus` value that can be passed directly to
+`muninn analyze --focus <value>` for the bounded analytical view that owns it.
 
 - `--details` selects the full JSON report or adds analytical rankings and
   constituent findings to `--human`.
@@ -36,6 +38,8 @@ tool, owner, discovery workflow, or verification workflow are consolidated.
 - `--focus friction` explicitly selects the broad default queue.
 - `--focus tooling`, `instructions`, `interface`, `structure`, `discovery`,
   `failures`, `loops`, `output`, or `quality` selects one concern.
+- `--focus loops` includes verification repair loops as well as session and
+  interface loops.
 - `--focus discovery` adds repository-relative read targets and the
   highest-output bundled search/read shapes. Human rows follow `--limit`;
   compact JSON includes the top five as `focusEvidence`. Targets inside a

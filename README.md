@@ -65,8 +65,9 @@ The main surface has two commands:
 
 - `muninn analyze` returns a compact JSON intervention queue that consolidates
   related findings, and supports focused evidence, owned-operation drill-down,
-  and adjacent-period comparison. `--details` selects the full JSON report;
-  `--human` selects readable terminal output.
+  and adjacent-period comparison. Each intervention provides its bounded
+  `focus` route. `--details` selects the full JSON report; `--human` selects
+  readable terminal output.
 - `muninn failures <tool/operation>` returns a bounded failure
   timeline for one configured locally controlled operation.
 

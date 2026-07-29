@@ -15,6 +15,7 @@ type sessionIntervention struct {
 	Lever             string   `json:"lever"`
 	Confidence        string   `json:"confidence"`
 	Priority          string   `json:"priority"`
+	Focus             string   `json:"focus"`
 	PrimarySignal     string   `json:"primarySignal"`
 	SupportingSignals []string `json:"supportingSignals,omitempty"`
 	FindingCount      int      `json:"findingCount"`
@@ -84,6 +85,7 @@ func buildSessionInterventions(findings []sessionFinding) []sessionIntervention 
 			Lever:             primary.Lever,
 			Confidence:        primary.Confidence,
 			Priority:          interventionPriorityLabel(maxPriority),
+			Focus:             sessionInterventionFocus(key, primary),
 			PrimarySignal:     primary.Signal,
 			SupportingSignals: supporting,
 			FindingCount:      len(members),
@@ -108,6 +110,17 @@ func buildSessionInterventions(findings []sessionFinding) []sessionIntervention 
 		return interventions[i].ID < interventions[j].ID
 	})
 	return diversifySessionInterventions(interventions)
+}
+
+func sessionInterventionFocus(id string, primary sessionFinding) string {
+	switch id {
+	case "intervention/workflow/discovery":
+		return "discovery"
+	case "intervention/workflow/verification":
+		return "loops"
+	default:
+		return sessionFindingFocus(primary)
+	}
 }
 
 func diversifySessionInterventions(interventions []sessionIntervention) []sessionIntervention {

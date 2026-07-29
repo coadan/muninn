@@ -50,6 +50,7 @@ func TestFilterSessionFindingsKeepsPublicFocusCategoriesDisjoint(t *testing.T) {
 		"instruction-discovery",
 		"instruction-footprint",
 		"session-loop",
+		"verification-loop",
 		"agent-interface",
 		"code-structure",
 		"discovery",
@@ -68,7 +69,7 @@ func TestFilterSessionFindingsKeepsPublicFocusCategoriesDisjoint(t *testing.T) {
 		"structure":    "code-structure",
 		"discovery":    "instruction-discovery,discovery",
 		"failures":     "recurring-failure,diagnostic-failure",
-		"loops":        "session-loop,agent-interface,delegation-cost",
+		"loops":        "session-loop,verification-loop,agent-interface,delegation-cost",
 		"output":       "output-cost",
 		"quality":      "delegation-cost,delivery-quality,task-cost",
 	}
@@ -83,6 +84,34 @@ func TestFilterSessionFindingsKeepsPublicFocusCategoriesDisjoint(t *testing.T) {
 		}
 		if strings.Join(got, ",") != expected {
 			t.Fatalf("%s focus categories=%q want %q", focus, strings.Join(got, ","), expected)
+		}
+	}
+}
+
+func TestEveryFindingCategoryHasAValidPreferredFocus(t *testing.T) {
+	categories := []string{
+		"owned-tool",
+		"owned-operation",
+		"default-candidate",
+		"recurring-failure",
+		"diagnostic-failure",
+		"output-cost",
+		"instruction-discovery",
+		"instruction-footprint",
+		"agent-interface",
+		"code-structure",
+		"discovery",
+		"session-loop",
+		"verification-loop",
+		"delegation-cost",
+		"delivery-quality",
+		"task-cost",
+	}
+	for _, category := range categories {
+		finding := sessionFinding{Category: category}
+		focus := sessionFindingFocus(finding)
+		if focus == "" || !sessionFocusCategories[focus][category] {
+			t.Fatalf("category %q has invalid preferred focus %q", category, focus)
 		}
 	}
 }
