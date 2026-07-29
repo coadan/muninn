@@ -750,17 +750,27 @@ func TestBuildSessionFindingsDoesNotTreatRootAsTaskCohort(t *testing.T) {
 
 func TestBuildSessionFindingsCompactionConfidenceRequiresRecurrence(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
-	report.Summary.Compactions = 3
+	report.Summary.Sessions = 3
+	report.Summary.Compactions = 5
 	report.Summary.SessionsWithCompactions = 1
-	report.Summary.Tokens.InputTokens = 1_000
-	report.Summary.Tokens.CachedInputTokens = 900
+	report.Summary.Tokens.InputTokens = 10_000
+	report.Summary.Tokens.CachedInputTokens = 9_000
+	report.Summary.Tokens.UncachedInputTokens = 1_000
+	report.Summary.Tokens.OutputTokens = 500
 
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
-	if len(findings) != 1 || findings[0].Confidence != "low" {
+	if len(findings) != 1 || findings[0].Confidence != "low" ||
+		!strings.Contains(findings[0].Evidence, "1,500 fresh tokens per session") {
 		t.Fatalf("single-session compaction confidence mismatch: %#v", findings)
 	}
 
+	report.Summary.Compactions = 3
 	report.Summary.SessionsWithCompactions = 2
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("one-off cross-session compactions produced finding: %#v", findings)
+	}
+
+	report.Summary.Compactions = 4
 	findings = buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 || findings[0].Confidence != "medium" {
 		t.Fatalf("recurring compaction confidence mismatch: %#v", findings)

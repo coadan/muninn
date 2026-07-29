@@ -458,15 +458,26 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
-	if summary.Compactions >= 3 || summary.SessionsWithCompactions >= 2 {
+	compactionBurst := summary.SessionsWithCompactions >= 2 &&
+		summary.Compactions >= 2*summary.SessionsWithCompactions
+	compactionWidespread := summary.SessionsWithCompactions >= 5 &&
+		summary.SessionsWithCompactions*5 >= summary.Sessions
+	singleSessionCompactionBurst := summary.SessionsWithCompactions == 1 &&
+		summary.Compactions >= 5
+	if compactionBurst || compactionWidespread || singleSessionCompactionBurst {
+		compactionTokens := compactionCohortTokens(report)
 		findings = append(findings, sessionFinding{
 			Category: "session-loop",
 			Control:  "instructions",
 			Title:    "context compactions indicate long or looping sessions",
-			Evidence: fmt.Sprintf("%s compactions across %s sessions with %.0f%% cached input",
+			Evidence: fmt.Sprintf("%s compactions across %s sessions; affected sessions used %s fresh tokens per session with %.0f%% cached input",
 				formatCodexCount(int64(summary.Compactions)),
 				formatCodexCount(int64(summary.SessionsWithCompactions)),
-				100*ratio(float64(summary.Tokens.CachedInputTokens), float64(summary.Tokens.InputTokens)),
+				formatCodexCount(perSessionTokens(
+					compactionTokens.UncachedInputTokens+compactionTokens.OutputTokens,
+					summary.SessionsWithCompactions,
+				)),
+				100*ratio(float64(compactionTokens.CachedInputTokens), float64(compactionTokens.InputTokens)),
 			),
 			Action:   config.Actions.SessionLoop,
 			Count:    summary.Compactions,
@@ -1689,6 +1700,19 @@ func perSessionTokens(total int64, sessions int) int64 {
 		return 0
 	}
 	return total / int64(sessions)
+}
+
+func compactionCohortTokens(report codexSessionInsightsReport) normalizedTokenUsage {
+	var tokens normalizedTokenUsage
+	for _, record := range report.sessionRecords {
+		if record.Compactions > 0 {
+			addNormalizedTokenUsage(&tokens, record.Tokens)
+		}
+	}
+	if tokens.InputTokens == 0 && tokens.OutputTokens == 0 {
+		return report.Summary.Tokens
+	}
+	return tokens
 }
 
 func formatDurationSeconds(seconds int64) string {
