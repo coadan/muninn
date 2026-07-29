@@ -12,8 +12,8 @@ Choose a horizon that matches the work being evaluated:
 ```bash
 muninn analyze --repo .
 muninn analyze --repo . --since 24h
-muninn analyze --repo . --since 1d --compare previous
-muninn analyze --repo . --since 7d --compare previous
+muninn analyze --repo . --since 1d --compare previous --human
+muninn analyze --repo . --since 7d --compare previous --human
 muninn analyze --repo . --since-commit HEAD~3
 muninn analyze --repo . --task task-id
 muninn analyze --repo . --since 14d --include-archived
@@ -24,13 +24,15 @@ events, so long-lived work remains in the selected cohort.
 
 ## Choose a view
 
-The default human report is a bounded queue of distinct interventions. Related
-findings that point to the same locally controlled tool, owner, discovery
-workflow, or verification workflow are consolidated.
+The default report is compact JSON containing a bounded queue of distinct
+interventions. Related findings that point to the same locally controlled
+tool, owner, discovery workflow, or verification workflow are consolidated.
 
-- `--details` adds analytical rankings and constituent findings. With JSON, it
-  selects the full report.
-- `--limit` bounds human detail rows.
+- `--details` selects the full JSON report or adds analytical rankings and
+  constituent findings to `--human`.
+- `--human` selects readable terminal output and is required by
+  `--compare previous`.
+- `--limit` bounds human detail rows and only applies with `--human`.
 - `--focus friction` explicitly selects the broad default queue.
 - `--focus tooling`, `instructions`, `interface`, `structure`, `discovery`,
   `failures`, `loops`, `output`, or `quality` selects one concern.
@@ -47,8 +49,8 @@ muninn analyze --repo . --focus output
 muninn analyze --repo . --focus structure
 muninn analyze --repo . --operation repository-cli
 muninn analyze --repo . --operation repository-cli/test --details
-muninn analyze --repo . --json
-muninn analyze --repo . --details --json
+muninn analyze --repo . --details
+muninn analyze --repo . --human
 ```
 
 Operation associations are not physical tool-call counts: one outer call can

@@ -162,6 +162,6 @@ Default JSON includes compact scope, intervention, outcome, profile,
 delegation, and diagnostic summaries. It omits task rows and high-cardinality
 maps except bounded focus evidence.
 
-Use `--details --json` for the complete analytical maps. `detailLevel` is
-`summary` or `full`. Both `interventions` and constituent `findings` remain
-available in the full report.
+Use `--details` for the complete analytical maps. `detailLevel` is `summary`
+or `full`. Both `interventions` and constituent `findings` remain available in
+the full report. Use `--human` when readable terminal output is preferred.

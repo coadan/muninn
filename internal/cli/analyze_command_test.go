@@ -2,10 +2,43 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestAnalyzeUsesJSONByDefault(t *testing.T) {
+	repository := t.TempDir()
+	sessions := t.TempDir()
+	output, err := captureStdout(t, func() error {
+		return cmdAnalyze(repository, []string{"--sessions-dir", sessions, "--no-cache"})
+	})
+	if err != nil {
+		t.Fatalf("default analysis: %v", err)
+	}
+	if !json.Valid([]byte(output)) {
+		t.Fatalf("default analysis did not emit JSON: %q", output)
+	}
+}
+
+func TestAnalyzeRejectsRemovedJSONFlag(t *testing.T) {
+	err := cmdAnalyze(t.TempDir(), []string{"--json"})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -json") {
+		t.Fatalf("removed --json flag error=%v", err)
+	}
+}
+
+func TestAnalyzeHumanOnlyModesAreExplicit(t *testing.T) {
+	err := cmdAnalyze(t.TempDir(), []string{"--compare", "previous"})
+	if err == nil || err.Error() != "--compare previous requires --human" {
+		t.Fatalf("comparison without --human error=%v", err)
+	}
+	err = cmdAnalyze(t.TempDir(), []string{"--limit", "10"})
+	if err == nil || err.Error() != "--limit requires --human" {
+		t.Fatalf("limit without --human error=%v", err)
+	}
+}
 
 func TestResolveAnalyzeOutputSelectionComposesDetailsWithOperations(t *testing.T) {
 	selection, err := resolveAnalyzeOutputSelection(true, "", "bwb", 10, false)
