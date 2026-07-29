@@ -78,6 +78,8 @@ type deliveryCohortMetrics struct {
 type verificationMetrics struct {
 	Deliveries            int `json:"deliveries"`
 	DeliveriesWithRework  int `json:"deliveriesWithRework"`
+	Runs                  int `json:"runs"`
+	RepeatedRuns          int `json:"repeatedRuns"`
 	FailedRuns            int `json:"failedRuns"`
 	FailFixPassDeliveries int `json:"failFixPassDeliveries"`
 }
@@ -141,6 +143,7 @@ type deliveryReworkTracker struct {
 	repairCandidateChecks    map[string]struct{}
 	repairedChecksAfterEdit  map[string]struct{}
 	currentDeliveryChecks    map[string]struct{}
+	checksRunAfterEdit       map[string]int
 }
 
 type downstreamQualityTracker struct {
@@ -488,10 +491,14 @@ func (tracker *deliveryReworkTracker) observeEdit(event normalizedSessionEvent) 
 	tracker.reviewAfterLatestEdit = false
 	tracker.passedChecksAfterEdit = nil
 	tracker.repairedChecksAfterEdit = nil
+	tracker.checksRunAfterEdit = nil
 }
 
 func (tracker *deliveryReworkTracker) observeTest(event normalizedSessionEvent, operations []string) {
 	checks := verificationCheckIDs(event, operations)
+	for _, check := range checks {
+		tracker.observeVerificationRun(check)
+	}
 	if event.Failed {
 		if tracker.failedChecksAwaitingEdit == nil {
 			tracker.failedChecksAwaitingEdit = map[string]struct{}{}
@@ -527,6 +534,31 @@ func (tracker *deliveryReworkTracker) observeTest(event normalizedSessionEvent, 
 		if _, repaired := tracker.repairCandidateChecks[check]; repaired {
 			tracker.repairedChecksAfterEdit[check] = struct{}{}
 		}
+	}
+}
+
+func (tracker *deliveryReworkTracker) observeVerificationRun(check string) {
+	if tracker.checksRunAfterEdit == nil {
+		tracker.checksRunAfterEdit = map[string]int{}
+	}
+	repeated := tracker.checksRunAfterEdit[check] > 0
+	tracker.checksRunAfterEdit[check]++
+
+	metrics := tracker.verification(check)
+	metrics.Runs++
+	if repeated {
+		metrics.RepeatedRuns++
+	}
+	tracker.metrics.VerificationChecks[check] = metrics
+	for cohort := range tracker.pendingEditCohorts {
+		cohortMetrics := tracker.cohort(cohort)
+		checkMetrics := cohortVerification(&cohortMetrics, check)
+		checkMetrics.Runs++
+		if repeated {
+			checkMetrics.RepeatedRuns++
+		}
+		cohortMetrics.VerificationChecks[check] = checkMetrics
+		tracker.metrics.Cohorts[cohort] = cohortMetrics
 	}
 }
 
@@ -582,6 +614,7 @@ func (tracker *deliveryReworkTracker) observeDelivery() {
 	tracker.failedChecksAwaitingEdit = nil
 	tracker.repairCandidateChecks = nil
 	tracker.repairedChecksAfterEdit = nil
+	tracker.checksRunAfterEdit = nil
 }
 
 func (tracker *deliveryReworkTracker) observeReviewDrivenEdit(event normalizedSessionEvent) {
@@ -973,6 +1006,8 @@ func addVerificationMetricsMap(target *map[string]verificationMetrics, addition 
 		current := (*target)[check]
 		current.Deliveries += metrics.Deliveries
 		current.DeliveriesWithRework += metrics.DeliveriesWithRework
+		current.Runs += metrics.Runs
+		current.RepeatedRuns += metrics.RepeatedRuns
 		current.FailedRuns += metrics.FailedRuns
 		current.FailFixPassDeliveries += metrics.FailFixPassDeliveries
 		(*target)[check] = current
@@ -1282,6 +1317,7 @@ type completionEpisodeAnalysis struct {
 	TailPhases               []taskPhaseTailAssociation   `json:"tailPhases,omitempty"`
 	FileHotspots             []fileHotspotMetrics         `json:"fileHotspots,omitempty"`
 	PerformanceCohorts       []taskPerformanceCohort      `json:"performanceCohorts,omitempty"`
+	OwnedOperationEffects    []ownedOperationEffect       `json:"ownedOperationEffects,omitempty"`
 	QualityCohorts           []taskQualityCohort          `json:"qualityCohorts,omitempty"`
 }
 
@@ -1329,6 +1365,7 @@ type taskPhaseAnalysis struct {
 	TotalToolCalls       int64               `json:"totalToolCalls"`
 	TotalOutputTokens    int64               `json:"totalOutputTokens"`
 	TotalDurationSeconds int64               `json:"totalDurationSeconds"`
+	TotalCompactions     int64               `json:"totalCompactions"`
 	FreshTokens          outcomeDistribution `json:"freshTokens"`
 	ToolCalls            outcomeDistribution `json:"toolCalls"`
 	VisibleOutputTokens  outcomeDistribution `json:"visibleOutputTokens"`
@@ -1411,6 +1448,7 @@ func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAna
 	analysis.Phases = analyzeTaskPhases(eligible)
 	analysis.TailPhases = analyzeTaskPhaseTailAssociations(eligible)
 	analysis.PerformanceCohorts = analyzeTaskPerformanceCohorts(eligible)
+	analysis.OwnedOperationEffects = analyzeOwnedOperationEffects(eligible)
 	return analysis
 }
 
@@ -1741,6 +1779,7 @@ func analyzeTaskPhases(episodes []codexTaskEpisode) map[string]taskPhaseAnalysis
 			TotalToolCalls:       sumInt64(current.toolCalls),
 			TotalOutputTokens:    sumInt64(current.outputTokens),
 			TotalDurationSeconds: sumInt64(current.durations),
+			TotalCompactions:     sumInt64(current.compactions),
 			FreshTokens:          summarizeOutcomeDistribution(current.freshTokens),
 			ToolCalls:            summarizeOutcomeDistribution(current.toolCalls),
 			VisibleOutputTokens:  summarizeOutcomeDistribution(current.outputTokens),
@@ -1859,7 +1898,9 @@ func taskCostDiagnosticOperations(operations map[string]int) map[string]int {
 		name := operation[strings.LastIndex(operation, "/")+1:]
 		name = strings.TrimSuffix(name, "-here")
 		switch name {
-		case "git-add", "git-commit", "git-push", "pr", "publish", "worktree-land":
+		case "git-add", "git-commit", "git-push", "pr", "publish",
+			"worktree-create", "worktree-land", "comments", "comments-wait",
+			"review", "update":
 			continue
 		}
 		filtered[operation] = calls

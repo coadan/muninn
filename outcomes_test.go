@@ -214,7 +214,12 @@ func TestTaskCostDiagnosticOperationsExcludesDeliveryBookkeeping(t *testing.T) {
 		"bwb/publish-here":     1,
 		"bwb/pr-here":          1,
 		"bwb/git-push-here":    1,
+		"repo/worktree-create": 1,
 		"repo/worktree-land":   1,
+		"repo/comments":        1,
+		"repo/comments-wait":   1,
+		"repo/review":          1,
+		"repo/update":          1,
 		"repo/publish-preview": 3,
 		"bwb/test":             2,
 	})
@@ -493,7 +498,8 @@ func TestDeliveryVerificationDoesNotCallRetryWithoutEditAFix(t *testing.T) {
 	tracker.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}, nil)
 
 	if got := tracker.metrics.VerificationChecks["repo/test-unit"]; got.FailedRuns != 1 ||
-		got.Deliveries != 1 || got.FailFixPassDeliveries != 0 {
+		got.Deliveries != 1 || got.FailFixPassDeliveries != 0 ||
+		got.Runs != 2 || got.RepeatedRuns != 1 {
 		t.Fatalf("retry without edit was classified as fail-fix-pass: %#v", got)
 	}
 }
@@ -512,8 +518,8 @@ func TestDeliveryVerificationMustFollowLatestEdit(t *testing.T) {
 	if tracker.metrics.DeliveriesWithPreTests != 0 {
 		t.Fatalf("test before latest edit counted as pre-delivery verification: %#v", tracker.metrics)
 	}
-	if len(tracker.metrics.VerificationChecks) != 0 {
-		t.Fatalf("stale check was attached to delivery: %#v", tracker.metrics.VerificationChecks)
+	if got := tracker.metrics.VerificationChecks["tests"]; got.Deliveries != 0 || got.Runs != 1 {
+		t.Fatalf("stale check attribution mismatch: %#v", tracker.metrics.VerificationChecks)
 	}
 	if got := tracker.metrics.Cohorts["src/parser"]; got.Deliveries != 1 || got.DeliveriesWithPreTests != 0 {
 		t.Fatalf("ordinary repository cohort mismatch: %#v", got)

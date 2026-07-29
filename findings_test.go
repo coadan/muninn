@@ -462,6 +462,22 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsRoutesRecurringFailureToFixedContext(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.FailureContexts = map[string]map[string]codexOccurrenceMetrics{
+		"test failure": {
+			"tests": {Count: 7, Sessions: 3},
+		},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 ||
+		findings[0].Title != "test failure recurs in tests" ||
+		findings[0].Target != "tests" ||
+		findings[0].Signal != "recurring-failure/tests" {
+		t.Fatalf("recurring failure context mismatch: %#v", findings)
+	}
+}
+
 func TestBuildSessionFindingsSuppressesOnlyExactSignal(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.ProgressStalls["bwb/api-start"] = codexWaitMetrics{Calls: 2, Seconds: 60, Sessions: 2}

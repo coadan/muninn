@@ -151,6 +151,8 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
+	findings = append(findings, buildCausalFindings(report, config)...)
+
 	for context, metrics := range summary.OversizedOutputs {
 		control := "repository"
 		if locallyControlledOutputContext(context, config.OwnedTools) {
@@ -213,18 +215,24 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			if metrics.Sessions < 2 || metrics.Count < 2 {
 				continue
 			}
+			control := "repository"
+			action := config.Actions.RecurringFailure
+			if locallyControlledOutputContext(context, config.OwnedTools) {
+				control = "local"
+				action = "Inspect this operation with `muninn failures --operation " + context + "`, fix the dominant owned failure boundary, and keep one focused regression check."
+			}
 			findings = append(findings, sessionFinding{
 				Category: "recurring-failure",
-				Control:  "repository",
-				Title:    reason + " recurs across sessions",
-				Evidence: fmt.Sprintf("%s calls in %s sessions; context: %s",
+				Control:  control,
+				Title:    reason + " recurs in " + context,
+				Evidence: fmt.Sprintf("%s calls in %s sessions",
 					formatCodexCount(int64(metrics.Count)),
 					formatCodexCount(int64(metrics.Sessions)),
-					context,
 				),
-				Action:   config.Actions.RecurringFailure,
+				Action:   action,
 				Count:    metrics.Count,
 				Sessions: metrics.Sessions,
+				Target:   context,
 				LastSeen: sessionFindingLastSeen(report, "failure", reason+"\x00"+context),
 				score:    400 + metrics.Sessions*30 + metrics.Count,
 			})
@@ -1322,6 +1330,13 @@ func verificationCheckComparison(totalDeliveries, totalRework int, check verific
 		comparison += fmt.Sprintf(
 			"; %s failed runs",
 			formatCodexCount(int64(check.FailedRuns)),
+		)
+	}
+	if check.RepeatedRuns > 0 {
+		comparison += fmt.Sprintf(
+			"; %s/%s runs repeated without an intervening edit",
+			formatCodexCount(int64(check.RepeatedRuns)),
+			formatCodexCount(int64(check.Runs)),
 		)
 	}
 	return comparison
