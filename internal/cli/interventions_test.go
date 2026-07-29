@@ -121,12 +121,12 @@ func TestBuildSessionInterventionsRanksActionabilityBeforeRawCategoryScore(t *te
 func TestBuildSessionInterventionsDefersAdditionalOwnerHotspots(t *testing.T) {
 	findings := []sessionFinding{
 		{
-			Category: "code-structure", Signal: "owner/src/first.go",
+			Category: "code-structure", Signal: "code-structure/file-cost/src/first.go",
 			Title: "first owner", Target: "src/first.go",
 			Lever: "source code", Confidence: "medium", score: 900,
 		},
 		{
-			Category: "code-structure", Signal: "owner/src/second.go",
+			Category: "code-structure", Signal: "code-structure/file-cost/src/second.go",
 			Title: "second owner", Target: "src/second.go",
 			Lever: "source code", Confidence: "medium", score: 800,
 		},
@@ -138,9 +138,9 @@ func TestBuildSessionInterventionsDefersAdditionalOwnerHotspots(t *testing.T) {
 
 	got := buildSessionInterventions(findings)
 	if len(got) != 3 ||
-		got[0].ID != "intervention/owner/src/first.go" ||
+		got[0].ID != "intervention/code-structure/file-cost/src/first.go" ||
 		got[1].ID != "intervention/output-cost/tool-exec" ||
-		got[2].ID != "intervention/owner/src/second.go" {
+		got[2].ID != "intervention/code-structure/file-cost/src/second.go" {
 		t.Fatalf("owner diversity mismatch: %#v", got)
 	}
 }

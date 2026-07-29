@@ -351,16 +351,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			if !materialOwnerRediscovery(metrics) {
 				continue
 			}
-			action := "Prefer the repository's bounded context/index surface or clarify the injected guidance so agents do not repeatedly reopen this small owner."
-			if filepath.Base(target) == "AGENTS.md" {
-				action = "AGENTS.md is normally injected into the session; clarify the relevant rule or tooling entry point, then avoid rereading the file."
-			} else if repositoryManifestTarget(target) {
-				action = "Add or use a bounded repository command for dependency/script discovery instead of repeatedly rereading the full manifest."
-			}
+			title, action := ownerRediscoveryPolicy(target, config)
 			findings = append(findings, sessionFinding{
 				Category: "instruction-discovery",
 				Control:  "repository",
-				Title:    "an authoritative owner is repeatedly rediscovered",
+				Title:    title,
 				Evidence: fmt.Sprintf("%s reads and %s search/read loops across %s sessions; rediscovery affected %s sessions; current size %s bytes",
 					formatCodexCount(int64(metrics.Reads)),
 					formatCodexCount(int64(metrics.SearchReadLoops)),
@@ -1361,7 +1356,7 @@ func sessionFindingLever(finding sessionFinding) (string, string) {
 		switch {
 		case instructionTarget(target):
 			return "instructions/docs", "high"
-		case repositoryManifestTarget(target):
+		case repositoryManifestTarget(target), buildEntrypointTarget(target):
 			return "tooling", "high"
 		default:
 			return "source code", "medium"

@@ -1,7 +1,14 @@
-.PHONY: check format-check test vet build install
+.PHONY: help check format-check test vet build install
 
 BINARY := muninn
 DIST := dist/$(BINARY)
+
+help:
+	@echo "Muninn development targets:"
+	@echo "  check    format-check, test, and vet"
+	@echo "  test     run Go tests"
+	@echo "  build    build dist/muninn"
+	@echo "  install  check, build, and install into GOPATH/bin"
 
 check: format-check test vet
 

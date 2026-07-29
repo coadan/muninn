@@ -7,6 +7,35 @@ import (
 	"strings"
 )
 
+func ownerRediscoveryPolicy(target string, config repositoryConfig) (title, action string) {
+	base := strings.ToLower(filepath.Base(target))
+	switch {
+	case base == "agents.md":
+		return "injected repository instructions are repeatedly reopened",
+			"AGENTS.md is normally injected into the session; clarify the relevant rule or tooling entry point, then avoid rereading the file."
+	case repositoryManifestTarget(target):
+		return "repository manifest is repeatedly reopened",
+			"Add or use a bounded repository command for dependency and script discovery instead of repeatedly rereading the full manifest."
+	case buildEntrypointTarget(target):
+		return "build entry point is repeatedly reopened",
+			"Expose canonical targets through a concise help target or injected workflow map, then invoke the target directly instead of reopening the build file."
+	case instructionTarget(target):
+		return "documentation entry point is repeatedly reopened",
+			"Route agents to the exact heading through a concise documentation index or heading-aware inspection surface instead of reopening the whole document."
+	default:
+		return "an authoritative owner is repeatedly rediscovered", config.Actions.SourceContext
+	}
+}
+
+func buildEntrypointTarget(target string) bool {
+	switch strings.ToLower(filepath.Base(target)) {
+	case "makefile", "justfile", "taskfile", "taskfile.yml", "taskfile.yaml":
+		return true
+	default:
+		return false
+	}
+}
+
 func materialOwnerRediscovery(metrics codexTargetMetrics) bool {
 	return metrics.Sessions >= 2 &&
 		metrics.RediscoverySessions >= 3 &&
