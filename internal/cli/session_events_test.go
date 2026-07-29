@@ -48,6 +48,8 @@ func TestCodexToolFailureReasonUsesFixedPrivacySafeLabels(t *testing.T) {
 		"listen tcp 127.0.0.1:8080: bind: address already in use":                 "port collision",
 		"dial tcp 127.0.0.1:8090: connection refused":                             "local service unavailable",
 		"Void development runtime stopped because SpacetimeDB is not running.":    "local service unavailable",
+		"Live diagnostic query has no tracked Void development runtime.":          "local service unavailable",
+		"SpacetimeDB schema inspection failed: failed to find database":           "local service unavailable",
 		"HTTP 502: Bad Gateway":                                                   "transient service failure",
 		"GitHub couldn't respond to GitHub's servers":                             "transient service failure",
 		"zsh: command not found: playwright-cli":                                  "missing executable",
