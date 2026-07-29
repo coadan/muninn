@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 79
+const codexSessionInsightsSchemaVersion = 81
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -110,6 +110,8 @@ type codexOversizedOutputMetrics struct {
 	OutputBytes    int64 `json:"outputBytes"`
 	MaxOutputBytes int64 `json:"maxOutputBytes"`
 	Sessions       int   `json:"sessions"`
+	NestedCalls    int   `json:"nestedCalls,omitempty"`
+	MaxNestedCalls int   `json:"maxNestedCalls,omitempty"`
 }
 
 type codexInlineMetrics struct {

@@ -420,15 +420,16 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 				OperationAttributionAmbiguous: true,
 			},
 			{
-				OccurredAt:      generatedAt.Add(-15 * time.Second),
-				Kind:            sessionEventToolOutput,
-				ToolName:        "exec",
-				Family:          "mixed shell",
-				Shape:           "tool exec",
-				OutputBytes:     70_000,
-				CallOccurredAt:  generatedAt.Add(-45 * time.Second),
-				OwnedOperations: []string{"bwb/status-env"},
-				ConcurrentBatch: true,
+				OccurredAt:          generatedAt.Add(-15 * time.Second),
+				Kind:                sessionEventToolOutput,
+				ToolName:            "exec",
+				Family:              "mixed shell",
+				Shape:               "tool exec",
+				OutputBytes:         70_000,
+				CallOccurredAt:      generatedAt.Add(-45 * time.Second),
+				OwnedOperations:     []string{"bwb/status-env"},
+				ConcurrentBatch:     true,
+				ConcurrentBatchSize: 3,
 			},
 		},
 	}
@@ -452,7 +453,8 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 	if _, exists := record.OversizedOutputs["bwb/status-env"]; exists {
 		t.Fatalf("ambiguous bundled output must not be charged to an owned operation: %#v", record.OversizedOutputs)
 	}
-	if got := record.OversizedOutputs["concurrent tool batch"]; got.Calls != 1 || got.OutputBytes != 70_000 {
+	if got := record.OversizedOutputs["concurrent tool batch"]; got.Calls != 1 ||
+		got.OutputBytes != 70_000 || got.NestedCalls != 3 || got.MaxNestedCalls != 3 {
 		t.Fatalf("concurrent batch output should use its shared stage context: %#v", got)
 	}
 	if len(record.OversizedOutputs) != 4 {
@@ -462,6 +464,26 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 	addCodexSessionToReport(&report, map[string]*codexTaskInsights{}, record)
 	if got := report.Summary.OversizedOutputs["search"]; got.Sessions != 1 {
 		t.Fatalf("oversized output sessions=%#v want one", got)
+	}
+}
+
+func TestConcurrentBatchUsesSharedStageBudget(t *testing.T) {
+	record := newCodexSessionRecord()
+	recordOversizedOutput(record, normalizedSessionEvent{
+		ConcurrentBatch:     true,
+		ConcurrentBatchSize: 2,
+		OutputBytes:         concurrentBatchOutputMinimumBytes - 1,
+	}, nil)
+	if len(record.OversizedOutputs) != 0 {
+		t.Fatalf("below-budget concurrent batch was retained: %#v", record.OversizedOutputs)
+	}
+	recordOversizedOutput(record, normalizedSessionEvent{
+		ConcurrentBatch:     true,
+		ConcurrentBatchSize: 2,
+		OutputBytes:         concurrentBatchOutputMinimumBytes,
+	}, nil)
+	if got := record.OversizedOutputs["concurrent tool batch"]; got.Calls != 1 || got.NestedCalls != 2 {
+		t.Fatalf("at-budget concurrent batch missing: %#v", got)
 	}
 }
 

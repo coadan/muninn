@@ -208,18 +208,35 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		if context == "concurrent tool batch" {
 			title = "concurrent tool batches exceed the shared output budget"
 		}
+		evidence := fmt.Sprintf("%s returned %s bytes (~%s visible tokens) across %s; largest call %s bytes",
+			formatCodexCountNoun(int64(metrics.Calls), "call"),
+			formatCodexCount(metrics.OutputBytes),
+			formatCodexCount(estimatedTokens(metrics.OutputBytes)),
+			formatCodexCountNoun(int64(metrics.Sessions), "session"),
+			formatCodexCount(metrics.MaxOutputBytes),
+		)
+		if context == "concurrent tool batch" && metrics.NestedCalls > 0 {
+			evidence += fmt.Sprintf("; %s nested calls averaged ~%s visible output tokens each; largest batch contained %s calls",
+				formatCodexCount(int64(metrics.NestedCalls)),
+				formatCodexCount(estimatedTokens(metrics.OutputBytes)/int64(metrics.NestedCalls)),
+				formatCodexCount(int64(metrics.MaxNestedCalls)),
+			)
+		}
+		action := oversizedOutputAction(context, control)
+		if context == "concurrent tool batch" && metrics.MaxNestedCalls > 0 {
+			action = fmt.Sprintf(
+				"Keep independent calls concurrent, but keep the combined stage below ~%s visible tokens; for the largest %s-call batch, budget about %s tokens per result if divided evenly, and inspect every partial result.",
+				formatCodexCount(concurrentBatchOutputBudgetTokens),
+				formatCodexCount(int64(metrics.MaxNestedCalls)),
+				formatCodexCount(concurrentBatchOutputBudgetTokens/int64(metrics.MaxNestedCalls)),
+			)
+		}
 		findings = append(findings, sessionFinding{
-			Category: "output-cost",
-			Control:  control,
-			Title:    title,
-			Evidence: fmt.Sprintf("%s returned %s bytes (~%s visible tokens) across %s; largest call %s bytes",
-				formatCodexCountNoun(int64(metrics.Calls), "call"),
-				formatCodexCount(metrics.OutputBytes),
-				formatCodexCount(estimatedTokens(metrics.OutputBytes)),
-				formatCodexCountNoun(int64(metrics.Sessions), "session"),
-				formatCodexCount(metrics.MaxOutputBytes),
-			),
-			Action:     oversizedOutputAction(context, control),
+			Category:   "output-cost",
+			Control:    control,
+			Title:      title,
+			Evidence:   evidence,
+			Action:     action,
 			Count:      metrics.Calls,
 			Sessions:   metrics.Sessions,
 			Target:     context,

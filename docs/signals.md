@@ -66,6 +66,13 @@ five-compaction single-session burst. Evidence reports fresh-token and cache
 cost for affected sessions only. Phase-specific compaction evidence remains
 available for completed tasks.
 
+Concurrent-batch output findings retain the number of nested calls, never
+their code or arguments. Evidence reports average visible output per nested
+call and the largest batch size so agents can divide a shared stage budget
+without serializing independent work. The default concurrent stage budget is
+12,000 visible tokens; the action divides that budget by the largest observed
+batch size to suggest an even per-result cap.
+
 ## Intervention construction
 
 An intervention contains:
