@@ -563,6 +563,37 @@ func TestConcurrentBatchOversizedOutputFindingPreservesBatching(t *testing.T) {
 	}
 }
 
+func TestOversizedOutputFindingRequiresRecurrenceOrSevereCall(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.OversizedOutputs["isolated moderate"] = codexOversizedOutputMetrics{
+		Calls: 1, OutputBytes: 40_157, MaxOutputBytes: 40_157, Sessions: 1,
+	}
+	findings, err := filterSessionFindings(
+		buildSessionFindings(report, defaultRepositoryConfig()),
+		"output",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("isolated moderate output became a finding: %#v", findings)
+	}
+
+	report.Summary.OversizedOutputs["isolated severe"] = codexOversizedOutputMetrics{
+		Calls: 1, OutputBytes: 60_000, MaxOutputBytes: 60_000, Sessions: 1,
+	}
+	findings, err = filterSessionFindings(
+		buildSessionFindings(report, defaultRepositoryConfig()),
+		"output",
+	)
+	if err != nil || len(findings) != 1 ||
+		findings[0].Signal != "output-cost/isolated-severe" ||
+		!strings.Contains(findings[0].Evidence, "1 call") ||
+		!strings.Contains(findings[0].Evidence, "1 session") {
+		t.Fatalf("isolated severe output finding mismatch: findings=%#v err=%v", findings, err)
+	}
+}
+
 func TestSessionFindingSignalIsPrivacySafeAndBounded(t *testing.T) {
 	finding := sessionFinding{
 		Category: "session-loop",

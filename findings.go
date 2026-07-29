@@ -154,6 +154,9 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	findings = append(findings, buildCausalFindings(report, config)...)
 
 	for context, metrics := range summary.OversizedOutputs {
+		if metrics.Calls < 2 && metrics.MaxOutputBytes < 2*oversizedOutputMinimumBytes {
+			continue
+		}
 		control := "repository"
 		if locallyControlledOutputContext(context, config.OwnedTools) {
 			control = "local"
@@ -166,11 +169,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Category: "output-cost",
 			Control:  control,
 			Title:    title,
-			Evidence: fmt.Sprintf("%s calls returned %s bytes (~%s visible tokens) across %s sessions; largest call %s bytes",
-				formatCodexCount(int64(metrics.Calls)),
+			Evidence: fmt.Sprintf("%s returned %s bytes (~%s visible tokens) across %s; largest call %s bytes",
+				formatCodexCountNoun(int64(metrics.Calls), "call"),
 				formatCodexCount(metrics.OutputBytes),
 				formatCodexCount(estimatedTokens(metrics.OutputBytes)),
-				formatCodexCount(int64(metrics.Sessions)),
+				formatCodexCountNoun(int64(metrics.Sessions), "session"),
 				formatCodexCount(metrics.MaxOutputBytes),
 			),
 			Action:   oversizedOutputAction(context, control),

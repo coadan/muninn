@@ -2688,6 +2688,13 @@ func formatCodexCount(value int64) string {
 	return raw
 }
 
+func formatCodexCountNoun(value int64, noun string) string {
+	if value != 1 {
+		noun += "s"
+	}
+	return formatCodexCount(value) + " " + noun
+}
+
 func truncateCodexLabel(value string, max int) string {
 	if len(value) <= max {
 		return value
