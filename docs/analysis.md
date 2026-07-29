@@ -68,13 +68,13 @@ configured operation:
 muninn failures repository-cli/test --repo . --since 14d
 muninn failures repository-cli/test --repo . --task task-id
 muninn failures repository-cli/test --repo . \
-  --reason "test harness protocol" --json
+  --reason "test harness protocol"
 ```
 
-The timeline contains timestamps, fixed failure and command-family labels,
-output byte counts, and attribution quality. It never contains raw session
-content or provider identifiers. The default limit is 20 events and the
-maximum is 100.
+The JSON timeline contains its schema version, timestamps, fixed failure and
+command-family labels, output byte counts, and attribution quality. It never
+contains raw session content or provider identifiers. The default limit is 20
+events and the maximum is 100.
 
 ## Control the local index
 

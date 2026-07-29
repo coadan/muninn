@@ -24,14 +24,15 @@ type ownedOperationFailureEvent struct {
 }
 
 type ownedOperationFailureReport struct {
-	Provider   string                       `json:"provider"`
-	Repository string                       `json:"repository"`
-	Since      time.Time                    `json:"since"`
-	Generated  time.Time                    `json:"generatedAt"`
-	Operation  string                       `json:"operation"`
-	Reason     string                       `json:"reason,omitempty"`
-	Task       string                       `json:"task,omitempty"`
-	Events     []ownedOperationFailureEvent `json:"events"`
+	SchemaVersion int                          `json:"schemaVersion"`
+	Provider      string                       `json:"provider"`
+	Repository    string                       `json:"repository"`
+	Since         time.Time                    `json:"since"`
+	Generated     time.Time                    `json:"generatedAt"`
+	Operation     string                       `json:"operation"`
+	Reason        string                       `json:"reason,omitempty"`
+	Task          string                       `json:"task,omitempty"`
+	Events        []ownedOperationFailureEvent `json:"events"`
 }
 
 func cmdFailures(root string, args []string) error {
@@ -53,15 +54,14 @@ func cmdFailures(root string, args []string) error {
 	reason := fs.String("reason", "", "only include this fixed failure-reason label")
 	task := fs.String("task", "", "only include failures attributed to this exact worktree/task ID")
 	limit := fs.Int("limit", 20, "maximum failure events to return (1-100)")
-	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	setFlagSetUsage(
 		fs,
-		"muninn failures <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>] [--json]",
+		"muninn failures <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>]",
 		"Inspect bounded, privacy-safe failure events for one configured owned operation.",
 		[]string{
 			"muninn failures repository-cli/test --repo . --since 14d",
 			"muninn failures repository-cli/test --repo . --task task-id",
-			"muninn failures repository-cli/test --repo . --reason \"test harness protocol\" --json",
+			"muninn failures repository-cli/test --repo . --reason \"test harness protocol\"",
 		},
 	)
 	if len(args) == 0 {
@@ -143,23 +143,23 @@ func cmdFailures(root string, args []string) error {
 	if err != nil {
 		return err
 	}
+	if events == nil {
+		events = []ownedOperationFailureEvent{}
+	}
 	report := ownedOperationFailureReport{
-		Provider:   source.Name(),
-		Repository: filepath.Base(resolvedRepoRoot),
-		Since:      since,
-		Generated:  now,
-		Operation:  selectedOperation,
-		Reason:     strings.TrimSpace(*reason),
-		Task:       strings.TrimSpace(*task),
-		Events:     events,
+		SchemaVersion: codexSessionInsightsSchemaVersion,
+		Provider:      source.Name(),
+		Repository:    filepath.Base(resolvedRepoRoot),
+		Since:         since,
+		Generated:     now,
+		Operation:     selectedOperation,
+		Reason:        strings.TrimSpace(*reason),
+		Task:          strings.TrimSpace(*task),
+		Events:        events,
 	}
-	if *jsonOutput {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(report)
-	}
-	printOwnedOperationFailureReport(report)
-	return nil
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(report)
 }
 
 func configuredOwnedOperationIDs(configs []ownedToolConfig) []string {
@@ -180,36 +180,4 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func printOwnedOperationFailureReport(report ownedOperationFailureReport) {
-	fmt.Printf("Owned-operation failures for %s\n", report.Operation)
-	fmt.Printf("Repository: %s\n", report.Repository)
-	fmt.Printf("Since: %s\n", report.Since.Format(time.RFC3339))
-	if report.Reason != "" {
-		fmt.Printf("Reason: %s\n", report.Reason)
-	}
-	if report.Task != "" {
-		fmt.Printf("Task: %s\n", report.Task)
-	}
-	fmt.Printf("Events: %s\n", formatCodexCount(int64(len(report.Events))))
-	for _, event := range report.Events {
-		attribution := "exact"
-		if event.AttributionAmbiguous {
-			attribution = "ambiguous"
-		}
-		family := event.Family
-		if family == "" {
-			family = "(unknown)"
-		}
-		fmt.Printf(
-			"- %s · task %s · %s · %s · %s bytes · %s\n",
-			event.OccurredAt.Format(time.RFC3339),
-			event.Task,
-			event.Reason,
-			family,
-			formatCodexCount(event.OutputBytes),
-			attribution,
-		)
-	}
 }
