@@ -16,6 +16,10 @@ is current.
 Muninn compares completed-task duration and outer tool roundtrips at p50 and
 p90. It also normalizes cross-call transitions, repeated same-family
 transitions, rapid polls, and progress stalls by completed tool tasks.
+These results are returned under `trends`: `completedTasks`,
+`matchedPerformance`, `matchedQuality`, and `rates`. Each metric includes its
+baseline/current values, direction, denominator, and minimum sample when one
+applies.
 
 Matched cohorts require the same agent kind, model, reasoning effort, and
 derived task family, with at least three completed tasks in each period. Each
@@ -29,10 +33,11 @@ least five sessions in each period; smaller windows return
 `sufficientEvidence: false` without direction labels. Use `--details` for the
 full reports behind both cohorts.
 
-The baseline and current reports always expose their observed values. Treat
-rate changes as material only when both periods have an adequate denominator:
-five sessions for session rates, ten completed tasks for task rates, and 100
-tool calls for call-normalized rates.
+The baseline and current reports always expose their observed values. Rate
+metrics are direction-labeled only when both periods have an adequate
+denominator: five sessions for session rates, ten completed tasks for task
+rates, and 100 tool calls for call-normalized rates. Smaller samples return
+`direction: "insufficient"`.
 
 ## Quality-adjusted verdict
 
@@ -65,6 +70,7 @@ or 30 minutes without activity.
 States are `improving`, `unchanged`, `regressed`, `new`, `resolved`, or
 `not-observed`. `resolved` requires a current passed Heimdal report for the same
 rehashed test target; disappearance alone is `not-observed`.
+The structured result is returned in `diagnostics`.
 
 Task families are privacy-safe derived labels based on owned targets and
 operation families. Prompts and raw commands are not retained. Even matched

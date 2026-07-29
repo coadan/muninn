@@ -63,20 +63,59 @@ type compactSessionInsightsReport struct {
 }
 
 type comparisonSessionInsightsReport struct {
-	SchemaVersion     int                   `json:"schemaVersion"`
-	DetailLevel       string                `json:"detailLevel"`
-	Comparison        string                `json:"comparison"`
-	BaselineLabel     string                `json:"baselineLabel"`
-	Baseline          any                   `json:"baseline"`
-	Current           any                   `json:"current"`
-	Cohorts           comparisonCohortsJSON `json:"cohorts"`
-	QualityVerdict    string                `json:"qualityAdjustedVerdict"`
-	InterventionTrend interventionTrendJSON `json:"interventionTrend"`
+	SchemaVersion     int                       `json:"schemaVersion"`
+	DetailLevel       string                    `json:"detailLevel"`
+	Comparison        string                    `json:"comparison"`
+	BaselineLabel     string                    `json:"baselineLabel"`
+	Baseline          any                       `json:"baseline"`
+	Current           any                       `json:"current"`
+	Cohorts           comparisonCohortsJSON     `json:"cohorts"`
+	Trends            comparisonTrendsJSON      `json:"trends"`
+	QualityVerdict    string                    `json:"qualityAdjustedVerdict"`
+	Diagnostics       comparisonDiagnosticsJSON `json:"diagnostics"`
+	InterventionTrend interventionTrendJSON     `json:"interventionTrend"`
+}
+
+type comparisonTrendsJSON struct {
+	CompletedTasks     trendSummaryJSON  `json:"completedTasks"`
+	MatchedPerformance trendSummaryJSON  `json:"matchedPerformance"`
+	MatchedQuality     trendSummaryJSON  `json:"matchedQuality"`
+	Rates              []trendMetricJSON `json:"rates"`
+}
+
+type trendSummaryJSON struct {
+	SufficientEvidence bool              `json:"sufficientEvidence"`
+	Direction          string            `json:"direction"`
+	Improved           int               `json:"improved"`
+	Regressed          int               `json:"regressed"`
+	Unchanged          int               `json:"unchanged"`
+	Insufficient       int               `json:"insufficient"`
+	Metrics            []trendMetricJSON `json:"metrics"`
+}
+
+type trendMetricJSON struct {
+	Name           string  `json:"name"`
+	Baseline       float64 `json:"baseline"`
+	Current        float64 `json:"current"`
+	Direction      string  `json:"direction"`
+	LowerIsBetter  bool    `json:"lowerIsBetter"`
+	Percentage     bool    `json:"percentage"`
+	BaselineSample int     `json:"baselineSample"`
+	CurrentSample  int     `json:"currentSample"`
+	MinimumSample  int     `json:"minimumSample"`
 }
 
 type comparisonCohortsJSON struct {
-	Performance []performanceCohortComparisonJSON `json:"performance"`
-	Quality     []qualityCohortComparisonJSON     `json:"quality"`
+	TotalPerformance int                               `json:"totalPerformance"`
+	TotalQuality     int                               `json:"totalQuality"`
+	Performance      []performanceCohortComparisonJSON `json:"performance"`
+	Quality          []qualityCohortComparisonJSON     `json:"quality"`
+}
+
+type comparisonDiagnosticsJSON struct {
+	Available         bool                                 `json:"available"`
+	TotalFingerprints int                                  `json:"totalFingerprints"`
+	Fingerprints      []diagnosticEffectivenessFingerprint `json:"fingerprints"`
 }
 
 type performanceCohortComparisonJSON struct {
@@ -183,6 +222,14 @@ func comparisonJSONPayload(
 		performance,
 		5,
 	)
+	performanceMetrics := matchedPerformanceTrendMetrics(performance)
+	qualityMetrics := matchedQualityTrendMetrics(quality)
+	completedMetrics := completedTaskTrendMetrics(baseline, current)
+	for index := range completedMetrics {
+		completedMetrics[index].BaselineSample = baseline.Outcomes.ToolUsingCompleted
+		completedMetrics[index].CurrentSample = current.Outcomes.ToolUsingCompleted
+		completedMetrics[index].MinimumSample = minimumTrendTasks
+	}
 	return comparisonSessionInsightsReport{
 		SchemaVersion: current.SchemaVersion,
 		DetailLevel:   detailLevel,
@@ -190,24 +237,86 @@ func comparisonJSONPayload(
 		BaselineLabel: "previous non-overlapping " + formatTrendLookback(current.AnalysisScope.LookbackSeconds),
 		Baseline:      analysisJSONPayload(baseline, detailed),
 		Current:       analysisJSONPayload(current, detailed),
-		Cohorts:       comparisonCohortPayload(performance, quality),
+		Cohorts:       comparisonCohortPayload(performance, quality, detailed),
+		Trends: comparisonTrendsJSON{
+			CompletedTasks:     buildTrendSummaryJSON(completedMetrics),
+			MatchedPerformance: buildTrendSummaryJSON(performanceMetrics),
+			MatchedQuality:     buildTrendSummaryJSON(qualityMetrics),
+			Rates:              trendMetricPayload(sessionRateTrendMetrics(baseline, current)),
+		},
 		QualityVerdict: qualityAdjustedPerformanceVerdict(
 			baseline,
 			current,
-			matchedPerformanceTrendMetrics(performance),
-			matchedQualityTrendMetrics(quality),
+			performanceMetrics,
+			qualityMetrics,
 		),
+		Diagnostics:       comparisonDiagnosticPayload(baseline.Diagnostics, current.Diagnostics, detailed),
 		InterventionTrend: buildInterventionTrendJSON(baseline, current, detailed),
 	}
+}
+
+func buildTrendSummaryJSON(metrics []trendMetric) trendSummaryJSON {
+	label, improved, regressed, unchanged := summarizeTrendDirections(metrics)
+	insufficient := 0
+	for _, metric := range metrics {
+		if materialTrendDirection(metric) == "insufficient" {
+			insufficient++
+		}
+	}
+	unchanged -= insufficient
+	sufficient := len(metrics) > 0 && insufficient == 0
+	if !sufficient {
+		label = "insufficient"
+	}
+	return trendSummaryJSON{
+		SufficientEvidence: sufficient,
+		Direction:          label,
+		Improved:           improved,
+		Regressed:          regressed,
+		Unchanged:          unchanged,
+		Insufficient:       insufficient,
+		Metrics:            trendMetricPayload(metrics),
+	}
+}
+
+func trendMetricPayload(metrics []trendMetric) []trendMetricJSON {
+	rows := make([]trendMetricJSON, 0, len(metrics))
+	for _, metric := range metrics {
+		rows = append(rows, trendMetricJSON{
+			Name:           metric.Name,
+			Baseline:       metric.Baseline,
+			Current:        metric.Current,
+			Direction:      materialTrendDirection(metric),
+			LowerIsBetter:  metric.LowerIsBetter,
+			Percentage:     metric.PercentageDisplay,
+			BaselineSample: metric.BaselineSample,
+			CurrentSample:  metric.CurrentSample,
+			MinimumSample:  metric.MinimumSample,
+		})
+	}
+	return rows
 }
 
 func comparisonCohortPayload(
 	performance []matchedPerformanceCohort,
 	quality []matchedQualityCohort,
+	detailed bool,
 ) comparisonCohortsJSON {
+	totalPerformance := len(performance)
+	totalQuality := len(quality)
+	if !detailed {
+		if len(performance) > compactInterventionLimit {
+			performance = performance[:compactInterventionLimit]
+		}
+		if len(quality) > compactInterventionLimit {
+			quality = quality[:compactInterventionLimit]
+		}
+	}
 	payload := comparisonCohortsJSON{
-		Performance: make([]performanceCohortComparisonJSON, 0, len(performance)),
-		Quality:     make([]qualityCohortComparisonJSON, 0, len(quality)),
+		TotalPerformance: totalPerformance,
+		TotalQuality:     totalQuality,
+		Performance:      make([]performanceCohortComparisonJSON, 0, len(performance)),
+		Quality:          make([]qualityCohortComparisonJSON, 0, len(quality)),
 	}
 	for _, cohort := range performance {
 		payload.Performance = append(payload.Performance, performanceCohortComparisonJSON{
@@ -222,6 +331,26 @@ func comparisonCohortPayload(
 		})
 	}
 	return payload
+}
+
+func comparisonDiagnosticPayload(
+	baseline,
+	current diagnosticFailureAnalysis,
+	detailed bool,
+) comparisonDiagnosticsJSON {
+	analysis := compareDiagnosticEffectiveness(baseline, current)
+	fingerprints := analysis.Fingerprints
+	if !detailed && len(fingerprints) > compactInterventionLimit {
+		fingerprints = fingerprints[:compactInterventionLimit]
+	}
+	if fingerprints == nil {
+		fingerprints = []diagnosticEffectivenessFingerprint{}
+	}
+	return comparisonDiagnosticsJSON{
+		Available:         analysis.Available,
+		TotalFingerprints: len(analysis.Fingerprints),
+		Fingerprints:      fingerprints,
+	}
 }
 
 func buildInterventionTrendJSON(

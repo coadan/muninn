@@ -119,6 +119,8 @@ func TestComparisonJSONPayloadKeepsCohortsAndStructuredInterventionTrend(t *test
 	current := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	baseline.Summary.Sessions = minimumTrendSessions
 	current.Summary.Sessions = minimumTrendSessions + 1
+	baseline.Outcomes.ToolUsingCompleted = minimumTrendTasks
+	current.Outcomes.ToolUsingCompleted = minimumTrendTasks
 	current.AnalysisScope.LookbackSeconds = 24 * 60 * 60
 	baseline.Profiles = modelEffortAnalysis{Available: true}
 	current.Profiles = modelEffortAnalysis{Available: true}
@@ -163,6 +165,13 @@ func TestComparisonJSONPayloadKeepsCohortsAndStructuredInterventionTrend(t *test
 		payload.QualityVerdict == "" {
 		t.Fatalf("comparison cohorts missing: %#v", payload)
 	}
+	if !payload.Trends.CompletedTasks.SufficientEvidence ||
+		len(payload.Trends.CompletedTasks.Metrics) == 0 ||
+		!payload.Trends.MatchedPerformance.SufficientEvidence ||
+		!payload.Trends.MatchedQuality.SufficientEvidence ||
+		len(payload.Trends.Rates) == 0 {
+		t.Fatalf("structured comparison trends missing: %#v", payload.Trends)
+	}
 
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -173,6 +182,8 @@ func TestComparisonJSONPayloadKeepsCohortsAndStructuredInterventionTrend(t *test
 		`"baseline"`,
 		`"current"`,
 		`"profiles"`,
+		`"trends"`,
+		`"diagnostics"`,
 		`"interventionTrend"`,
 	} {
 		if !strings.Contains(string(raw), want) {
@@ -188,8 +199,65 @@ func TestComparisonJSONPayloadDoesNotDirectionLabelSparseWindows(t *testing.T) {
 	current.Summary.Sessions = minimumTrendSessions
 	baseline.Interventions = []sessionIntervention{{ID: "intervention/resolved"}}
 
-	trend := comparisonJSONPayload(baseline, current, false).InterventionTrend
+	payload := comparisonJSONPayload(baseline, current, false)
+	trend := payload.InterventionTrend
 	if trend.SufficientEvidence || len(trend.Resolved) != 0 {
 		t.Fatalf("sparse windows received direction labels: %#v", trend)
+	}
+	if payload.Trends.CompletedTasks.SufficientEvidence ||
+		payload.Trends.CompletedTasks.Direction != "insufficient" {
+		t.Fatalf("sparse completed-task windows received a direction: %#v", payload.Trends.CompletedTasks)
+	}
+}
+
+func TestCompactComparisonBoundsCohortsAndDiagnostics(t *testing.T) {
+	var performance []matchedPerformanceCohort
+	var quality []matchedQualityCohort
+	baselineDiagnostics := diagnosticFailureAnalysis{}
+	for index := 0; index < compactInterventionLimit+2; index++ {
+		taskFamily := "family-" + string(rune('a'+index))
+		performance = append(performance, matchedPerformanceCohort{
+			Baseline: taskPerformanceCohort{TaskFamily: taskFamily},
+			Current:  taskPerformanceCohort{TaskFamily: taskFamily},
+		})
+		quality = append(quality, matchedQualityCohort{
+			Baseline: taskQualityCohort{TaskFamily: taskFamily},
+			Current:  taskQualityCohort{TaskFamily: taskFamily},
+		})
+		baselineDiagnostics.Failures = append(
+			baselineDiagnostics.Failures,
+			diagnosticFailureAggregate{Fingerprint: "fingerprint-" + string(rune('a'+index))},
+		)
+	}
+
+	compactCohorts := comparisonCohortPayload(performance, quality, false)
+	if compactCohorts.TotalPerformance != len(performance) ||
+		compactCohorts.TotalQuality != len(quality) ||
+		len(compactCohorts.Performance) != compactInterventionLimit ||
+		len(compactCohorts.Quality) != compactInterventionLimit {
+		t.Fatalf("compact cohort bounds mismatch: %#v", compactCohorts)
+	}
+	fullCohorts := comparisonCohortPayload(performance, quality, true)
+	if len(fullCohorts.Performance) != len(performance) ||
+		len(fullCohorts.Quality) != len(quality) {
+		t.Fatalf("full cohorts were bounded: %#v", fullCohorts)
+	}
+
+	compactDiagnostics := comparisonDiagnosticPayload(
+		baselineDiagnostics,
+		diagnosticFailureAnalysis{},
+		false,
+	)
+	if compactDiagnostics.TotalFingerprints != len(baselineDiagnostics.Failures) ||
+		len(compactDiagnostics.Fingerprints) != compactInterventionLimit {
+		t.Fatalf("compact diagnostic bounds mismatch: %#v", compactDiagnostics)
+	}
+	fullDiagnostics := comparisonDiagnosticPayload(
+		baselineDiagnostics,
+		diagnosticFailureAnalysis{},
+		true,
+	)
+	if len(fullDiagnostics.Fingerprints) != len(baselineDiagnostics.Failures) {
+		t.Fatalf("full diagnostics were bounded: %#v", fullDiagnostics)
 	}
 }

@@ -62,12 +62,10 @@ func formatTrendLookback(seconds int64) string {
 	return duration.String()
 }
 
-func printSessionTrend(
+func sessionRateTrendMetrics(
 	baseline,
 	current codexSessionInsightsReport,
-	baselineLabel string,
-	includeFindingTrend bool,
-) {
+) []trendMetric {
 	base := baseline.Summary
 	now := current.Summary
 	baseRework := base.DeliveryRework
@@ -240,47 +238,7 @@ func printSessionTrend(
 			LowerIsBetter: true,
 		})
 	}
-	fmt.Printf("\nPerformance comparison against %q:\n", baselineLabel)
-	printCompletedTaskTrend(baseline, current)
-	matchedMetrics := printMatchedPerformanceTrend(baseline, current)
-	matchedQuality := printMatchedQualityTrend(baseline, current)
-	fmt.Printf("\nSession and quality rates:\n")
-	fmt.Printf("%-32s %12s %12s %12s\n", "RATE", "BASELINE", "CURRENT", "CHANGE")
-	for _, metric := range metrics {
-		direction := materialTrendDirection(metric)
-		if metric.PercentageDisplay {
-			fmt.Printf("%-32s %11.1f%% %11.1f%% %12s\n",
-				metric.Name,
-				100*metric.Baseline,
-				100*metric.Current,
-				direction,
-			)
-			continue
-		}
-		fmt.Printf("%-32s %12.1f %12.1f %12s\n",
-			metric.Name,
-			metric.Baseline,
-			metric.Current,
-			direction,
-		)
-	}
-	fmt.Printf(
-		"Quality-adjusted verdict: %s\n",
-		qualityAdjustedPerformanceVerdict(baseline, current, matchedMetrics, matchedQuality),
-	)
-	if base.Sessions >= minimumTrendSessions && now.Sessions >= minimumTrendSessions {
-		printInterventionTrend(baseline.Interventions, current.Interventions)
-		if includeFindingTrend {
-			printFindingTrend(baseline.Findings, current.Findings)
-		}
-	} else {
-		fmt.Printf(
-			"\nIntervention trend: insufficient evidence (%s baseline, %s current; need at least %s each).\n",
-			formatCodexCountNoun(int64(base.Sessions), "session"),
-			formatCodexCountNoun(int64(now.Sessions), "session"),
-			formatCodexCount(minimumTrendSessions),
-		)
-	}
+	return metrics
 }
 
 type matchedQualityCohort struct {
@@ -364,57 +322,6 @@ func matchedQualityTrendMetrics(matched []matchedQualityCohort) []trendMetric {
 	return metrics
 }
 
-func printMatchedQualityTrend(baseline, current codexSessionInsightsReport) []trendMetric {
-	performance := matchedPerformanceCohorts(
-		baseline.Outcomes.PerformanceCohorts,
-		current.Outcomes.PerformanceCohorts,
-		3,
-	)
-	matched := matchedQualityCohorts(
-		baseline.Outcomes.QualityCohorts,
-		current.Outcomes.QualityCohorts,
-		performance,
-		5,
-	)
-	if len(matched) == 0 {
-		fmt.Println("Matched quality cohorts: insufficient shared delivery evidence.")
-		return nil
-	}
-	fmt.Println("\nMatched delivery quality (minimum 5 deliveries in each period):")
-	fmt.Printf("%-42s %11s %15s %15s\n", "COHORT", "DELIVERIES", "REVIEW FIX B→C", "FAILURE B→C")
-	rows := matched
-	if len(rows) > 8 {
-		rows = rows[:8]
-	}
-	for _, row := range rows {
-		label := strings.Join([]string{
-			row.Baseline.AgentKind,
-			row.Baseline.Model + "/" + row.Baseline.ReasoningEffort,
-			row.Baseline.TaskFamily,
-		}, " ")
-		fmt.Printf(
-			"%-42s %5d→%-5d %6.1f%%→%-6.1f%% %6.1f%%→%-6.1f%%\n",
-			truncateCodexLabel(label, 42),
-			row.Baseline.Deliveries,
-			row.Current.Deliveries,
-			100*ratio(float64(row.Baseline.ReviewFixes), float64(row.Baseline.Deliveries)),
-			100*ratio(float64(row.Current.ReviewFixes), float64(row.Current.Deliveries)),
-			100*ratio(float64(row.Baseline.DownstreamFailure), float64(row.Baseline.Deliveries)),
-			100*ratio(float64(row.Current.DownstreamFailure), float64(row.Current.Deliveries)),
-		)
-	}
-	metrics := matchedQualityTrendMetrics(matched)
-	label, improved, regressed, unchanged, _ := summarizeQualityDirections(metrics)
-	fmt.Printf(
-		"Matched quality direction: %s (%d improved, %d regressed, %d unchanged across equal-weight cohort rates).\n",
-		label,
-		improved,
-		regressed,
-		unchanged,
-	)
-	return metrics
-}
-
 type matchedPerformanceCohort struct {
 	Baseline taskPerformanceCohort
 	Current  taskPerformanceCohort
@@ -474,63 +381,6 @@ func matchedPerformanceTrendMetrics(matched []matchedPerformanceCohort) []trendM
 			LowerIsBetter: true,
 		},
 	}
-}
-
-func printMatchedPerformanceTrend(
-	baseline,
-	current codexSessionInsightsReport,
-) []trendMetric {
-	matched := matchedPerformanceCohorts(
-		baseline.Outcomes.PerformanceCohorts,
-		current.Outcomes.PerformanceCohorts,
-		3,
-	)
-	if len(matched) == 0 {
-		fmt.Println("Matched performance cohorts: insufficient shared model/effort/task-family evidence.")
-		return nil
-	}
-	fmt.Println("\nMatched model/effort/task-family cohorts (minimum 3 completed tasks in each period):")
-	fmt.Printf(
-		"%-42s %11s %13s %13s\n",
-		"COHORT",
-		"TASKS B→C",
-		"RT P50 B→C",
-		"TIME P50 B→C",
-	)
-	rows := matched
-	if len(rows) > 8 {
-		rows = rows[:8]
-	}
-	for _, row := range rows {
-		label := strings.Join(
-			[]string{
-				row.Baseline.AgentKind,
-				row.Baseline.Model + "/" + row.Baseline.ReasoningEffort,
-				row.Baseline.TaskFamily,
-			},
-			" ",
-		)
-		fmt.Printf(
-			"%-42s %5d→%-5d %6d→%-6d %7s→%-7s\n",
-			truncateCodexLabel(label, 42),
-			row.Baseline.CompletedTasks,
-			row.Current.CompletedTasks,
-			row.Baseline.ToolRoundtrips.P50,
-			row.Current.ToolRoundtrips.P50,
-			formatDurationSeconds(row.Baseline.DurationSeconds.P50),
-			formatDurationSeconds(row.Current.DurationSeconds.P50),
-		)
-	}
-	metrics := matchedPerformanceTrendMetrics(matched)
-	label, improved, regressed, unchanged := summarizeTrendDirections(metrics)
-	fmt.Printf(
-		"Matched efficiency direction: %s (%d improved, %d regressed, %d unchanged across equal-weight cohort medians).\n",
-		label,
-		improved,
-		regressed,
-		unchanged,
-	)
-	return metrics
 }
 
 func qualityAdjustedPerformanceVerdict(
@@ -766,119 +616,11 @@ func summarizeTrendDirections(metrics []trendMetric) (label string, improved, re
 	return label, improved, regressed, unchanged
 }
 
-func printCompletedTaskTrend(baseline, current codexSessionInsightsReport) {
-	metrics := completedTaskTrendMetrics(baseline, current)
-	if len(metrics) == 0 {
-		fmt.Printf("Completed-task direction: insufficient completed tool-task evidence.\n")
-		return
-	}
-	if baseline.Outcomes.ToolUsingCompleted < 10 || current.Outcomes.ToolUsingCompleted < 10 {
-		fmt.Printf(
-			"Completed-task direction: insufficient evidence (%s baseline, %s current; need at least 10 each).\n",
-			formatCodexCount(int64(baseline.Outcomes.ToolUsingCompleted)),
-			formatCodexCount(int64(current.Outcomes.ToolUsingCompleted)),
-		)
-		return
-	}
-	fmt.Printf(
-		"Completed-task cost (%s baseline → %s current; lower is better):\n",
-		formatCodexCount(int64(baseline.Outcomes.ToolUsingCompleted)),
-		formatCodexCount(int64(current.Outcomes.ToolUsingCompleted)),
-	)
-	fmt.Printf("%-32s %12s %12s %12s\n", "METRIC", "BASELINE", "CURRENT", "CHANGE")
-	for _, metric := range metrics {
-		fmt.Printf(
-			"%-32s %12.0f %12.0f %12s\n",
-			metric.Name,
-			metric.Baseline,
-			metric.Current,
-			materialTrendDirection(metric),
-		)
-	}
-	label, improved, regressed, unchanged := summarizeTrendDirections(metrics)
-	fmt.Printf(
-		"Observed completed-task direction: %s (%d improved, %d regressed, %d unchanged). Rolling task mix is observational, not causal.\n",
-		label,
-		improved,
-		regressed,
-		unchanged,
-	)
-	if baseline.SchemaVersion < 30 && current.SchemaVersion >= 30 {
-		fmt.Printf("The older comparison schema cannot separate cached input, uncached input, and model output.\n")
-	}
-}
-
 func ratio(numerator, denominator float64) float64 {
 	if denominator <= 0 {
 		return 0
 	}
 	return numerator / denominator
-}
-
-func printInterventionTrend(baseline, current []sessionIntervention) {
-	baselineByID := map[string]sessionIntervention{}
-	currentByID := map[string]sessionIntervention{}
-	for _, intervention := range baseline {
-		baselineByID[intervention.ID] = intervention
-	}
-	for _, intervention := range current {
-		currentByID[intervention.ID] = intervention
-	}
-	var resolved, introduced, persistent []sessionIntervention
-	for id, intervention := range baselineByID {
-		if _, exists := currentByID[id]; exists {
-			persistent = append(persistent, intervention)
-		} else {
-			resolved = append(resolved, intervention)
-		}
-	}
-	for id, intervention := range currentByID {
-		if _, exists := baselineByID[id]; !exists {
-			introduced = append(introduced, intervention)
-		}
-	}
-	fmt.Printf("\nIntervention trend: %s resolved, %s persistent, %s new.\n",
-		formatCodexCount(int64(len(resolved))),
-		formatCodexCount(int64(len(persistent))),
-		formatCodexCount(int64(len(introduced))),
-	)
-	printInterventionTrendRows("Resolved", resolved, 4)
-	printInterventionTrendRows("New", introduced, 4)
-}
-
-func printInterventionTrendRows(label string, interventions []sessionIntervention, limit int) {
-	if len(interventions) == 0 {
-		return
-	}
-	sort.Slice(interventions, func(i, j int) bool {
-		leftPriority := interventionTrendPriority(interventions[i])
-		rightPriority := interventionTrendPriority(interventions[j])
-		if leftPriority != rightPriority {
-			return leftPriority > rightPriority
-		}
-		if interventions[i].FindingCount != interventions[j].FindingCount {
-			return interventions[i].FindingCount > interventions[j].FindingCount
-		}
-		if interventions[i].score != interventions[j].score {
-			return interventions[i].score > interventions[j].score
-		}
-		return interventions[i].ID < interventions[j].ID
-	})
-	rows := interventions
-	if len(rows) > limit {
-		rows = rows[:limit]
-	}
-	fmt.Printf("%s interventions:\n", label)
-	for _, intervention := range rows {
-		fmt.Printf("- [%s priority] %s · %s\n",
-			intervention.Priority,
-			intervention.ID,
-			intervention.Title,
-		)
-	}
-	if len(rows) < len(interventions) {
-		fmt.Printf("- ... %d more\n", len(interventions)-len(rows))
-	}
 }
 
 func interventionTrendPriority(intervention sessionIntervention) int {
@@ -894,70 +636,5 @@ func interventionTrendPriority(intervention sessionIntervention) int {
 		return 2
 	default:
 		return 1
-	}
-}
-
-func printFindingTrend(baseline, current []sessionFinding) {
-	baselineByKey := map[string]sessionFinding{}
-	currentByKey := map[string]sessionFinding{}
-	for _, finding := range baseline {
-		baselineByKey[findingTrendKey(finding)] = finding
-	}
-	for _, finding := range current {
-		currentByKey[findingTrendKey(finding)] = finding
-	}
-	var resolved, introduced, persistent []sessionFinding
-	for key, finding := range baselineByKey {
-		if _, exists := currentByKey[key]; exists {
-			persistent = append(persistent, finding)
-		} else {
-			resolved = append(resolved, finding)
-		}
-	}
-	for key, finding := range currentByKey {
-		if _, exists := baselineByKey[key]; !exists {
-			introduced = append(introduced, finding)
-		}
-	}
-	fmt.Printf("\nFinding trend: %s resolved, %s persistent, %s new.\n",
-		formatCodexCount(int64(len(resolved))),
-		formatCodexCount(int64(len(persistent))),
-		formatCodexCount(int64(len(introduced))),
-	)
-	printFindingTrendRows("Resolved", resolved, 4)
-	printFindingTrendRows("New", introduced, 4)
-}
-
-func findingTrendKey(finding sessionFinding) string {
-	return finding.Category + "\x00" + finding.Title + "\x00" + finding.Target
-}
-
-func printFindingTrendRows(label string, findings []sessionFinding, limit int) {
-	if len(findings) == 0 {
-		return
-	}
-	sort.Slice(findings, func(i, j int) bool {
-		if findings[i].Category != findings[j].Category {
-			return findings[i].Category < findings[j].Category
-		}
-		if findings[i].Target != findings[j].Target {
-			return findings[i].Target < findings[j].Target
-		}
-		return findings[i].Title < findings[j].Title
-	})
-	rows := findings
-	if len(rows) > limit {
-		rows = rows[:limit]
-	}
-	fmt.Printf("%s findings:\n", label)
-	for _, finding := range rows {
-		target := ""
-		if finding.Target != "" {
-			target = " · " + finding.Target
-		}
-		fmt.Printf("- [%s] %s%s\n", finding.Category, finding.Title, target)
-	}
-	if len(rows) < len(findings) {
-		fmt.Printf("- ... %d more\n", len(findings)-len(rows))
 	}
 }
