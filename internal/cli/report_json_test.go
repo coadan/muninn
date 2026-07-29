@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -58,10 +60,14 @@ func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
 }
 
 func TestAnalysisJSONPayloadIncludesBoundedDiscoveryFocusEvidence(t *testing.T) {
-	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	root := t.TempDir()
+	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
 	report.AnalysisScope.Focus = "discovery"
 	for index := 0; index < 7; index++ {
 		target := string(rune('a'+index)) + ".go"
+		if err := os.WriteFile(filepath.Join(root, target), []byte("current"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", target, err)
+		}
 		report.Summary.ReadTargets[target] = codexTargetMetrics{
 			Reads: 10 - index, SearchReadLoops: 10 - index, Sessions: 2,
 		}

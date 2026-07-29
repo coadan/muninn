@@ -26,11 +26,14 @@ type discoveryShapeEvidence struct {
 	EstimatedOutputTokens int64  `json:"estimatedOutputTokens"`
 }
 
-func buildDiscoveryFocusEvidence(summary codexSessionInsightsSummary, limit int) discoveryFocusEvidence {
+func buildDiscoveryFocusEvidence(summary codexSessionInsightsSummary, repositoryRoot string, limit int) discoveryFocusEvidence {
 	evidence := discoveryFocusEvidence{
 		ReadTargets: make([]discoveryReadTargetEvidence, 0, len(summary.ReadTargets)),
 	}
 	for target, metrics := range summary.ReadTargets {
+		if _, _, exists := repositoryTargetSize(repositoryRoot, target); !exists {
+			continue
+		}
 		evidence.ReadTargets = append(evidence.ReadTargets, discoveryReadTargetEvidence{
 			Target:              target,
 			Reads:               metrics.Reads,
