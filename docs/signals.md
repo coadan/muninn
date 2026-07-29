@@ -158,10 +158,12 @@ remain in detailed reports.
 
 ## JSON detail levels
 
-Default JSON includes compact scope, intervention, outcome, profile,
-delegation, and diagnostic summaries. It omits task rows and high-cardinality
-maps except bounded focus evidence.
+Default JSON includes compact scope, outcome, profile, delegation, diagnostic,
+and top-five intervention summaries. `totalInterventions` reports the full
+queue size. The compact report omits constituent findings, task rows, and
+high-cardinality maps except bounded focus evidence.
 
 Use `--details` for the complete analytical maps. `detailLevel` is `summary`
-or `full`. Both `interventions` and constituent `findings` remain available in
-the full report. Use `--human` when readable terminal output is preferred.
+or `full`. Both the complete `interventions` queue and constituent `findings`
+are available in the full report. Use `--human` when readable terminal output
+is preferred.
