@@ -35,6 +35,11 @@ from becoming a high-priority intervention.
 Per-category caps retain the highest-impact evidence rather than merely the
 newest evidence.
 
+File-cost findings are observational correlations, not proof that source
+structure caused task cost. A standalone `code-structure/file-cost` signal is
+therefore low priority until another finding corroborates the same owner; it
+remains available in the detailed report for the required ownership trace.
+
 Owned-tool findings use definitely attributed invocations. Excessive-operation
 findings use definitely attributed successful invocations so failure-repair
 loops are not also described as redundant final verification. Tools or
@@ -54,7 +59,7 @@ Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned
 operation's definite calls (or the tool's calls when no operation matches).
 Muninn retains only the normalized operation and flag names, such as
-`muninn/analyze/json`; it never retains the flag value. `--help` and
+`repository-cli/check/quiet`; it never retains the flag value. `--help` and
 `--version` are excluded because they describe discovery rather than a
 workflow default. For an
 `operationsOnly` shared launcher, fixed flags in the matched operation prefix

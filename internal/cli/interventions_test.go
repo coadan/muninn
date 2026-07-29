@@ -138,9 +138,12 @@ func TestBuildSessionInterventionsDefersAdditionalOwnerHotspots(t *testing.T) {
 
 	got := buildSessionInterventions(findings)
 	if len(got) != 3 ||
-		got[0].ID != "intervention/code-structure/file-cost/src/first.go" ||
-		got[1].ID != "intervention/output-cost/tool-exec" ||
-		got[2].ID != "intervention/code-structure/file-cost/src/second.go" {
+		got[0].ID != "intervention/output-cost/tool-exec" ||
+		got[0].Priority != "medium" ||
+		got[1].ID != "intervention/code-structure/file-cost/src/first.go" ||
+		got[1].Priority != "low" ||
+		got[2].ID != "intervention/code-structure/file-cost/src/second.go" ||
+		got[2].Priority != "low" {
 		t.Fatalf("owner diversity mismatch: %#v", got)
 	}
 }
