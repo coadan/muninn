@@ -35,35 +35,36 @@ type modelEffortProfile struct {
 }
 
 type delegationAnalysis struct {
-	Available                           bool           `json:"available"`
-	ParentSessions                      int            `json:"parentSessions"`
-	DelegatingParents                   int            `json:"delegatingParents"`
-	SubagentSessions                    int            `json:"subagentSessions"`
-	LinkedSubagents                     int            `json:"linkedSubagents"`
-	UnlinkedSubagents                   int            `json:"unlinkedSubagents"`
-	ParentsOutsideScope                 int            `json:"parentsOutsideScope"`
-	CompletedSubagents                  int            `json:"completedSubagents"`
-	IncompleteSubagents                 int            `json:"incompleteSubagents"`
-	ParentFreshTokens                   int64          `json:"parentFreshTokens"`
-	SubagentFreshTokens                 int64          `json:"subagentFreshTokens"`
-	SubagentFreshTokenShare             float64        `json:"subagentFreshTokenShare"`
-	ParentToolCalls                     int            `json:"parentToolCalls"`
-	SubagentToolCalls                   int            `json:"subagentToolCalls"`
-	CoordinationCalls                   int            `json:"coordinationCalls"`
-	CoordinationFreshTokens             int64          `json:"coordinationFreshTokens"`
-	CoordinationOutputTokens            int64          `json:"coordinationOutputTokens"`
-	CoordinationCallsByAction           map[string]int `json:"coordinationCallsByAction,omitempty"`
-	ChildrenWithUniqueEdits             int            `json:"childrenWithUniqueEdits"`
-	ChildrenWithEditOverlap             int            `json:"childrenWithEditOverlap"`
-	EditOverlapTargets                  int            `json:"editOverlapTargets"`
-	ChildrenWithReadOverlap             int            `json:"childrenWithReadOverlap"`
-	ReadOverlapTargets                  int            `json:"readOverlapTargets"`
-	OverlappingChildFreshTokens         int64          `json:"overlappingChildFreshTokens"`
-	NoObservableContributionSubagents   int            `json:"noObservableContributionSubagents"`
-	NoObservableContributionFreshTokens int64          `json:"noObservableContributionFreshTokens"`
-	SummedSubagentDurationSeconds       int64          `json:"summedSubagentDurationSeconds"`
-	DelegatedWallSeconds                int64          `json:"delegatedWallSeconds"`
-	SubagentConcurrencyFactor           float64        `json:"subagentConcurrencyFactor"`
+	Available                     bool             `json:"available"`
+	ParentSessions                int              `json:"parentSessions"`
+	DelegatingParents             int              `json:"delegatingParents"`
+	SubagentSessions              int              `json:"subagentSessions"`
+	LinkedSubagents               int              `json:"linkedSubagents"`
+	UnlinkedSubagents             int              `json:"unlinkedSubagents"`
+	ParentsOutsideScope           int              `json:"parentsOutsideScope"`
+	CompletedSubagents            int              `json:"completedSubagents"`
+	IncompleteSubagents           int              `json:"incompleteSubagents"`
+	ParentFreshTokens             int64            `json:"parentFreshTokens"`
+	SubagentFreshTokens           int64            `json:"subagentFreshTokens"`
+	SubagentFreshTokenShare       float64          `json:"subagentFreshTokenShare"`
+	ParentToolCalls               int              `json:"parentToolCalls"`
+	SubagentToolCalls             int              `json:"subagentToolCalls"`
+	CoordinationAvailable         bool             `json:"coordinationAvailable"`
+	CoordinationCalls             int              `json:"coordinationCalls"`
+	CoordinationFreshTokens       int64            `json:"coordinationFreshTokens"`
+	CoordinationOutputTokens      int64            `json:"coordinationOutputTokens"`
+	CoordinationCallsByAction     map[string]int   `json:"coordinationCallsByAction,omitempty"`
+	ChildrenWithUniqueEdits       int              `json:"childrenWithUniqueEdits"`
+	ChildrenWithEditOverlap       int              `json:"childrenWithEditOverlap"`
+	EditOverlapTargets            int              `json:"editOverlapTargets"`
+	ChildrenWithReadOverlap       int              `json:"childrenWithReadOverlap"`
+	ReadOverlapTargets            int              `json:"readOverlapTargets"`
+	OverlappingChildFreshTokens   int64            `json:"overlappingChildFreshTokens"`
+	SubagentsByWorkMode           map[string]int   `json:"subagentsByWorkMode"`
+	SubagentFreshTokensByWorkMode map[string]int64 `json:"subagentFreshTokensByWorkMode"`
+	SummedSubagentDurationSeconds int64            `json:"summedSubagentDurationSeconds"`
+	DelegatedWallSeconds          int64            `json:"delegatedWallSeconds"`
+	SubagentConcurrencyFactor     float64          `json:"subagentConcurrencyFactor"`
 }
 
 type modelEffortProfileAccumulator struct {
@@ -166,7 +167,11 @@ func analyzeModelEffortProfiles(records []codexSessionRecord) modelEffortAnalysi
 }
 
 func analyzeDelegation(records []codexSessionRecord) delegationAnalysis {
-	analysis := delegationAnalysis{CoordinationCallsByAction: map[string]int{}}
+	analysis := delegationAnalysis{
+		CoordinationCallsByAction:     map[string]int{},
+		SubagentsByWorkMode:           map[string]int{},
+		SubagentFreshTokensByWorkMode: map[string]int64{},
+	}
 	byLineage := map[string]*codexSessionRecord{}
 	for index := range records {
 		record := &records[index]
@@ -175,6 +180,9 @@ func analyzeDelegation(records []codexSessionRecord) delegationAnalysis {
 			byLineage[record.LineageKey] = record
 		}
 		if record.AgentKind == "subagent" {
+			workMode := delegatedWorkMode(*record)
+			analysis.SubagentsByWorkMode[workMode]++
+			analysis.SubagentFreshTokensByWorkMode[workMode] += recordFreshTokens(*record)
 			analysis.SubagentSessions++
 			analysis.SubagentFreshTokens += recordFreshTokens(*record)
 			analysis.SubagentToolCalls += record.ToolCalls
@@ -192,6 +200,7 @@ func analyzeDelegation(records []codexSessionRecord) delegationAnalysis {
 			if !delegationToolName(action) {
 				continue
 			}
+			analysis.CoordinationAvailable = true
 			analysis.CoordinationCalls += calls
 			analysis.CoordinationCallsByAction[action] += calls
 		}
@@ -267,10 +276,6 @@ func analyzeDelegation(records []codexSessionRecord) delegationAnalysis {
 		if childReadOverlap {
 			analysis.ChildrenWithReadOverlap++
 		}
-		if len(child.EditTargets) == 0 && child.DeliveryRework.Deliveries == 0 {
-			analysis.NoObservableContributionSubagents++
-			analysis.NoObservableContributionFreshTokens += recordFreshTokens(*child)
-		}
 	}
 	analysis.DelegatingParents = len(delegatingParents)
 	analysis.EditOverlapTargets = len(editOverlap)
@@ -283,6 +288,27 @@ func analyzeDelegation(records []codexSessionRecord) delegationAnalysis {
 		float64(analysis.DelegatedWallSeconds),
 	)
 	return analysis
+}
+
+func delegatedWorkMode(record codexSessionRecord) string {
+	if len(record.EditTargets) > 0 {
+		return "implementation"
+	}
+	if record.DeliveryRework.Deliveries > 0 {
+		return "delivery"
+	}
+	for _, episode := range record.TaskEpisodes {
+		if phase, ok := episode.Phases["verification"]; ok && phase.ToolCalls > 0 {
+			return "verification"
+		}
+	}
+	if len(record.ReadTargets) > 0 {
+		return "research/review"
+	}
+	if record.ToolCalls > 0 {
+		return "other tool work"
+	}
+	return "response only"
 }
 
 type timeInterval struct {
@@ -368,16 +394,23 @@ func printDelegationAnalysis(analysis delegationAnalysis) {
 		return
 	}
 	fmt.Printf(
-		"Delegation: %s/%s subagent sessions linked to %s in-scope parents used %.1f%% of fresh tokens; %s coordination calls (~%s fresh tokens); %s children overlapped parent edits; observed concurrency %.2fx\n",
+		"Delegation: %s/%s subagent sessions linked to %s in-scope parents used %.1f%% of fresh tokens; %s children overlapped parent edits; observed concurrency %.2fx\n",
 		formatCodexCount(int64(analysis.LinkedSubagents)),
 		formatCodexCount(int64(analysis.SubagentSessions)),
 		formatCodexCount(int64(analysis.DelegatingParents)),
 		100*analysis.SubagentFreshTokenShare,
-		formatCodexCount(int64(analysis.CoordinationCalls)),
-		formatCodexCount(analysis.CoordinationFreshTokens),
 		formatCodexCount(int64(analysis.ChildrenWithEditOverlap)),
 		analysis.SubagentConcurrencyFactor,
 	)
+	if analysis.CoordinationAvailable {
+		fmt.Printf(
+			"Delegation coordination: %s captured calls used ~%s fresh tokens.\n",
+			formatCodexCount(int64(analysis.CoordinationCalls)),
+			formatCodexCount(analysis.CoordinationFreshTokens),
+		)
+	} else {
+		fmt.Println("Delegation coordination: unavailable because the selected provider events do not contain spawn, wait, or message calls.")
+	}
 	if analysis.UnlinkedSubagents > 0 || analysis.ParentsOutsideScope > 0 {
 		fmt.Printf(
 			"Delegation coverage: %s subagents lacked provider parent lineage; %s had parents outside the selected repository or time window.\n",
@@ -385,11 +418,25 @@ func printDelegationAnalysis(analysis delegationAnalysis) {
 			formatCodexCount(int64(analysis.ParentsOutsideScope)),
 		)
 	}
-	if analysis.NoObservableContributionSubagents > 0 {
-		fmt.Printf(
-			"Delegation attribution: %s subagents (~%s fresh tokens) had no observable edit or delivery; research/review contributions are not inferable from repository metadata.\n",
-			formatCodexCount(int64(analysis.NoObservableContributionSubagents)),
-			formatCodexCount(analysis.NoObservableContributionFreshTokens),
-		)
+	if len(analysis.SubagentsByWorkMode) > 0 {
+		fmt.Printf("Delegated work modes: %s.\n", formatDelegatedWorkModes(analysis))
 	}
+}
+
+func formatDelegatedWorkModes(analysis delegationAnalysis) string {
+	order := []string{"implementation", "delivery", "verification", "research/review", "other tool work", "response only"}
+	parts := make([]string, 0, len(order))
+	for _, mode := range order {
+		count := analysis.SubagentsByWorkMode[mode]
+		if count == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf(
+			"%s %s (~%s fresh tokens)",
+			formatCodexCount(int64(count)),
+			mode,
+			formatCodexCount(analysis.SubagentFreshTokensByWorkMode[mode]),
+		))
+	}
+	return strings.Join(parts, "; ")
 }

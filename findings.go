@@ -884,7 +884,8 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 
 	delegation := report.Delegation
 	totalFreshTokens := delegation.ParentFreshTokens + delegation.SubagentFreshTokens
-	if delegation.SubagentSessions >= 3 &&
+	if delegation.CoordinationAvailable &&
+		delegation.SubagentSessions >= 3 &&
 		delegation.CoordinationCalls >= delegation.SubagentSessions*3 &&
 		delegation.CoordinationFreshTokens >= 50_000 &&
 		delegation.CoordinationFreshTokens*10 >= totalFreshTokens {

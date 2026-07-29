@@ -76,6 +76,13 @@ Muninn separates activity that is often conflated:
 - root-agent and delegated work, including coordination and overlap;
 - repository navigation, repeated reads, and instruction footprint.
 
+Delegated sessions are classified by their strongest observable work mode:
+implementation, delivery, verification, research/review, other tool work, or
+response only. This is descriptive rather than a value judgment. Coordination
+call and token metrics are marked unavailable when provider lineage exists but
+the selected provider events do not contain spawn, wait, or message calls;
+missing events are never reported as a measured zero.
+
 In `--details` output, Muninn also compares completed tasks that used a locally
 owned operation with tasks that did not, within the same agent, model,
 reasoning-effort, and task-family cohort. These with/without deltas are

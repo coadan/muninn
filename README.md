@@ -19,6 +19,9 @@ Muninn helps identify:
   loops, and checks whose absence is associated with downstream escapes;
 - workflow phases that concentrate context compactions and their observed
   fresh-token, output, and roundtrip cost;
+- delegated work split into implementation, delivery, verification,
+  research/review, other-tool, and response-only modes, with lineage coverage,
+  parent overlap, concurrency, and explicit coordination observability;
 - performance changes across matched agent, model, reasoning-effort, and task
   cohorts without ignoring observed delivery quality, plus observational
   with/without comparisons for owned operations.
