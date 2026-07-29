@@ -108,6 +108,7 @@ func TestSessionStoreRebuildsIncompatibleDerivedSchema(t *testing.T) {
 	}{
 		{"sources", "scope_key"},
 		{"events", "in_repository_scope"},
+		{"events", "nested_tool_context"},
 	} {
 		var count int
 		if err := migrated.db.QueryRow(

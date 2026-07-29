@@ -237,6 +237,7 @@ func (store *sessionStore) replaceSession(
 	}
 	statement, err := tx.PrepareContext(ctx, `INSERT INTO events(
 		session_id, sequence, occurred_at_ns, kind, tool_name, family, shape,
+		nested_tool_context,
 		first_family, last_family, tool_round, call_occurred_at_ns, failed,
 		truncated, output_bytes, failure_reason, failure_context, input_tokens,
 		cached_input_tokens, uncached_input_tokens, output_tokens,
@@ -246,7 +247,7 @@ func (store *sessionStore) replaceSession(
 		operation_continues, targets, inline_bytes, concurrent_batch,
 		concurrent_batch_size,
 		diagnostic_json, working_directories, in_repository_scope
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -297,6 +298,7 @@ func (store *sessionStore) replaceSession(
 			event.ToolName,
 			event.Family,
 			event.Shape,
+			event.NestedToolContext,
 			event.FirstFamily,
 			event.LastFamily,
 			event.ToolRound,

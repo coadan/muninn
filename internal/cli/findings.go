@@ -1510,6 +1510,12 @@ func oversizedOutputAction(context, control string) string {
 	if control == "local" {
 		return "Lower this locally controlled operation's default output and return a compact summary with explicit focused follow-ups."
 	}
+	if strings.HasPrefix(context, "nested tool") {
+		if strings.Contains(context, "exec_command") {
+			return "Set a bounded max_output_tokens on each nested exec_command, then narrow or page only the result that reaches that limit."
+		}
+		return "Request bounded output from the named nested tool and inspect only the focused follow-up needed for the task."
+	}
 	if strings.Contains(context, " -> ") {
 		return "Keep the workflow bundled, but cap each output-heavy stage and return one compact summary with explicit focused follow-ups."
 	}

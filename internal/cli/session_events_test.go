@@ -422,6 +422,14 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 				OperationAttributionAmbiguous: true,
 			},
 			{
+				OccurredAt:        generatedAt.Add(-20 * time.Second),
+				Kind:              sessionEventToolOutput,
+				ToolName:          "exec",
+				NestedToolContext: "nested tool web__run",
+				OutputBytes:       35_000,
+				CallOccurredAt:    generatedAt.Add(-50 * time.Second),
+			},
+			{
 				OccurredAt:          generatedAt.Add(-15 * time.Second),
 				Kind:                sessionEventToolOutput,
 				ToolName:            "exec",
@@ -459,7 +467,11 @@ func TestOversizedOutputsUsePrivacySafeOwnedOrFamilyContext(t *testing.T) {
 		got.OutputBytes != 70_000 || got.NestedCalls != 3 || got.MaxNestedCalls != 3 {
 		t.Fatalf("concurrent batch output should use its shared stage context: %#v", got)
 	}
-	if len(record.OversizedOutputs) != 4 {
+	if got := record.OversizedOutputs["nested tool web__run"]; got.Calls != 1 ||
+		got.OutputBytes != 35_000 {
+		t.Fatalf("opaque Code Mode output lost nested tool context: %#v", got)
+	}
+	if len(record.OversizedOutputs) != 5 {
 		t.Fatalf("below-threshold output should be absent: %#v", record.OversizedOutputs)
 	}
 	report := newSessionInsightsReport("codex", nil, workspaceRoot, generatedAt.Add(-time.Hour), generatedAt)

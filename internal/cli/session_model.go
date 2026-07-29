@@ -33,6 +33,7 @@ type normalizedSessionEvent struct {
 	ToolName                      string
 	Family                        string
 	Shape                         string
+	NestedToolContext             string
 	FirstFamily                   string
 	LastFamily                    string
 	ToolRound                     int

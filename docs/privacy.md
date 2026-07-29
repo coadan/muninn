@@ -12,10 +12,11 @@ Model and effort labels are bounded. Lineage identifiers are one-way digests
 used only for aggregation. Command, output, and failure classifications use
 fixed labels. For configured locally owned executables, Muninn may retain a
 normalized long flag name such as `json`, but never its value or surrounding
-arguments. Concurrent Code Mode batches retain only their nested call count,
-not code, tool arguments, or result content. External diagnostic fingerprints
-are rehashed; Muninn retains only bounded classifications, phases, counts, and
-diagnostic status—not raw reports, database names, servers, tests, paths, or
+arguments. Code Mode calls retain only validated nested tool names and, for
+concurrent batches, the nested call count—not code, tool arguments, or result
+content. External diagnostic fingerprints are rehashed. Structured diagnostics
+may retain validated repository-relative test-file paths, but never raw
+reports, grep text, test titles, database names, servers, absolute paths, or
 failure messages.
 
 Provider ingestion remains behind an adapter boundary. Provider-specific call

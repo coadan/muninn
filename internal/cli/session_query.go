@@ -18,7 +18,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 	rows, err := store.db.QueryContext(ctx, `SELECT
 		sessions.id, sources.source_path, sessions.cwd, events.sequence,
 		events.occurred_at_ns, events.kind, events.tool_name, events.family,
-		events.shape, events.first_family, events.last_family, events.tool_round,
+		events.shape, events.nested_tool_context, events.first_family,
+		events.last_family, events.tool_round,
 		events.call_occurred_at_ns, events.failed, events.truncated,
 		events.output_bytes, events.failure_reason, events.failure_context,
 		events.input_tokens, events.cached_input_tokens,
@@ -85,6 +86,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&event.ToolName,
 			&event.Family,
 			&event.Shape,
+			&event.NestedToolContext,
 			&event.FirstFamily,
 			&event.LastFamily,
 			&event.ToolRound,

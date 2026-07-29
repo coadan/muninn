@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -228,4 +230,31 @@ func codexConcurrentToolBatchSize(toolName, input string) int {
 		return 0
 	}
 	return len(matches)
+}
+
+func codexNestedToolContext(toolName, input string) string {
+	if strings.ToLower(strings.TrimSpace(toolName)) != "exec" {
+		return ""
+	}
+	var names []string
+	for _, match := range codexNestedToolCallPattern.FindAllStringSubmatch(input, -1) {
+		name := strings.ToLower(match[1])
+		names = appendUniqueString(names, name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	if len(names) == 1 {
+		return "nested tool " + names[0]
+	}
+	const shown = 3
+	if len(names) <= shown {
+		return "nested tools " + strings.Join(names, " + ")
+	}
+	return fmt.Sprintf(
+		"nested tools %s + %d more",
+		strings.Join(names[:shown], " + "),
+		len(names)-shown,
+	)
 }
