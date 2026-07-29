@@ -90,6 +90,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	var activeDiagnostic *diagnosticFailureEpisode
 	pendingContinuations := map[string]int{}
 	inRepositoryScope := true
+	lastEventKind := ""
 	for _, event := range session.Events {
 		event = withoutContinuationCallAttribution(event)
 		if inside, explicit := eventRepositoryScope(event, session.CWD, workspaceRoot); explicit {
@@ -171,6 +172,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		if record.EndedAt.IsZero() || event.OccurredAt.After(record.EndedAt) {
 			record.EndedAt = event.OccurredAt
 		}
+		lastEventKind = event.Kind
 		if event.Kind == sessionEventToolCall && len(event.Targets) == 0 {
 			if event.ToolName == "apply_patch" {
 				if event.OperationTask == "" {
@@ -405,7 +407,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if record.StartedAt.IsZero() {
 		return codexSessionRecord{}, nil
 	}
-	if record.Completed || generatedAt.Sub(record.EndedAt) >= 30*time.Minute {
+	if lastEventKind == sessionEventComplete || generatedAt.Sub(record.EndedAt) >= 30*time.Minute {
 		// ponytail: context-level accounting can undercount concurrent yielded
 		// operations with the same attribution; add provider operation IDs if
 		// this becomes material in real session evidence.
