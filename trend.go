@@ -836,6 +836,17 @@ func printInterventionTrendRows(label string, interventions []sessionInterventio
 		return
 	}
 	sort.Slice(interventions, func(i, j int) bool {
+		leftPriority := interventionTrendPriority(interventions[i])
+		rightPriority := interventionTrendPriority(interventions[j])
+		if leftPriority != rightPriority {
+			return leftPriority > rightPriority
+		}
+		if interventions[i].FindingCount != interventions[j].FindingCount {
+			return interventions[i].FindingCount > interventions[j].FindingCount
+		}
+		if interventions[i].score != interventions[j].score {
+			return interventions[i].score > interventions[j].score
+		}
 		return interventions[i].ID < interventions[j].ID
 	})
 	rows := interventions
@@ -852,6 +863,22 @@ func printInterventionTrendRows(label string, interventions []sessionInterventio
 	}
 	if len(rows) < len(interventions) {
 		fmt.Printf("- ... %d more\n", len(interventions)-len(rows))
+	}
+}
+
+func interventionTrendPriority(intervention sessionIntervention) int {
+	if intervention.priority > 0 {
+		return intervention.priority
+	}
+	switch intervention.Priority {
+	case "highest":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	default:
+		return 1
 	}
 }
 

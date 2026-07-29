@@ -82,6 +82,40 @@ func TestInterventionTrendUsesStableInterventionIdentity(t *testing.T) {
 	}
 }
 
+func TestInterventionTrendRowsLeadWithActionability(t *testing.T) {
+	interventions := []sessionIntervention{
+		{ID: "intervention/a-low", Title: "low", Priority: "low", FindingCount: 9},
+		{ID: "intervention/b-medium", Title: "medium", Priority: "medium", FindingCount: 1},
+		{ID: "intervention/c-high", Title: "high", Priority: "high", FindingCount: 1},
+		{ID: "intervention/d-high-corroborated", Title: "high corroborated", Priority: "high", FindingCount: 3},
+		{ID: "intervention/z-highest", Title: "highest", Priority: "highest", FindingCount: 1},
+	}
+	out, err := captureStdout(t, func() error {
+		printInterventionTrendRows("New", interventions, 4)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := []string{
+		"intervention/z-highest",
+		"intervention/d-high-corroborated",
+		"intervention/c-high",
+		"intervention/b-medium",
+	}
+	previous := -1
+	for _, id := range order {
+		index := strings.Index(out, id)
+		if index < 0 || index <= previous {
+			t.Fatalf("actionability order missing %q after offset %d:\n%s", id, previous, out)
+		}
+		previous = index
+	}
+	if strings.Contains(out, "intervention/a-low") {
+		t.Fatalf("low-priority row displaced an actionable row:\n%s", out)
+	}
+}
+
 func TestCompletedTaskTrendUsesTokenSplitForCurrentSchemas(t *testing.T) {
 	baseline := codexSessionInsightsReport{SchemaVersion: 30}
 	current := codexSessionInsightsReport{SchemaVersion: 30}
