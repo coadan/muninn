@@ -22,9 +22,9 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
 
 - Work directly on `main` unless the user requests another branch.
 - Commit coherent slices and reinstall after user-visible CLI changes.
-- Format changed Go files, then run `make check`; use `make install` after a
-  user-visible CLI change. These are the canonical verification/install
-  surfaces; do not reread the Makefile for their syntax.
+- Use `make help` for bounded workflow discovery. Format changed Go files,
+  then run `make check`; use `make install` after a user-visible CLI change.
+  Do not reread the Makefile for target syntax.
 - Use `apply_patch` for source edits.
 - Do not add a review gate unless the user requests one.
 

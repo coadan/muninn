@@ -106,6 +106,7 @@ Run `muninn --help` for the complete command surface.
 ## Development
 
 ```bash
+make help
 make check
 make build
 ```

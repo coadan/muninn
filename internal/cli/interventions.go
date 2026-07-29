@@ -126,7 +126,7 @@ func diversifySessionInterventions(interventions []sessionIntervention) []sessio
 		}
 	}
 	for _, intervention := range interventions {
-		if strings.HasPrefix(intervention.ID, "intervention/owner/") {
+		if ownerIntervention(intervention.ID) {
 			if ownerSelected {
 				deferred = append(deferred, intervention)
 				continue
@@ -147,6 +147,11 @@ func diversifySessionInterventions(interventions []sessionIntervention) []sessio
 		result = append(result, intervention)
 	}
 	return append(result, deferred...)
+}
+
+func ownerIntervention(id string) bool {
+	return strings.HasPrefix(id, "intervention/owner/") ||
+		strings.HasPrefix(id, "intervention/code-structure/file-cost/")
 }
 
 func sessionInterventionTool(id string) string {
