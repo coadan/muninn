@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,11 +17,6 @@ import (
 
 const sessionStoreSchemaVersion = 20
 const sessionStoreBusyTimeout = 30 * time.Second
-
-type sessionNormalizer interface {
-	NormalizeSession(path string) (normalizedSession, error)
-	SessionCWD(path string) (string, error)
-}
 
 type sessionStore struct {
 	db *sql.DB
@@ -408,76 +402,65 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 	return nil
 }
 
-func (store *sessionStore) refresh(ctx context.Context, provider string, sessionDirs []string, repositoryRoot string, normalizer sessionNormalizer, ownership ownershipCatalog, force bool) (sessionRefreshStats, error) {
-	var stats sessionRefreshStats
-	for _, sessionDir := range sessionDirs {
-		err := filepath.WalkDir(sessionDir, func(path string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				stats.FilesUnreadable++
-				return nil
-			}
-			if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".jsonl") {
-				return nil
-			}
-			stats.FilesScanned++
-			info, err := entry.Info()
-			if err != nil {
-				stats.FilesUnreadable++
-				return nil
-			}
-			unchanged, err := store.sourceUnchanged(ctx, provider, path, info.Size(), info.ModTime().UnixNano())
-			if err != nil {
-				return err
-			}
-			if unchanged && !force {
-				stats.FilesReused++
-				return nil
-			}
-			cwd, err := normalizer.SessionCWD(path)
-			if err != nil {
-				stats.FilesUnreadable++
-				return nil
-			}
-			inside, err := pathInsideRoot(repositoryRoot, cwd)
-			if err != nil || !inside {
-				return nil
-			}
-			session, err := normalizer.NormalizeSession(path)
-			if err != nil {
-				stats.FilesUnreadable++
-				return nil
-			}
-			session.Provider = provider
-			session.SourcePath = path
-			for index := range session.Events {
-				if session.Events[index].ToolName == "apply_patch" {
-					if session.Events[index].OperationTask == "" {
-						session.Events[index].OperationTask = repositoryTaskForTargetCandidates(
-							session.Events[index].TargetCandidates,
-							session.CWD,
-							repositoryRoot,
-						)
-					}
-					session.Events[index].Targets = normalizeRepositoryEditTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
-				} else {
-					session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
-				}
-				session.Events[index].TargetCandidates = nil
-				session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
-				if session.Events[index].OperationTask == "" {
-					session.Events[index].OperationTask = ownership.taskForInvocations(session.Events[index].CommandCandidates)
-				}
-				session.Events[index].CommandCandidates = nil
-			}
-			if err := store.replaceSession(ctx, session, info.Size(), info.ModTime().UnixNano()); err != nil {
-				return err
-			}
-			stats.FilesIndexed++
-			return nil
-		})
+func (store *sessionStore) refresh(ctx context.Context, provider string, discovery sessionDiscovery, repositoryRoot string, normalizer sessionNormalizer, ownership ownershipCatalog, force bool) (sessionRefreshStats, error) {
+	stats := sessionRefreshStats{
+		FilesScanned:    len(discovery.Files),
+		FilesUnreadable: discovery.FilesUnreadable,
+	}
+	for _, path := range discovery.Files {
+		info, err := os.Stat(path)
 		if err != nil {
-			return stats, fmt.Errorf("refresh %s sessions in %s: %w", provider, sessionDir, err)
+			stats.FilesUnreadable++
+			continue
 		}
+		unchanged, err := store.sourceUnchanged(ctx, provider, path, info.Size(), info.ModTime().UnixNano())
+		if err != nil {
+			return stats, err
+		}
+		if unchanged && !force {
+			stats.FilesReused++
+			continue
+		}
+		cwd, err := normalizer.SessionCWD(path)
+		if err != nil {
+			stats.FilesUnreadable++
+			continue
+		}
+		inside, err := pathInsideRoot(repositoryRoot, cwd)
+		if err != nil || !inside {
+			continue
+		}
+		session, err := normalizer.NormalizeSession(path)
+		if err != nil {
+			stats.FilesUnreadable++
+			continue
+		}
+		session.Provider = provider
+		session.SourcePath = path
+		for index := range session.Events {
+			if session.Events[index].ToolName == "apply_patch" {
+				if session.Events[index].OperationTask == "" {
+					session.Events[index].OperationTask = repositoryTaskForTargetCandidates(
+						session.Events[index].TargetCandidates,
+						session.CWD,
+						repositoryRoot,
+					)
+				}
+				session.Events[index].Targets = normalizeRepositoryEditTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
+			} else {
+				session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
+			}
+			session.Events[index].TargetCandidates = nil
+			session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
+			if session.Events[index].OperationTask == "" {
+				session.Events[index].OperationTask = ownership.taskForInvocations(session.Events[index].CommandCandidates)
+			}
+			session.Events[index].CommandCandidates = nil
+		}
+		if err := store.replaceSession(ctx, session, info.Size(), info.ModTime().UnixNano()); err != nil {
+			return stats, err
+		}
+		stats.FilesIndexed++
 	}
 	return stats, nil
 }

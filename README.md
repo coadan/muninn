@@ -50,8 +50,9 @@ muninn analyze --repo . --since 7d --compare previous
 
 The main surface has two commands:
 
-- `muninn analyze` returns the findings-first action queue and supports focused
-  evidence, owned-operation drill-down, and adjacent-period comparison.
+- `muninn analyze` returns a ranked intervention queue that consolidates
+  related findings, and supports focused evidence, owned-operation drill-down,
+  and adjacent-period comparison. `--details` exposes the constituent findings.
 - `muninn failures --operation <tool/operation>` returns a bounded failure
   timeline for one configured locally controlled operation.
 
@@ -83,6 +84,7 @@ absolute paths, secrets, or provider session identifiers.
 - [Repository configuration](docs/repository-configuration.md)
 - [Improvement workflow](docs/improvement-workflow.md)
 - [Privacy and data model](docs/privacy.md)
+- [Adding session providers](docs/session-providers.md)
 
 Run `muninn --help` for the complete command surface.
 

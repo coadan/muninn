@@ -20,10 +20,7 @@ type normalizedSessionMetadata struct {
 	SpawnStatus      string
 }
 
-func loadProviderSessionMetadata(provider string, sessionDirs []string) map[string]normalizedSessionMetadata {
-	if provider != "codex" {
-		return nil
-	}
+func loadCodexSessionMetadata(sessionDirs []string) map[string]normalizedSessionMetadata {
 	path := newestCodexStateDB(sessionDirs)
 	if path == "" {
 		return nil

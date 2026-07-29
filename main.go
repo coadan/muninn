@@ -10,7 +10,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,7 +19,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 47
+const codexSessionInsightsSchemaVersion = 48
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -163,6 +162,7 @@ type codexSessionInsightsReport struct {
 	Instructions   repositoryInstructionFootprint `json:"instructions"`
 	Summary        codexSessionInsightsSummary    `json:"summary"`
 	Tasks          []codexTaskInsights            `json:"tasks"`
+	Interventions  []sessionIntervention          `json:"interventions"`
 	Findings       []sessionFinding               `json:"findings"`
 	Outcomes       completionEpisodeAnalysis      `json:"outcomes"`
 	Profiles       modelEffortAnalysis            `json:"profiles"`
@@ -373,46 +373,6 @@ func normalizeSuppressedSignals(signals []string) ([]string, error) {
 	return result, nil
 }
 
-type sessionSource interface {
-	Name() string
-	SessionDirs(explicit string, includeArchived bool) ([]string, error)
-	Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, metadata map[string]normalizedSessionMetadata) (codexSessionInsightsReport, error)
-}
-
-type codexSessionSource struct{}
-
-func (codexSessionSource) Name() string {
-	return "codex"
-}
-
-func (codexSessionSource) SessionDirs(explicit string, includeArchived bool) ([]string, error) {
-	resolved, err := resolveCodexSessionsDir(explicit)
-	if err != nil {
-		return nil, err
-	}
-	dirs := []string{resolved}
-	if includeArchived {
-		archivedDir := filepath.Join(filepath.Dir(resolved), "archived_sessions")
-		if dirExists(archivedDir) {
-			dirs = append(dirs, archivedDir)
-		}
-	}
-	return dirs, nil
-}
-
-func (codexSessionSource) Analyze(sessionDirs []string, repoRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, metadata map[string]normalizedSessionMetadata) (codexSessionInsightsReport, error) {
-	return analyzeCodexSessionsFilteredWithMetadata(sessionDirs, repoRoot, since, generatedAt, taskFilter, ownership, metadata)
-}
-
-func resolveSessionSource(name string) (sessionSource, error) {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "", "codex":
-		return codexSessionSource{}, nil
-	default:
-		return nil, fmt.Errorf("unsupported session provider %q (available: codex)", name)
-	}
-}
-
 func main() {
 	root, err := os.Getwd()
 	if err != nil {
@@ -544,7 +504,7 @@ func cmdAnalyze(root string, args []string) error {
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
 	operation := fs.String("operation", "", "show configured operations for one locally owned tool or exact tool/operation ID")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
-	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
+	limit := fs.Int("limit", 5, "maximum intervention or detail rows in human output (0 shows all)")
 	setFlagSetUsage(
 		fs,
 		"muninn analyze [--repo <path>] [--since <duration>] [--task <task-id>] [--focus <area>] [--details] [--operation <tool-or-operation>] [--compare previous] [--json]",
@@ -582,6 +542,10 @@ func cmdAnalyze(root string, args []string) error {
 			limitWasSet = true
 		}
 	})
+	if *detailsOutput && strings.TrimSpace(*focus) == "" &&
+		strings.TrimSpace(*operation) == "" && !limitWasSet {
+		*limit = 0
+	}
 	if strings.TrimSpace(*sinceCommit) != "" && sinceWasSet {
 		return errors.New("--since and --since-commit are mutually exclusive")
 	}
@@ -615,11 +579,11 @@ func cmdAnalyze(root string, args []string) error {
 	if err != nil {
 		return err
 	}
-	sessionDirs, err := source.SessionDirs(*sessionsDir, *includeArchived)
+	discovery, err := source.Discover(*sessionsDir, *includeArchived)
 	if err != nil {
 		return err
 	}
-	sessionMetadata := loadProviderSessionMetadata(source.Name(), sessionDirs)
+	sessionMetadata := source.Metadata(discovery)
 	resolvedRepoRoot, err := filepath.Abs(strings.TrimSpace(repoRoot))
 	if err != nil {
 		return fmt.Errorf("resolve --repo: %w", err)
@@ -651,8 +615,9 @@ func cmdAnalyze(root string, args []string) error {
 	var analyzeWindow func(time.Time, time.Time) (codexSessionInsightsReport, error)
 	if *noCache {
 		analyzeWindow = func(windowSince, windowUntil time.Time) (codexSessionInsightsReport, error) {
-			return source.Analyze(
-				sessionDirs,
+			return analyzeProviderSessions(
+				source,
+				discovery,
 				resolvedRepoRoot,
 				windowSince,
 				windowUntil,
@@ -662,10 +627,6 @@ func cmdAnalyze(root string, args []string) error {
 			)
 		}
 	} else {
-		normalizer, ok := source.(sessionNormalizer)
-		if !ok {
-			return fmt.Errorf("session provider %q does not support indexed analysis; use --no-cache", source.Name())
-		}
 		store, err = openSessionStore(*storePath)
 		if err != nil {
 			return fmt.Errorf("%w (use --no-cache to bypass the index)", err)
@@ -674,7 +635,7 @@ func cmdAnalyze(root string, args []string) error {
 		if *forceRefresh && !*jsonOutput {
 			fmt.Fprintf(os.Stderr, "Refreshing Muninn index for %s...\n", filepath.Base(resolvedRepoRoot))
 		}
-		stats, err := store.refresh(context.Background(), source.Name(), sessionDirs, resolvedRepoRoot, normalizer, ownership, *forceRefresh)
+		stats, err := store.refresh(context.Background(), source.Name(), discovery, resolvedRepoRoot, source, ownership, *forceRefresh)
 		if err != nil {
 			return err
 		}
@@ -685,7 +646,7 @@ func cmdAnalyze(root string, args []string) error {
 			return store.analyze(
 				context.Background(),
 				source.Name(),
-				sessionDirs,
+				discovery.Dirs,
 				resolvedRepoRoot,
 				windowSince,
 				windowUntil,
@@ -714,6 +675,7 @@ func cmdAnalyze(root string, args []string) error {
 	if err != nil {
 		return err
 	}
+	report.Interventions = buildSessionInterventions(report.Findings)
 	var baseline *codexSessionInsightsReport
 	if comparison == "previous" {
 		previousSince, previousUntil, err := previousLookbackWindow(since, now, lookbackSeconds)
@@ -732,6 +694,7 @@ func cmdAnalyze(root string, args []string) error {
 		if err != nil {
 			return err
 		}
+		previous.Interventions = buildSessionInterventions(previous.Findings)
 		baseline = &previous
 	}
 	if toolID := strings.TrimSpace(*operation); toolID != "" {
@@ -875,44 +838,11 @@ func analyzeCodexSessionsFilteredWithOwnership(sessionDirs []string, workspaceRo
 }
 
 func analyzeCodexSessionsFilteredWithMetadata(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, metadata map[string]normalizedSessionMetadata) (codexSessionInsightsReport, error) {
-	report := newSessionInsightsReport("codex", sessionDirs, workspaceRoot, since, generatedAt)
-	taskMap := map[string]*codexTaskInsights{}
-	for _, sessionDir := range sessionDirs {
-		err := filepath.WalkDir(sessionDir, func(path string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				report.Summary.FilesUnreadable++
-				return nil
-			}
-			if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".jsonl") {
-				return nil
-			}
-			report.Summary.FilesScanned++
-			session, err := parseCodexNormalizedSession(path)
-			if err != nil {
-				report.Summary.FilesUnreadable++
-				return nil
-			}
-			enrichNormalizedSession(&session, metadata)
-			record, err := sessionRecordFromNormalized(session, workspaceRoot, since, generatedAt, ownership)
-			if err != nil {
-				report.Summary.FilesUnreadable++
-				return nil
-			}
-			if record.CWD == "" || record.StartedAt.IsZero() {
-				return nil
-			}
-			if taskFilter != "" && record.Task != taskFilter {
-				return nil
-			}
-			addCodexSessionToReport(&report, taskMap, record)
-			return nil
-		})
-		if err != nil {
-			return report, fmt.Errorf("scan Codex sessions in %s: %w", sessionDir, err)
-		}
+	discovery, err := discoverCodexSessions(sessionDirs)
+	if err != nil {
+		return codexSessionInsightsReport{}, err
 	}
-	finishSessionInsightsReport(&report, taskMap)
-	return report, nil
+	return analyzeProviderSessions(codexSessionSource{}, discovery, workspaceRoot, since, generatedAt, taskFilter, ownership, metadata)
 }
 
 func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRoot string, since, generatedAt time.Time) codexSessionInsightsReport {
@@ -2108,14 +2038,15 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	fmt.Printf("Muninn session insights since %s\n", report.Since)
 	fmt.Printf("Provider: %s\n", report.Provider)
 	fmt.Printf("Repository: %s\n", filepath.Base(report.WorkspaceRoot))
-	if view == "focused" {
+	if view == "findings" || view == "focused" {
 		fmt.Printf(
-			"Scope: %s sessions, %s tool calls, %s failed\n",
+			"Scope: %s sessions, %s tool calls, %s failed, ~%s fresh tokens\n",
 			formatCodexCount(int64(summary.Sessions)),
 			formatCodexCount(int64(summary.ToolCalls)),
 			formatCodexCount(int64(summary.FailedToolCalls)),
+			formatCodexCount(summary.FreshTokens),
 		)
-		printSessionFindings(report.Findings, limit)
+		printSessionInterventions(report.Interventions, limit)
 		return
 	}
 	fmt.Printf("Sessions: %s (%s complete, %s incomplete)\n",
@@ -2151,16 +2082,8 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	if summary.FilesUnreadable > 0 {
 		fmt.Printf("Files: %s scanned, %s unreadable\n", formatCodexCount(int64(summary.FilesScanned)), formatCodexCount(int64(summary.FilesUnreadable)))
 	}
-	if view == "findings" && len(report.Findings) > 0 {
-		printSessionFindings(report.Findings, limit)
-		return
-	}
 	if len(report.Tasks) == 0 {
 		fmt.Println("\nNo matching sessions.")
-		return
-	}
-	if view == "findings" {
-		printSessionFindings(report.Findings, limit)
 		return
 	}
 	rows := report.Tasks
@@ -2285,6 +2208,9 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Printf("- %s remaining tool calls failed or timed out; inspect the reason/context rows before changing shared tooling.\n", formatCodexCount(int64(remainingFailures)))
 	}
 	fmt.Println("- Token counts are rollout totals, not billing amounts. Fresh-token proxy excludes cached input but does not apply model prices.")
+	if view == "details" {
+		printSessionFindings(report.Findings, limit)
+	}
 }
 
 func printRepositoryInstructionFootprint(footprint repositoryInstructionFootprint) {

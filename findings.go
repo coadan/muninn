@@ -2082,7 +2082,7 @@ func printSessionFindings(findings []sessionFinding, limit int) {
 		fmt.Printf("  Next: %s\n", finding.Action)
 	}
 	if len(rows) < len(findings) {
-		fmt.Printf("... %d more findings; use --limit 0 or --details.\n", len(findings)-len(rows))
+		fmt.Printf("... %d more findings; use --limit 0 for the full list.\n", len(findings)-len(rows))
 	}
 }
 

@@ -50,7 +50,7 @@ func TestLoadProviderSessionMetadataJoinsPrivacySafeModelAndLineage(t *testing.T
 		}
 	}
 
-	metadata := loadProviderSessionMetadata("codex", []string{sessionsDir})
+	metadata := loadCodexSessionMetadata([]string{sessionsDir})
 	rootEntry := metadata[filepath.Clean(rootRollout)]
 	childEntry := metadata[filepath.Clean(childRollout)]
 	if rootEntry.Model != "gpt-5.6-sol" || rootEntry.ReasoningEffort != "xhigh" ||
@@ -127,7 +127,7 @@ func TestLoadProviderSessionMetadataFallsBackToRolloutParentLineage(t *testing.T
 		}
 	}
 
-	metadata := loadProviderSessionMetadata("codex", []string{sessionsDir})
+	metadata := loadCodexSessionMetadata([]string{sessionsDir})
 	rootEntry := metadata[filepath.Clean(rootRollout)]
 	childEntry := metadata[filepath.Clean(childRollout)]
 	if childEntry.ParentLineageKey == "" ||
