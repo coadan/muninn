@@ -235,9 +235,11 @@ func TestFocusedDiscoveryViewPrintsBoundedActionEvidence(t *testing.T) {
 	report.AnalysisScope.Focus = "discovery"
 	report.Summary.ReadTargets["owner.go"] = codexTargetMetrics{
 		Reads: 12, SearchReadLoops: 4, Sessions: 2, RediscoverySessions: 2,
+		UneditedRediscoverySessions: 2,
 	}
 	report.Summary.ReadTargets["hidden.go"] = codexTargetMetrics{
 		Reads: 11, SearchReadLoops: 3, Sessions: 1, RediscoverySessions: 1,
+		UneditedRediscoverySessions: 1,
 	}
 	report.Summary.MixedShellShapes["search -> file reads"] = codexToolMetrics{
 		Calls: 6, Sessions: 2, OutputBytes: 40_000,
@@ -252,7 +254,7 @@ func TestFocusedDiscoveryViewPrintsBoundedActionEvidence(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Discovery evidence:",
-		"owner.go: 12 reads, 4 search/read loops, 2 sessions, 2 rediscovery sessions",
+		"owner.go: 12 reads, 4 search/read loops, 2 sessions, 2 unedited rediscovery sessions, 0 edited sessions",
 		"search -> file reads: 6 calls, 2 sessions, ~10,000 visible output tokens",
 	} {
 		if !strings.Contains(out, want) {

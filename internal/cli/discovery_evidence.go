@@ -11,12 +11,14 @@ type discoveryFocusEvidence struct {
 }
 
 type discoveryReadTargetEvidence struct {
-	Target              string `json:"target"`
-	Repository          string `json:"repository,omitempty"`
-	Reads               int    `json:"reads"`
-	SearchReadLoops     int    `json:"searchReadLoops"`
-	Sessions            int    `json:"sessions"`
-	RediscoverySessions int    `json:"rediscoverySessions"`
+	Target                      string `json:"target"`
+	Repository                  string `json:"repository,omitempty"`
+	Reads                       int    `json:"reads"`
+	SearchReadLoops             int    `json:"searchReadLoops"`
+	Sessions                    int    `json:"sessions"`
+	RediscoverySessions         int    `json:"rediscoverySessions"`
+	EditedSessions              int    `json:"editedSessions"`
+	UneditedRediscoverySessions int    `json:"uneditedRediscoverySessions"`
 }
 
 type discoveryShapeEvidence struct {
@@ -37,12 +39,14 @@ func buildDiscoveryFocusEvidence(summary codexSessionInsightsSummary, repository
 		}
 		repository, evidenceTarget, _ := splitManagedRepositoryTarget(target)
 		evidence.ReadTargets = append(evidence.ReadTargets, discoveryReadTargetEvidence{
-			Target:              evidenceTarget,
-			Repository:          repository,
-			Reads:               metrics.Reads,
-			SearchReadLoops:     metrics.SearchReadLoops,
-			Sessions:            metrics.Sessions,
-			RediscoverySessions: metrics.RediscoverySessions,
+			Target:                      evidenceTarget,
+			Repository:                  repository,
+			Reads:                       metrics.Reads,
+			SearchReadLoops:             metrics.SearchReadLoops,
+			Sessions:                    metrics.Sessions,
+			RediscoverySessions:         metrics.RediscoverySessions,
+			EditedSessions:              metrics.EditedSessions,
+			UneditedRediscoverySessions: metrics.UneditedRediscoverySessions,
 		})
 	}
 	sort.Slice(evidence.ReadTargets, func(i, j int) bool {

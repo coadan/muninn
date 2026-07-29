@@ -204,12 +204,13 @@ func printDiscoveryFocusEvidence(evidence discoveryFocusEvidence) {
 				label = target.Repository + "/" + label
 			}
 			fmt.Printf(
-				"  - %s: %s, %s, %s, %s\n",
+				"  - %s: %s, %s, %s, %s, %s\n",
 				label,
 				formatCodexCountNoun(int64(target.Reads), "read"),
 				formatCodexCountNoun(int64(target.SearchReadLoops), "search/read loop"),
 				formatCodexCountNoun(int64(target.Sessions), "session"),
-				formatCodexCountNoun(int64(target.RediscoverySessions), "rediscovery session"),
+				formatCodexCountNoun(int64(target.UneditedRediscoverySessions), "unedited rediscovery session"),
+				formatCodexCountNoun(int64(target.EditedSessions), "edited session"),
 			)
 		}
 	}
@@ -600,14 +601,15 @@ func printCodexReadTargets(targets map[string]codexTargetMetrics, limit int) {
 		rows = rows[:limit]
 	}
 	fmt.Println("\nRepository-relative read targets:")
-	fmt.Printf("%-72s %8s %10s %9s %10s\n", "TARGET", "READS", "LOOPS", "SESSIONS", "REDISCOVER")
+	fmt.Printf("%-67s %8s %10s %9s %10s %8s\n", "TARGET", "READS", "LOOPS", "SESSIONS", "UNEDIT RED", "EDIT SES")
 	for _, row := range rows {
-		fmt.Printf("%-72s %8s %10s %9s %10s\n",
-			truncateCodexLabel(row.Path, 72),
+		fmt.Printf("%-67s %8s %10s %9s %10s %8s\n",
+			truncateCodexLabel(row.Path, 67),
 			formatCodexCount(int64(row.Metrics.Reads)),
 			formatCodexCount(int64(row.Metrics.SearchReadLoops)),
 			formatCodexCount(int64(row.Metrics.Sessions)),
-			formatCodexCount(int64(row.Metrics.RediscoverySessions)),
+			formatCodexCount(int64(row.Metrics.UneditedRediscoverySessions)),
+			formatCodexCount(int64(row.Metrics.EditedSessions)),
 		)
 	}
 }
