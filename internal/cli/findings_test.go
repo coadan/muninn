@@ -421,9 +421,20 @@ func TestBuildSessionFindingsFlagsRepeatedSuccessfulOwnedOperation(t *testing.T)
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 ||
 		!strings.Contains(findings[0].Title, "repeated excessively") ||
-		!strings.Contains(findings[0].Evidence, "112.0 definitely attributed calls per session") ||
+		!strings.Contains(findings[0].Evidence, "112.0 definitely attributed successful calls per session") ||
 		!strings.Contains(findings[0].Action, "once at the verification boundary") {
 		t.Fatalf("repeated successful operation finding mismatch: %#v", findings)
+	}
+
+	report.Summary.OwnedOperations["repo/check-worker"] = codexOwnedOperationMetrics{
+		Calls: 123, AmbiguousCalls: 36, Sessions: 5,
+		FailedCalls: 29, AmbiguousFailedCalls: 13,
+	}
+	report.Summary.OwnedOperationFailureReasons["repo/check-worker"] = map[string]codexOccurrenceMetrics{
+		"other non-zero exit": {Count: 29, Sessions: 4},
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("failed repair attempts became repeated successful operation friction: %#v", findings)
 	}
 
 	report.Summary.OwnedOperations["repo/check-worker"] = codexOwnedOperationMetrics{

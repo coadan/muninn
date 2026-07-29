@@ -33,11 +33,12 @@ from becoming a high-priority intervention.
 Per-category caps retain the highest-impact evidence rather than merely the
 newest evidence.
 
-Owned-tool and excessive-operation findings use definitely attributed
-invocations. Tools or operations that merely co-occur in a command bundle
-remain drill-down evidence but do not establish attributable friction.
-Definite and ambiguous bundled failures, truncation, and output cost remain
-separate.
+Owned-tool findings use definitely attributed invocations. Excessive-operation
+findings use definitely attributed successful invocations so failure-repair
+loops are not also described as redundant final verification. Tools or
+operations that merely co-occur in a command bundle remain drill-down evidence
+but do not establish attributable friction. Definite and ambiguous bundled
+failures, truncation, and output cost remain separate.
 
 Tool- and operation-level recurring failure and truncation findings require
 events across at least two sessions. Five or more definite events concentrated
