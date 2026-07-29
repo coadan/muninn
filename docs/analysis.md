@@ -78,6 +78,13 @@ Muninn separates activity that is often conflated:
 - root-agent and delegated work, including coordination and overlap;
 - repository navigation, repeated reads, and instruction footprint.
 
+Reading an authoritative manifest or document once per session is not treated
+as rediscovery friction. Instruction-discovery findings require repeated reads
+or a search/read loop within at least three sessions and at least 20% of the
+sessions that read that owner. High confidence requires rediscovery in at
+least half of those sessions. Per-category caps retain the highest-impact
+evidence rather than merely the most recent evidence.
+
 Delegated sessions are classified by their strongest observable work mode:
 implementation, delivery, verification, research/review, other tool work, or
 response only. This is descriptive rather than a value judgment. Coordination

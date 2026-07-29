@@ -341,7 +341,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		}
 		const boundedOwnerBytes = 12 * 1024
 		if info.Size() <= boundedOwnerBytes || filepath.Base(target) == "AGENTS.md" || repositoryManifestTarget(target) {
-			if metrics.SearchReadLoops < 5 {
+			if !materialOwnerRediscovery(metrics) {
 				continue
 			}
 			action := "Prefer the repository's bounded context/index surface or clarify the injected guidance so agents do not repeatedly reopen this small owner."
@@ -353,19 +353,21 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			findings = append(findings, sessionFinding{
 				Category: "instruction-discovery",
 				Control:  "repository",
-				Title:    "a small current owner is repeatedly reread",
-				Evidence: fmt.Sprintf("%s reads and %s search/read loops across %s sessions; current size %s bytes",
+				Title:    "an authoritative owner is repeatedly rediscovered",
+				Evidence: fmt.Sprintf("%s reads and %s search/read loops across %s sessions; rediscovery affected %s sessions; current size %s bytes",
 					formatCodexCount(int64(metrics.Reads)),
 					formatCodexCount(int64(metrics.SearchReadLoops)),
 					formatCodexCount(int64(metrics.Sessions)),
+					formatCodexCount(int64(metrics.RediscoverySessions)),
 					formatCodexCount(info.Size()),
 				),
-				Action:   action,
-				Count:    metrics.Reads,
-				Sessions: metrics.Sessions,
-				Target:   target,
-				LastSeen: sessionFindingLastSeen(report, "read", target),
-				score:    320 + metrics.Sessions*15 + metrics.SearchReadLoops*10 + metrics.Reads,
+				Action:     action,
+				Count:      metrics.Reads,
+				Sessions:   metrics.Sessions,
+				Target:     target,
+				LastSeen:   sessionFindingLastSeen(report, "read", target),
+				Confidence: ownerRediscoveryConfidence(metrics),
+				score:      320 + metrics.RediscoverySessions*20 + metrics.SearchReadLoops*10 + metrics.Reads,
 			})
 			continue
 		}
@@ -1073,6 +1075,20 @@ func fileHotspotFindings(report codexSessionInsightsReport) []sessionFinding {
 		}
 	}
 	return findings
+}
+
+func materialOwnerRediscovery(metrics codexTargetMetrics) bool {
+	return metrics.Sessions >= 2 &&
+		metrics.RediscoverySessions >= 3 &&
+		metrics.RediscoverySessions*5 >= metrics.Sessions
+}
+
+func ownerRediscoveryConfidence(metrics codexTargetMetrics) string {
+	if metrics.RediscoverySessions >= 5 &&
+		metrics.RediscoverySessions*2 >= metrics.Sessions {
+		return "high"
+	}
+	return "medium"
 }
 
 func consolidateOwnerFindings(findings []sessionFinding) []sessionFinding {
@@ -1975,7 +1991,13 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		findings,
 		limits["code-structure"],
 	)
-	counts := map[string]int{}
+	categorySelections := map[string]map[int]bool{}
+	for category, limit := range limits {
+		if category == "code-structure" {
+			continue
+		}
+		categorySelections[category] = selectHighestImpactCategoryFindings(findings, category, limit)
+	}
 	result := make([]sessionFinding, 0, len(findings))
 	for index, finding := range findings {
 		if finding.Category == "code-structure" {
@@ -1985,13 +2007,45 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 			result = append(result, finding)
 			continue
 		}
-		if limit := limits[finding.Category]; limit > 0 && counts[finding.Category] >= limit {
-			continue
+		if selections, limited := categorySelections[finding.Category]; limited {
+			if !selections[index] {
+				continue
+			}
 		}
-		counts[finding.Category]++
 		result = append(result, finding)
 	}
 	return result
+}
+
+func selectHighestImpactCategoryFindings(findings []sessionFinding, category string, limit int) map[int]bool {
+	selected := map[int]bool{}
+	if limit <= 0 {
+		return selected
+	}
+	var candidates []int
+	for index, finding := range findings {
+		if finding.Category == category {
+			candidates = append(candidates, index)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		left := findings[candidates[i]]
+		right := findings[candidates[j]]
+		if sessionFindingHigherImpact(left, right) {
+			return true
+		}
+		if sessionFindingHigherImpact(right, left) {
+			return false
+		}
+		return candidates[i] < candidates[j]
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	for _, index := range candidates {
+		selected[index] = true
+	}
+	return selected
 }
 
 func selectRepositoryScopedCodeStructureFindings(findings []sessionFinding, limit int) map[int]bool {

@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 51
+const codexSessionInsightsSchemaVersion = 52
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -138,9 +138,10 @@ type codexInlineMetrics struct {
 }
 
 type codexTargetMetrics struct {
-	Reads           int `json:"reads"`
-	SearchReadLoops int `json:"searchReadLoops"`
-	Sessions        int `json:"sessions"`
+	Reads               int `json:"reads"`
+	SearchReadLoops     int `json:"searchReadLoops"`
+	Sessions            int `json:"sessions"`
+	RediscoverySessions int `json:"rediscoverySessions"`
 }
 
 type codexSessionInsightsSummary struct {
@@ -1921,6 +1922,9 @@ func addCodexTargetMetrics(target, additions map[string]codexTargetMetrics) {
 		metrics.Reads += addition.Reads
 		metrics.SearchReadLoops += addition.SearchReadLoops
 		metrics.Sessions++
+		if addition.Reads > 1 || addition.SearchReadLoops > 0 {
+			metrics.RediscoverySessions++
+		}
 		target[path] = metrics
 	}
 }
@@ -2589,13 +2593,14 @@ func printCodexReadTargets(targets map[string]codexTargetMetrics, limit int) {
 		rows = rows[:limit]
 	}
 	fmt.Println("\nRepository-relative read targets:")
-	fmt.Printf("%-72s %8s %10s %9s\n", "TARGET", "READS", "LOOPS", "SESSIONS")
+	fmt.Printf("%-72s %8s %10s %9s %10s\n", "TARGET", "READS", "LOOPS", "SESSIONS", "REDISCOVER")
 	for _, row := range rows {
-		fmt.Printf("%-72s %8s %10s %9s\n",
+		fmt.Printf("%-72s %8s %10s %9s %10s\n",
 			truncateCodexLabel(row.Path, 72),
 			formatCodexCount(int64(row.Metrics.Reads)),
 			formatCodexCount(int64(row.Metrics.SearchReadLoops)),
 			formatCodexCount(int64(row.Metrics.Sessions)),
+			formatCodexCount(int64(row.Metrics.RediscoverySessions)),
 		)
 	}
 }
