@@ -115,6 +115,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			activeDiagnostic = &diagnosticFailureEpisode{
 				normalizedDiagnosticFailure: *event.Diagnostic.Failure,
 				Target:                      event.Diagnostic.Target,
+				TargetLabels:                event.Diagnostic.TargetLabels,
 				Model:                       record.Model,
 				ReasoningEffort:             record.ReasoningEffort,
 				AgentKind:                   record.AgentKind,
