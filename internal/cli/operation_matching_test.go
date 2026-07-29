@@ -30,7 +30,7 @@ func TestOperationsOnlyDoesNotClaimSharedLauncher(t *testing.T) {
 	if flags := catalog.classifyFlags(codexCommandInvocations("exec_command", `{"cmd":"npm test --json"}`, "")); len(flags) != 0 {
 		t.Fatalf("unrelated launcher flags should remain unattributed: %#v", flags)
 	}
-	if flags := catalog.classifyFlags(codexCommandInvocations("exec_command", `{"cmd":"npm run --silent void -- context actor --json"}`, "")); !reflect.DeepEqual(flags, []string{"void-cli/json", "void-cli/silent"}) {
+	if flags := catalog.classifyFlags(codexCommandInvocations("exec_command", `{"cmd":"npm run --silent void -- context actor --json"}`, "")); !reflect.DeepEqual(flags, []string{"void-cli/json"}) {
 		t.Fatalf("owned launcher flags were not classified: %#v", flags)
 	}
 }
