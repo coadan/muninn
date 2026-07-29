@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const defaultSessionProvider = "codex"
+
 type sessionDiscovery struct {
 	Dirs            []string
 	Files           []string
@@ -34,13 +36,17 @@ var sessionProviders = map[string]func() sessionProvider{
 func resolveSessionSource(name string) (sessionProvider, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
-		name = "codex"
+		name = defaultSessionProvider
 	}
 	factory, ok := sessionProviders[name]
 	if ok {
 		return factory(), nil
 	}
 	return nil, fmt.Errorf("unsupported session provider %q (available: %s)", name, strings.Join(availableSessionProviders(), ", "))
+}
+
+func sessionProviderFlagHelp() string {
+	return fmt.Sprintf("session provider (available: %s)", strings.Join(availableSessionProviders(), ", "))
 }
 
 func availableSessionProviders() []string {
