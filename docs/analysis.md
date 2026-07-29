@@ -85,6 +85,9 @@ sessions that read that owner. High confidence requires rediscovery in at
 least half of those sessions. Per-category caps retain the highest-impact
 evidence rather than merely the most recent evidence.
 
+Output-heavy bundled discovery remains low confidence when observed in only
+one session; cross-session recurrence is required for medium confidence.
+
 Delegated sessions are classified by their strongest observable work mode:
 implementation, delivery, verification, research/review, other tool work, or
 response only. This is descriptive rather than a value judgment. Coordination
@@ -119,7 +122,10 @@ failures remain available in `--details` and JSON.
 When deliveries fail a recurring downstream check without fresh
 pre-verification, the check—not the most common edited file cohort—is the
 intervention target. If that check belongs to a configured local tool, its
-quality evidence is consolidated into the same tool intervention.
+quality evidence is consolidated into the same tool intervention. A failed
+post-delivery check is still observational until matching follow-up edits,
+redeliveries, or reverts recur for a material share of affected deliveries;
+limited correction evidence remains medium confidence.
 
 ## Compare adjacent periods
 

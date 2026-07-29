@@ -674,6 +674,24 @@ func TestDownstreamQualityTracksFailureFixPassAndRedelivery(t *testing.T) {
 	}
 }
 
+func TestAddDownstreamQualityMetricsSeparatesDeliveryAndFailureSessions(t *testing.T) {
+	total := downstreamQualityMetrics{}
+	addDownstreamQualityMetrics(&total, downstreamQualityMetrics{
+		Deliveries: 3,
+		Sessions:   1,
+	})
+	addDownstreamQualityMetrics(&total, downstreamQualityMetrics{
+		Deliveries:            2,
+		DeliveriesWithFailure: 1,
+		Sessions:              1,
+		FailureSessions:       1,
+	})
+	if total.Deliveries != 5 || total.Sessions != 2 || total.DeliveriesWithFailure != 1 ||
+		total.FailureSessions != 1 {
+		t.Fatalf("downstream session aggregation mismatch: %#v", total)
+	}
+}
+
 func TestDownstreamQualitySeparatesReviewCleanupAndUnrelatedEdits(t *testing.T) {
 	tracker := downstreamQualityTracker{}
 	deliveredTarget := "src/runtime.go"

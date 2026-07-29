@@ -410,6 +410,10 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		record.DownstreamQuality.Reverts > 0 {
 		record.DownstreamQuality.Sessions = 1
 	}
+	if record.DownstreamQuality.DeliveriesWithFailure > 0 ||
+		record.DownstreamQuality.Reverts > 0 {
+		record.DownstreamQuality.FailureSessions = 1
+	}
 	if record.StartedAt.IsZero() {
 		return codexSessionRecord{}, nil
 	}

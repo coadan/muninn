@@ -95,6 +95,7 @@ type downstreamQualityMetrics struct {
 	RecoveredDeliveries               int                                `json:"recoveredDeliveries"`
 	Reverts                           int                                `json:"reverts"`
 	Sessions                          int                                `json:"sessions"`
+	FailureSessions                   int                                `json:"failureSessions"`
 	FailureChecks                     map[string]int                     `json:"failureChecks,omitempty"`
 	FailureTargets                    map[string]int                     `json:"failureTargets,omitempty"`
 	FollowUpTargets                   map[string]int                     `json:"followUpTargets,omitempty"`
@@ -1025,6 +1026,7 @@ func addDownstreamQualityMetrics(target *downstreamQualityMetrics, addition down
 	target.RecoveredDeliveries += addition.RecoveredDeliveries
 	target.Reverts += addition.Reverts
 	target.Sessions += addition.Sessions
+	target.FailureSessions += addition.FailureSessions
 	if target.FailureChecks == nil {
 		target.FailureChecks = map[string]int{}
 	}
