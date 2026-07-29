@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -10,6 +11,22 @@ import (
 type fakeSessionProvider struct {
 	discovery sessionDiscovery
 	sessions  map[string]normalizedSession
+}
+
+func TestSessionProviderRegistryOwnsPublicProviderList(t *testing.T) {
+	original := sessionProviders
+	sessionProviders = map[string]func() sessionProvider{
+		"zeta":  func() sessionProvider { return fakeSessionProvider{} },
+		"alpha": func() sessionProvider { return fakeSessionProvider{} },
+	}
+	t.Cleanup(func() { sessionProviders = original })
+
+	if got := availableSessionProviders(); !reflect.DeepEqual(got, []string{"alpha", "zeta"}) {
+		t.Fatalf("available providers=%v", got)
+	}
+	if got := sessionProviderFlagHelp(); got != "session provider (available: alpha, zeta)" {
+		t.Fatalf("provider help=%q", got)
+	}
 }
 
 func (provider fakeSessionProvider) Name() string {

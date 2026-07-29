@@ -485,13 +485,13 @@ func cmdAnalyze(root string, args []string) error {
 	fs.SetOutput(os.Stdout)
 	sinceRaw := fs.String("since", "7d", "lookback duration (for example 24h, 7d, or 2w)")
 	sinceCommit := fs.String("since-commit", "", "analyze activity after a Git commit timestamp")
-	providerName := fs.String("provider", "codex", "session provider (available: codex)")
-	sessionsDir := fs.String("sessions-dir", "", "provider session directory (Codex default: $CODEX_HOME/sessions or ~/.codex/sessions)")
+	providerName := fs.String("provider", defaultSessionProvider, sessionProviderFlagHelp())
+	sessionsDir := fs.String("sessions-dir", "", "override the selected provider's default session directory")
 	repoRoot := root
 	fs.StringVar(&repoRoot, "repo", root, "only include sessions whose cwd is inside this repository")
 	taskFilter := fs.String("task", "", "only include sessions attributed to this exact worktree/task ID")
 	configPath := fs.String("config", "", "repository config path (default: <repo>/.muninn.json when present)")
-	includeArchived := fs.Bool("include-archived", false, "also scan the sibling archived_sessions directory")
+	includeArchived := fs.Bool("include-archived", false, "also scan provider archives when supported")
 	defaultStorePath, err := defaultSessionStorePath()
 	if err != nil {
 		return err
