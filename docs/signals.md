@@ -1,0 +1,117 @@
+# Signal interpretation
+
+Muninn reports recurring, attributable patterns that may increase cost per
+completed task. Counts are evidence, not proof of causality.
+
+## What Muninn models
+
+Muninn keeps these activities distinct:
+
+- completed tool tasks and response-only turns;
+- fresh, cached, reasoning, and output tokens;
+- discovery, editing, verification, delivery, and review-driven rework;
+- actionable progress stalls, expected waits, and rapid continuation polling;
+- test outcomes after the latest edit and before delivery;
+- repeated exact configured checks without intervening edits;
+- oversized output, truncation, recurring failures, and long inline scripts;
+- context compactions attributed to the phase that preceded them;
+- structured Heimdal failures and post-failure recovery cost;
+- root-agent and delegated work, coordination, and overlap;
+- repository navigation, repeated reads, and instruction footprint.
+
+## Confidence and recurrence
+
+Reading an authoritative manifest or document once per session is not
+rediscovery friction. Instruction-discovery findings require repeated reads or
+a search/read loop in at least three sessions and at least 20% of sessions that
+read the owner. High confidence requires rediscovery in at least half.
+
+Output-heavy bundled discovery remains low confidence when it appears in only
+one session. The same recurrence rule prevents an isolated locally owned stall
+from becoming a high-priority intervention.
+
+Per-category caps retain the highest-impact evidence rather than merely the
+newest evidence.
+
+Excessive-operation findings use definitely attributed invocations. Operations
+that merely co-occur in a command bundle remain drill-down evidence but do not
+establish repeated outer-roundtrip friction. Definite and ambiguous bundled
+failures, truncation, and output cost remain separate.
+
+## Intervention construction
+
+An intervention contains:
+
+- a stable intervention ID and primary signal;
+- any supporting signals;
+- the likely improvement lever;
+- confidence and explicit priority;
+- recent supporting activity;
+- a concise explanation and next action.
+
+`highest` priority is reserved for high-confidence locally controlled changes.
+Other high-confidence changes follow, then medium- and low-confidence
+candidates. Evidence orders interventions within a priority tier; unlike
+signal categories are not treated as one numeric scale.
+
+Failures, output, waits, and delivery evidence for one configured local
+operation consolidate at the tool owner. Multiple findings for one exact file
+owner also consolidate: delivery quality outranks task cost, which outranks
+navigation-only evidence. Component signal IDs remain visible. A
+navigation-only owner remains medium confidence until cost or quality evidence
+corroborates it.
+
+Historical edit evidence only creates a current-owner intervention while that
+repository-relative target still exists. Deleting or moving an owner therefore
+resolves its old intervention instead of keeping a stale path in the queue.
+
+## Operation cohorts
+
+Detailed reports compare completed tasks that used a locally owned operation
+with tasks that did not, within the same agent, model, reasoning-effort, and
+task-family cohort. These with/without deltas are observational and never
+create findings by themselves because tool use may correlate with unobserved
+task difficulty.
+
+## Quality and file hotspots
+
+Muninn distinguishes healthy demand from actionable file friction.
+
+- `healthy-demand`: frequently edited without material cost or quality
+  evidence; never creates a finding.
+- `expensive-owner`: at least three completed tasks and a median of at least
+  50 outer tool roundtrips.
+- `review/rework`: at least two attributed review or follow-up corrections.
+- `downstream-risk`: at least two attributed downstream failures or reverts.
+
+When deliveries fail a recurring downstream check without fresh
+pre-verification, the check is the intervention target—not merely the most
+frequently edited file cohort. If the check belongs to a configured local
+tool, the quality evidence consolidates into that tool intervention.
+
+A failed post-delivery check remains observational until matching follow-up
+edits, redeliveries, or reverts recur for a material share of affected
+deliveries. Limited correction evidence stays medium confidence.
+
+## Delegation and diagnostics
+
+Delegated sessions are classified by their strongest observable mode:
+implementation, delivery, verification, research/review, other tool work, or
+response only. This is descriptive. Coordination metrics are unavailable—not
+zero—when lineage exists but provider events omit spawn, wait, or message
+calls.
+
+Failed Heimdal reports route by evidence: fixture startup failures point to
+tooling, executed-test failures to source code, and selection failures to tests
+or instructions. Recurring fingerprints become findings; one-off failures
+remain in detailed reports.
+
+## JSON detail levels
+
+Default JSON includes compact scope, intervention, outcome, profile,
+delegation, and diagnostic summaries. It omits task rows and high-cardinality
+maps except bounded focus evidence.
+
+Use `--details --json` for the complete analytical maps. `detailLevel` is
+`summary` or `full`. Both `interventions` and constituent `findings` remain
+available in the full report.
