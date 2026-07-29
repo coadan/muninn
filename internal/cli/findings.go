@@ -75,7 +75,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		}
 		reasons := summary.OwnedOperationFailureReasons[operation]
 		actionableFailures, expectedFailures := ownedOperationFailureCounts(ownership, operation, reasons)
-		outputThreshold := max(int64(25_000), summary.ToolOutputTokens/100)
+		outputThreshold := max(int64(50_000), summary.ToolOutputTokens/50)
 		outputHeavy := metrics.EstimatedOutputTokens >= outputThreshold &&
 			ratio(float64(metrics.EstimatedOutputTokens), float64(metrics.Calls)) >= 500
 		if actionableFailures < 2 && metrics.TruncatedCalls < 3 && !outputHeavy && !repeated {
@@ -113,17 +113,23 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			evidence += "; actionable reasons: " + formatted
 		}
 		evidence += recentOwnedOperationEvidence(report, ownership, operation)
+		confidence := "high"
+		if outputHeavy && !repeated && actionableFailures < 2 && metrics.TruncatedCalls < 3 {
+			confidence = "medium"
+		}
 		findings = append(findings, sessionFinding{
-			Category: "owned-operation",
-			Control:  "local",
-			Title:    title,
-			Evidence: evidence,
-			Action:   action,
-			Count:    metrics.Calls,
-			Sessions: metrics.Sessions,
-			Target:   operation,
-			LastSeen: ownedOperationFindingLastSeen(report, operation, actionableFailures, metrics.TruncatedCalls),
-			score:    650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + min(metrics.Calls, 200) + int(metrics.EstimatedOutputTokens/5_000),
+			Category:   "owned-operation",
+			Control:    "local",
+			Title:      title,
+			Evidence:   evidence,
+			Action:     action,
+			Count:      metrics.Calls,
+			Sessions:   metrics.Sessions,
+			Target:     operation,
+			LastSeen:   ownedOperationFindingLastSeen(report, operation, actionableFailures, metrics.TruncatedCalls),
+			Lever:      "tooling",
+			Confidence: confidence,
+			score:      650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + min(metrics.Calls, 200) + int(metrics.EstimatedOutputTokens/5_000),
 		})
 	}
 
@@ -189,11 +195,19 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 
 	for _, owned := range config.OwnedTools {
 		metrics := summary.OwnedTooling[owned.ID]
+		definiteCalls := max(metrics.Calls-metrics.AmbiguousCalls, 0)
 		failedCalls := max(metrics.FailedCalls-metrics.AmbiguousFailedCalls, 0)
 		truncatedCalls := max(metrics.TruncatedCalls-metrics.AmbiguousTruncatedCalls, 0)
 		outputBytes := max(metrics.OutputBytes-metrics.AmbiguousOutputBytes, 0)
 		outputTokens := estimatedTokens(outputBytes)
-		if failedCalls < 2 && truncatedCalls < 3 && outputTokens < 50_000 {
+		failureSessions, truncationSessions := ownedToolFrictionSessions(report, owned.ID)
+		recurringFailures := failedCalls >= 2 && (failureSessions >= 2 || failedCalls >= 5)
+		recurringTruncations := truncatedCalls >= 3 && (truncationSessions >= 2 || truncatedCalls >= 5)
+		outputThreshold := max(int64(50_000), summary.ToolOutputTokens/50)
+		outputHeavy := metrics.Sessions >= 2 &&
+			outputTokens >= outputThreshold &&
+			ratio(float64(outputTokens), float64(definiteCalls)) >= 500
+		if !recurringFailures && !recurringTruncations && !outputHeavy {
 			continue
 		}
 		action := strings.TrimSpace(owned.Recommendation)
@@ -204,11 +218,14 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Category: "owned-tool",
 			Control:  "local",
 			Title:    "locally controlled tooling has recurring friction: " + owned.ID,
-			Evidence: fmt.Sprintf("%s calls, %s bundled calls, %s attributable failures, %s attributable truncations, ~%s attributable output tokens, ~%s ambiguous bundled output tokens",
+			Evidence: fmt.Sprintf("%s calls across %s sessions, %s bundled calls, %s attributable failures across %s failure sessions, %s attributable truncations across %s truncation sessions, ~%s attributable output tokens, ~%s ambiguous bundled output tokens",
 				formatCodexCount(int64(metrics.Calls)),
+				formatCodexCount(int64(metrics.Sessions)),
 				formatCodexCount(int64(metrics.AmbiguousCalls)),
 				formatCodexCount(int64(failedCalls)),
+				formatCodexCount(int64(failureSessions)),
 				formatCodexCount(int64(truncatedCalls)),
+				formatCodexCount(int64(truncationSessions)),
 				formatCodexCount(outputTokens),
 				formatCodexCount(estimatedTokens(metrics.AmbiguousOutputBytes)),
 			),
@@ -1487,6 +1504,19 @@ func ownedOperationFailureCounts(ownership ownershipCatalog, operation string, r
 		}
 	}
 	return actionable, expected
+}
+
+func ownedToolFrictionSessions(report codexSessionInsightsReport, tool string) (failureSessions, truncationSessions int) {
+	for _, record := range report.sessionRecords {
+		metrics := record.OwnedTooling[tool]
+		if metrics.FailedCalls > metrics.AmbiguousFailedCalls {
+			failureSessions++
+		}
+		if metrics.TruncatedCalls > metrics.AmbiguousTruncatedCalls {
+			truncationSessions++
+		}
+	}
+	return failureSessions, truncationSessions
 }
 
 func ownedOperationExpectedFailure(operation, reason string) bool {

@@ -166,6 +166,9 @@ func sessionInterventionTool(id string) string {
 
 func interventionFindingPriority(finding sessionFinding) int {
 	switch {
+	case finding.Category == "owned-operation" &&
+		strings.HasPrefix(finding.Title, "high-cost locally controlled operation: "):
+		return 2
 	case finding.Control == "local" && finding.Confidence == "high":
 		return 4
 	case finding.Confidence == "high",

@@ -439,6 +439,36 @@ func TestBuildSessionFindingsDoesNotChargeBundledFrictionToOwnedTool(t *testing.
 	}
 }
 
+func TestBuildSessionFindingsRequiresRecurringOwnedToolFriction(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.OwnedTooling["repo"] = codexToolMetrics{
+		Calls: 10, Sessions: 1, FailedCalls: 2,
+	}
+	report.sessionRecords = []codexSessionRecord{{
+		OwnedTooling: map[string]codexToolMetrics{
+			"repo": {Calls: 10, FailedCalls: 2},
+		},
+	}}
+	config := defaultRepositoryConfig()
+	config.OwnedTools = []ownedToolConfig{{ID: "repo"}}
+	if findings := buildSessionFindings(report, config); len(findings) != 0 {
+		t.Fatalf("one-session owned-tool failures became recurring friction: %#v", findings)
+	}
+
+	report.Summary.OwnedTooling["repo"] = codexToolMetrics{
+		Calls: 20, Sessions: 2, FailedCalls: 2,
+	}
+	report.sessionRecords = []codexSessionRecord{
+		{OwnedTooling: map[string]codexToolMetrics{"repo": {Calls: 10, FailedCalls: 1}}},
+		{OwnedTooling: map[string]codexToolMetrics{"repo": {Calls: 10, FailedCalls: 1}}},
+	}
+	findings := buildSessionFindings(report, config)
+	if len(findings) != 1 ||
+		!strings.Contains(findings[0].Evidence, "2 attributable failures across 2 failure sessions") {
+		t.Fatalf("cross-session owned-tool friction missing: %#v", findings)
+	}
+}
+
 func TestBuildSessionFindingsShowsRecentOwnedOperationEvidence(t *testing.T) {
 	generatedAt := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	report := newSessionInsightsReport(
@@ -543,11 +573,22 @@ func TestBuildSessionFindingsFlagsMaterialOwnedOperationOutput(t *testing.T) {
 		Sessions:              3,
 		EstimatedOutputTokens: 30_000,
 	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("modest successful operation output became friction: %#v", findings)
+	}
 
+	metrics := report.Summary.OwnedOperations["repo/inspect"]
+	metrics.EstimatedOutputTokens = 60_000
+	report.Summary.OwnedOperations["repo/inspect"] = metrics
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 || findings[0].Target != "repo/inspect" ||
-		!strings.Contains(findings[0].Title, "high-cost") {
+		!strings.Contains(findings[0].Title, "high-cost") ||
+		findings[0].Confidence != "medium" {
 		t.Fatalf("material operation output finding mismatch: %#v", findings)
+	}
+	interventions := buildSessionInterventions(findings)
+	if len(interventions) != 1 || interventions[0].Priority != "medium" {
+		t.Fatalf("output-only operation priority mismatch: %#v", interventions)
 	}
 }
 
