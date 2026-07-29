@@ -19,7 +19,7 @@ type codexTaskEpisode struct {
 	EndedAt           time.Time
 	Completed         bool
 	LeftCensored      bool
-	Tokens            codexTokenUsage
+	Tokens            normalizedTokenUsage
 	ToolCalls         int
 	FailedCalls       int
 	Compactions       int
@@ -37,7 +37,7 @@ type codexTaskEpisode struct {
 }
 
 type taskPhaseCost struct {
-	Tokens          codexTokenUsage
+	Tokens          normalizedTokenUsage
 	ToolCalls       int
 	FailedCalls     int
 	Compactions     int
@@ -1084,7 +1084,7 @@ func finalizeDownstreamQualityMetrics(metrics *downstreamQualityMetrics) {
 	metrics.TimeToRecoverySeconds = summarizeOutcomeDistribution(metrics.timeToRecoverySecondsObservations)
 }
 
-func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncrement codexTokenUsage, operations []string) {
+func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncrement normalizedTokenUsage, operations []string) {
 	if episode.StartedAt.IsZero() || event.OccurredAt.Before(episode.StartedAt) {
 		episode.StartedAt = event.OccurredAt
 	}
@@ -1094,7 +1094,7 @@ func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncr
 	episode.observePhase(event, tokenIncrement, operations)
 	switch event.Kind {
 	case sessionEventToken:
-		addCodexTokenUsage(&episode.Tokens, tokenIncrement)
+		addNormalizedTokenUsage(&episode.Tokens, tokenIncrement)
 	case sessionEventToolCall:
 		episode.ToolCalls++
 		if event.Family != "" {
@@ -1145,7 +1145,7 @@ func (episode *codexTaskEpisode) observe(event normalizedSessionEvent, tokenIncr
 
 func (episode *codexTaskEpisode) observePhase(
 	event normalizedSessionEvent,
-	tokenIncrement codexTokenUsage,
+	tokenIncrement normalizedTokenUsage,
 	operations []string,
 ) {
 	if episode.Phases == nil {
@@ -1172,7 +1172,7 @@ func (episode *codexTaskEpisode) observePhase(
 	metrics := episode.Phases[phase]
 	switch event.Kind {
 	case sessionEventToken:
-		addCodexTokenUsage(&metrics.Tokens, tokenIncrement)
+		addNormalizedTokenUsage(&metrics.Tokens, tokenIncrement)
 	case sessionEventToolCall:
 		metrics.ToolCalls++
 	case sessionEventToolOutput:

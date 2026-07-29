@@ -31,7 +31,7 @@ var codexExplicitSessionMarkerPattern = regexp.MustCompile(`^SESSION_ID=([0-9]+)
 var codexContinuationStatusPattern = regexp.MustCompile(`(?im)^(?:script|process) running with (session|cell) id\s+([^\s]+)\s*$`)
 var suppressedSignalPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]{0,199}$`)
 
-type codexTokenUsage struct {
+type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
 	CachedInputTokens   int64 `json:"cachedInputTokens"`
 	UncachedInputTokens int64 `json:"uncachedInputTokens"`
@@ -52,7 +52,7 @@ type codexAggregateMetrics struct {
 	DurationSeconds              int64                                        `json:"durationSeconds"`
 	Compactions                  int                                          `json:"compactions"`
 	SessionsWithCompactions      int                                          `json:"sessionsWithCompactions"`
-	Tokens                       codexTokenUsage                              `json:"tokens"`
+	Tokens                       normalizedTokenUsage                         `json:"tokens"`
 	FreshTokens                  int64                                        `json:"freshTokens"`
 	ToolCalls                    int                                          `json:"toolCalls"`
 	FailedToolCalls              int                                          `json:"failedToolCalls"`
@@ -196,7 +196,7 @@ type codexSessionRecord struct {
 	EndedAt                      time.Time
 	Completed                    bool
 	Compactions                  int
-	Tokens                       codexTokenUsage
+	Tokens                       normalizedTokenUsage
 	ToolCalls                    int
 	FailedToolCalls              int
 	TruncatedToolCalls           int
@@ -848,7 +848,7 @@ func analyzeCodexSessionsFilteredWithMetadata(sessionDirs []string, workspaceRoo
 	if err != nil {
 		return codexSessionInsightsReport{}, err
 	}
-	return analyzeProviderSessions(codexSessionSource{}, discovery, workspaceRoot, since, generatedAt, taskFilter, ownership, metadata)
+	return analyzeProviderSessions(codexSessionProvider, discovery, workspaceRoot, since, generatedAt, taskFilter, ownership, metadata)
 }
 
 func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRoot string, since, generatedAt time.Time) codexSessionInsightsReport {
@@ -1826,7 +1826,7 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	if record.Compactions > 0 {
 		target.SessionsWithCompactions++
 	}
-	addCodexTokenUsage(&target.Tokens, record.Tokens)
+	addNormalizedTokenUsage(&target.Tokens, record.Tokens)
 	target.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
 	target.ToolCalls += record.ToolCalls
 	target.FailedToolCalls += record.FailedToolCalls
@@ -2024,7 +2024,7 @@ func codexSessionDuration(record codexSessionRecord) int64 {
 	return int64(record.EndedAt.Sub(record.StartedAt).Seconds())
 }
 
-func addCodexTokenUsage(total *codexTokenUsage, usage codexTokenUsage) {
+func addNormalizedTokenUsage(total *normalizedTokenUsage, usage normalizedTokenUsage) {
 	total.InputTokens += usage.InputTokens
 	total.CachedInputTokens += usage.CachedInputTokens
 	total.UncachedInputTokens += usage.UncachedInputTokens

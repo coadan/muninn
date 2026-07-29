@@ -15,7 +15,7 @@ func TestAnalyzeCompletionEpisodesUsesDistributionsNotAverages(t *testing.T) {
 			StartedAt: time.Unix(0, 0),
 			EndedAt:   time.Unix(10, 0),
 			Completed: true,
-			Tokens: codexTokenUsage{
+			Tokens: normalizedTokenUsage{
 				CachedInputTokens:   2 * fresh,
 				UncachedInputTokens: fresh,
 				OutputTokens:        fresh / 10,
@@ -56,7 +56,7 @@ func TestAnalyzeCompletionEpisodesLocalizesFreshTokenTailDrivers(t *testing.T) {
 			StartedAt: time.Unix(0, 0),
 			EndedAt:   time.Unix(10, 0),
 			Completed: true,
-			Tokens: codexTokenUsage{
+			Tokens: normalizedTokenUsage{
 				UncachedInputTokens: fresh,
 			},
 			ToolCalls:     2,
@@ -246,7 +246,7 @@ func TestTaskPhaseSequencingTracksDeliveryAndRework(t *testing.T) {
 	observe(8, normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "apply_patch"})
 	observe(9, normalizedSessionEvent{
 		Kind: sessionEventToken,
-		Tokens: codexTokenUsage{
+		Tokens: normalizedTokenUsage{
 			UncachedInputTokens: 80,
 			OutputTokens:        20,
 		},
@@ -285,15 +285,15 @@ func TestTaskPhaseSequencingTracksDelegation(t *testing.T) {
 		Kind:       sessionEventToolCall,
 		ToolName:   "spawn_agent",
 		OccurredAt: time.Unix(0, 0),
-	}, codexTokenUsage{}, nil)
+	}, normalizedTokenUsage{}, nil)
 	episode.observe(normalizedSessionEvent{
 		Kind:       sessionEventToken,
 		OccurredAt: time.Unix(2, 0),
-		Tokens: codexTokenUsage{
+		Tokens: normalizedTokenUsage{
 			UncachedInputTokens: 20,
 			OutputTokens:        5,
 		},
-	}, codexTokenUsage{UncachedInputTokens: 20, OutputTokens: 5}, nil)
+	}, normalizedTokenUsage{UncachedInputTokens: 20, OutputTokens: 5}, nil)
 	phase := episode.Phases["delegation"]
 	if phase.ToolCalls != 1 || phaseFreshTokens(phase) != 25 ||
 		phase.DurationSeconds != 2 {
@@ -315,7 +315,7 @@ func TestTaskPhaseKeepsNewPostDeliveryWorkOutOfDownstreamRework(t *testing.T) {
 	observe(4, normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "tests", Failed: true})
 	observe(5, normalizedSessionEvent{
 		Kind: sessionEventToken,
-		Tokens: codexTokenUsage{
+		Tokens: normalizedTokenUsage{
 			UncachedInputTokens: 20,
 		},
 	})
@@ -336,23 +336,23 @@ func TestAnalyzeTaskPhaseTailAssociationsComparesPhaseMix(t *testing.T) {
 			ToolCalls: 1,
 			Phases: map[string]taskPhaseCost{
 				"discovery": {
-					Tokens:    codexTokenUsage{UncachedInputTokens: 90},
+					Tokens:    normalizedTokenUsage{UncachedInputTokens: 90},
 					ToolCalls: 1,
 				},
 				"editing": {
-					Tokens: codexTokenUsage{UncachedInputTokens: 10},
+					Tokens: normalizedTokenUsage{UncachedInputTokens: 10},
 				},
 			},
-			Tokens: codexTokenUsage{UncachedInputTokens: 100},
+			Tokens: normalizedTokenUsage{UncachedInputTokens: 100},
 		}
 		if index < 2 {
 			episode.Phases = map[string]taskPhaseCost{
 				"discovery": {
-					Tokens:    codexTokenUsage{UncachedInputTokens: 200},
+					Tokens:    normalizedTokenUsage{UncachedInputTokens: 200},
 					ToolCalls: 1,
 				},
 				"rework": {
-					Tokens: codexTokenUsage{UncachedInputTokens: 800},
+					Tokens: normalizedTokenUsage{UncachedInputTokens: 800},
 				},
 			}
 			episode.Tokens.UncachedInputTokens = 1_000
@@ -822,7 +822,7 @@ func TestSessionRecordSegmentsCompletionEpisodesAndCensoring(t *testing.T) {
 			{
 				OccurredAt: since.Add(-time.Second),
 				Kind:       sessionEventToken,
-				Tokens: codexTokenUsage{
+				Tokens: normalizedTokenUsage{
 					InputTokens: 100, UncachedInputTokens: 20, OutputTokens: 10, TotalTokens: 110,
 				},
 			},
@@ -830,7 +830,7 @@ func TestSessionRecordSegmentsCompletionEpisodesAndCensoring(t *testing.T) {
 			{
 				OccurredAt: at(2),
 				Kind:       sessionEventToken,
-				Tokens: codexTokenUsage{
+				Tokens: normalizedTokenUsage{
 					InputTokens: 150, UncachedInputTokens: 30, OutputTokens: 15, TotalTokens: 165,
 				},
 			},
@@ -847,7 +847,7 @@ func TestSessionRecordSegmentsCompletionEpisodesAndCensoring(t *testing.T) {
 			{
 				OccurredAt: at(6),
 				Kind:       sessionEventToken,
-				Tokens: codexTokenUsage{
+				Tokens: normalizedTokenUsage{
 					InputTokens: 200, UncachedInputTokens: 40, OutputTokens: 20, TotalTokens: 220,
 				},
 			},

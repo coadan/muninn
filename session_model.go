@@ -46,7 +46,7 @@ type normalizedSessionEvent struct {
 	OutputBytes                   int64
 	FailureReason                 string
 	FailureContext                string
-	Tokens                        codexTokenUsage
+	Tokens                        normalizedTokenUsage
 	SelectorDigests               []string
 	CommandCandidates             []ownedCommandInvocation
 	OwnedOperations               []string
@@ -82,7 +82,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 
 	previousCommandRound := 0
 	previousCommand := normalizedSessionEvent{}
-	previousTokens := codexTokenUsage{}
+	previousTokens := normalizedTokenUsage{}
 	hasPreviousTokens := false
 	episode := newTaskEpisode(record)
 	deliveryTrackers := map[string]*deliveryReworkTracker{}
@@ -109,9 +109,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		if event.OccurredAt.After(generatedAt) {
 			continue
 		}
-		tokenIncrement := codexTokenUsage{}
+		tokenIncrement := normalizedTokenUsage{}
 		if event.Kind == sessionEventToken {
-			tokenIncrement = codexTokenUsageIncrement(event.Tokens, previousTokens, hasPreviousTokens)
+			tokenIncrement = normalizedTokenUsageIncrement(event.Tokens, previousTokens, hasPreviousTokens)
 			previousTokens = event.Tokens
 			hasPreviousTokens = true
 		}
@@ -119,7 +119,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			continue
 		}
 		if event.Kind == sessionEventToken {
-			addCodexTokenUsage(&record.Tokens, tokenIncrement)
+			addNormalizedTokenUsage(&record.Tokens, tokenIncrement)
 		}
 		if activeDiagnostic != nil &&
 			event.Kind != sessionEventToolOutput &&
@@ -135,7 +135,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				activeDiagnostic.EndedAt = event.OccurredAt
 				switch event.Kind {
 				case sessionEventToken:
-					addCodexTokenUsage(&activeDiagnostic.Tokens, tokenIncrement)
+					addNormalizedTokenUsage(&activeDiagnostic.Tokens, tokenIncrement)
 				case sessionEventToolCall:
 					activeDiagnostic.ToolCalls++
 				case sessionEventToolOutput:
@@ -327,7 +327,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			if event.CallOccurredAt.Before(since) || event.CallOccurredAt.After(generatedAt) {
 				continue
 			}
-			episode.observe(event, codexTokenUsage{}, eventOperations)
+			episode.observe(event, normalizedTokenUsage{}, eventOperations)
 			record.ToolOutputBytes += event.OutputBytes
 			if event.Truncated {
 				record.TruncatedToolCalls++
@@ -442,11 +442,11 @@ func newTaskEpisode(record codexSessionRecord) codexTaskEpisode {
 	}
 }
 
-func codexTokenUsageIncrement(current, previous codexTokenUsage, hasPrevious bool) codexTokenUsage {
+func normalizedTokenUsageIncrement(current, previous normalizedTokenUsage, hasPrevious bool) normalizedTokenUsage {
 	if !hasPrevious || current.TotalTokens < previous.TotalTokens {
 		return current
 	}
-	return codexTokenUsage{
+	return normalizedTokenUsage{
 		InputTokens:         max(int64(0), current.InputTokens-previous.InputTokens),
 		CachedInputTokens:   max(int64(0), current.CachedInputTokens-previous.CachedInputTokens),
 		UncachedInputTokens: max(int64(0), current.UncachedInputTokens-previous.UncachedInputTokens),

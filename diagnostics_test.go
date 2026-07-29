@@ -30,7 +30,7 @@ func TestSessionStorePreservesNormalizedDiagnosticFailure(t *testing.T) {
 			},
 			{
 				Sequence: 2, OccurredAt: failedAt.Add(time.Minute), Kind: sessionEventToken,
-				Tokens: codexTokenUsage{TotalTokens: 50},
+				Tokens: normalizedTokenUsage{TotalTokens: 50},
 			},
 			{Sequence: 3, OccurredAt: failedAt.Add(2 * time.Minute), Kind: sessionEventComplete},
 		},
@@ -226,12 +226,12 @@ func TestAnalyzeDiagnosticFailuresGroupsFingerprintAndProfiles(t *testing.T) {
 		{DiagnosticFailures: []diagnosticFailureEpisode{{
 			normalizedDiagnosticFailure: failure, Model: "gpt-5.6", ReasoningEffort: "high",
 			AgentKind: "root", EndedAt: failedAt.Add(2 * time.Minute),
-			Tokens: codexTokenUsage{TotalTokens: 120}, ToolCalls: 4,
+			Tokens: normalizedTokenUsage{TotalTokens: 120}, ToolCalls: 4,
 		}}},
 		{DiagnosticFailures: []diagnosticFailureEpisode{{
 			normalizedDiagnosticFailure: failure, Model: "gpt-5.6", ReasoningEffort: "high",
 			AgentKind: "root", EndedAt: failedAt.Add(time.Minute),
-			Tokens: codexTokenUsage{TotalTokens: 80}, ToolCalls: 2,
+			Tokens: normalizedTokenUsage{TotalTokens: 80}, ToolCalls: 2,
 		}}},
 	}
 	got := analyzeDiagnosticFailures(records)
@@ -283,7 +283,7 @@ func TestCompareDiagnosticEffectivenessDistinguishesPassAndAbsence(t *testing.T)
 		return diagnosticFailureAggregate{
 			Source: "heimdal", Classification: "infrastructure", Fingerprint: fingerprint,
 			Target: target, Lever: "tooling", Occurrences: 1,
-			PostFailureTokens: codexTokenUsage{UncachedInputTokens: fresh},
+			PostFailureTokens: normalizedTokenUsage{UncachedInputTokens: fresh},
 			PostFailureCalls:  int(calls), PostFailureSecs: seconds,
 		}
 	}

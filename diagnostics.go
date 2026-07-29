@@ -38,7 +38,7 @@ type diagnosticFailureEpisode struct {
 	ReasoningEffort string
 	AgentKind       string
 	EndedAt         time.Time
-	Tokens          codexTokenUsage
+	Tokens          normalizedTokenUsage
 	ToolCalls       int
 	FailedCalls     int
 	OutputBytes     int64
@@ -63,7 +63,7 @@ type diagnosticFailureAggregate struct {
 	Occurrences       int                     `json:"occurrences"`
 	Sessions          int                     `json:"sessions"`
 	ProbeCount        int                     `json:"probeCount"`
-	PostFailureTokens codexTokenUsage         `json:"postFailureTokens"`
+	PostFailureTokens normalizedTokenUsage    `json:"postFailureTokens"`
 	PostFailureCalls  int                     `json:"postFailureToolCalls"`
 	PostFailureFailed int                     `json:"postFailureFailedCalls"`
 	PostFailureOutput int64                   `json:"postFailureOutputBytes"`
@@ -82,13 +82,13 @@ type diagnosticPassAggregate struct {
 }
 
 type diagnosticCostProfile struct {
-	AgentKind       string          `json:"agentKind"`
-	Model           string          `json:"model"`
-	ReasoningEffort string          `json:"reasoningEffort"`
-	Occurrences     int             `json:"occurrences"`
-	Tokens          codexTokenUsage `json:"tokens"`
-	ToolCalls       int             `json:"toolCalls"`
-	DurationSeconds int64           `json:"durationSeconds"`
+	AgentKind       string               `json:"agentKind"`
+	Model           string               `json:"model"`
+	ReasoningEffort string               `json:"reasoningEffort"`
+	Occurrences     int                  `json:"occurrences"`
+	Tokens          normalizedTokenUsage `json:"tokens"`
+	ToolCalls       int                  `json:"toolCalls"`
+	DurationSeconds int64                `json:"durationSeconds"`
 }
 
 type diagnosticEffectivenessAnalysis struct {
@@ -304,7 +304,7 @@ func analyzeDiagnosticFailures(records []codexSessionRecord) diagnosticFailureAn
 			current.Occurrences++
 			current.sessionKeys[sessionIndex] = struct{}{}
 			current.ProbeCount += episode.ProbeCount
-			addCodexTokenUsage(&current.PostFailureTokens, episode.Tokens)
+			addNormalizedTokenUsage(&current.PostFailureTokens, episode.Tokens)
 			current.PostFailureCalls += episode.ToolCalls
 			current.PostFailureFailed += episode.FailedCalls
 			current.PostFailureOutput += episode.OutputBytes
@@ -321,7 +321,7 @@ func analyzeDiagnosticFailures(records []codexSessionRecord) diagnosticFailureAn
 				current.profiles[profileKey] = profile
 			}
 			profile.Occurrences++
-			addCodexTokenUsage(&profile.Tokens, episode.Tokens)
+			addNormalizedTokenUsage(&profile.Tokens, episode.Tokens)
 			profile.ToolCalls += episode.ToolCalls
 			profile.DurationSeconds += duration
 		}
@@ -379,7 +379,7 @@ func analyzeDiagnosticFailures(records []codexSessionRecord) diagnosticFailureAn
 	return analysis
 }
 
-func diagnosticFreshTokens(tokens codexTokenUsage) int64 {
+func diagnosticFreshTokens(tokens normalizedTokenUsage) int64 {
 	return tokens.UncachedInputTokens + tokens.OutputTokens
 }
 

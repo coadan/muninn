@@ -30,9 +30,9 @@ These signals distinguish tool-interface, repository-structure, instruction,
 verification, and delivery problems so improvements target the system that
 produced the friction.
 
-Muninn currently ingests Codex sessions. Its normalized analysis is designed
-to support additional providers without coupling reports to provider-specific
-formats.
+Muninn currently ingests Codex sessions. Additional coding harnesses plug in
+through one declarative discovery/routing/normalization adapter; storage,
+analysis, findings, and reports stay independent of the source format.
 
 ## Install
 
