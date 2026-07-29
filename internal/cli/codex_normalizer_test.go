@@ -91,3 +91,55 @@ func TestParseCodexSessionCarriesOnlyNestedToolNames(t *testing.T) {
 		t.Fatalf("nested tool arguments escaped normalization: %s", encoded)
 	}
 }
+
+func TestParseCodexSessionPreservesNestedContinuationTool(t *testing.T) {
+	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "nested-continuation", []any{
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:00Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call", "call_id": "start", "name": "exec",
+				"input": `const result = await tools.exec_command({cmd:"go test ./..."}); text(result);`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:01Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call_output", "call_id": "start",
+				"output": map[string]any{
+					"output": "still running", "session_id": 12, "wall_time_seconds": 1,
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:02Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call", "call_id": "poll", "name": "exec",
+				"input": `const result = await tools.write_stdin({session_id:12,chars:""}); text(result);`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:03Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call_output", "call_id": "poll",
+				"output": map[string]any{
+					"output": "still running", "session_id": 12, "wall_time_seconds": 1,
+				},
+			},
+		},
+	})
+	session, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatalf("parse nested continuation: %v", err)
+	}
+	if len(session.Events) != 4 ||
+		session.Events[2].NestedToolContext != "nested tool write_stdin" ||
+		session.Events[3].NestedToolContext != "nested tool write_stdin" ||
+		!session.Events[3].OperationContinues ||
+		session.Events[3].Family == "" {
+		t.Fatalf("nested continuation attribution mismatch: %#v", session.Events)
+	}
+}
