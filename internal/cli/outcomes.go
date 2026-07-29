@@ -355,6 +355,9 @@ func (tracker *downstreamQualityTracker) observeRevert(event normalizedSessionEv
 }
 
 func (tracker *downstreamQualityTracker) observeDelivery(event normalizedSessionEvent) {
+	if len(tracker.pendingEditCohorts) == 0 {
+		return
+	}
 	if tracker.failureActive && tracker.recoveryEditSeen {
 		tracker.metrics.RedeliveryAttempts++
 		for cohort := range tracker.recoveryCohorts {

@@ -133,7 +133,10 @@ tool, the quality evidence consolidates into that tool intervention.
 
 A failed post-delivery check remains observational until matching follow-up
 edits, redeliveries, or reverts recur for a material share of affected
-deliveries. Limited correction evidence stays medium confidence.
+deliveries. Limited correction evidence stays medium confidence. Downstream
+quality accounting requires an observed task-local edit before delivery;
+left-censored or coordination-only delivery commands cannot establish that a
+changed delivery caused a later failure.
 
 ## Delegation and diagnostics
 
