@@ -466,7 +466,10 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Count:    summary.Compactions,
 			Sessions: summary.SessionsWithCompactions,
 			LastSeen: sessionFindingLastSeen(report, "compaction", ""),
-			score:    420 + summary.SessionsWithCompactions*20 + summary.Compactions,
+			Confidence: recurringPatternConfidence(
+				summary.SessionsWithCompactions,
+			),
+			score: 420 + summary.SessionsWithCompactions*20 + summary.Compactions,
 		})
 	}
 
