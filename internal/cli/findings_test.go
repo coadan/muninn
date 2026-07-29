@@ -1447,6 +1447,53 @@ func TestFilterSessionFindingsUsesActionFamilies(t *testing.T) {
 	}
 }
 
+func TestFilterSessionFindingsKeepsPublicFocusCategoriesDisjoint(t *testing.T) {
+	categories := []string{
+		"owned-tool",
+		"owned-operation",
+		"recurring-failure",
+		"diagnostic-failure",
+		"output-cost",
+		"instruction-discovery",
+		"instruction-footprint",
+		"session-loop",
+		"agent-interface",
+		"code-structure",
+		"discovery",
+		"delegation-cost",
+		"delivery-quality",
+		"task-cost",
+	}
+	findings := make([]sessionFinding, 0, len(categories))
+	for _, category := range categories {
+		findings = append(findings, sessionFinding{Category: category, Title: category})
+	}
+	want := map[string]string{
+		"tooling":      "owned-tool,owned-operation,recurring-failure,diagnostic-failure,output-cost",
+		"instructions": "instruction-discovery,instruction-footprint",
+		"interface":    "agent-interface",
+		"structure":    "code-structure",
+		"discovery":    "instruction-discovery,discovery",
+		"failures":     "recurring-failure,diagnostic-failure",
+		"loops":        "session-loop,agent-interface,delegation-cost",
+		"output":       "output-cost",
+		"quality":      "delegation-cost,delivery-quality,task-cost",
+	}
+	for focus, expected := range want {
+		filtered, err := filterSessionFindings(findings, focus)
+		if err != nil {
+			t.Fatalf("%s focus: %v", focus, err)
+		}
+		got := make([]string, 0, len(filtered))
+		for _, finding := range filtered {
+			got = append(got, finding.Category)
+		}
+		if strings.Join(got, ",") != expected {
+			t.Fatalf("%s focus categories=%q want %q", focus, strings.Join(got, ","), expected)
+		}
+	}
+}
+
 func zeroTime() time.Time {
 	return time.Time{}
 }
