@@ -106,15 +106,18 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			metrics.Sessions > 0 &&
 			definiteCalls >= 40 &&
 			definiteCalls >= metrics.Sessions*15
-		if metrics.Sessions < 2 && !repeated {
-			continue
-		}
 		reasons := summary.OwnedOperationFailureReasons[operation]
 		actionableFailures, expectedFailures := ownedOperationFailureCounts(ownership, operation, reasons)
+		failureSessions, truncationSessions := ownedOperationFrictionSessions(report, ownership, operation)
+		recurringFailures := actionableFailures >= 2 &&
+			(failureSessions >= 2 || actionableFailures >= 5)
+		recurringTruncations := metrics.TruncatedCalls >= 3 &&
+			(truncationSessions >= 2 || metrics.TruncatedCalls >= 5)
 		outputThreshold := max(int64(50_000), summary.ToolOutputTokens/50)
-		outputHeavy := metrics.EstimatedOutputTokens >= outputThreshold &&
+		outputHeavy := metrics.Sessions >= 2 &&
+			metrics.EstimatedOutputTokens >= outputThreshold &&
 			ratio(float64(metrics.EstimatedOutputTokens), float64(metrics.Calls)) >= 500
-		if actionableFailures < 2 && metrics.TruncatedCalls < 3 && !outputHeavy && !repeated {
+		if !recurringFailures && !recurringTruncations && !outputHeavy && !repeated {
 			continue
 		}
 		toolID, _, _ := strings.Cut(operation, "/")
@@ -128,17 +131,19 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			title = "locally controlled operation is repeated excessively: " + operation
 			action = "Batch related edits, then run this operation once at the verification boundary; use a faster focused mode only to narrow a reported failure."
 		}
-		if actionableFailures >= 2 || metrics.TruncatedCalls >= 3 {
+		if recurringFailures || recurringTruncations {
 			title = "locally controlled operation has recurring friction: " + operation
 		}
-		evidence := fmt.Sprintf("%s calls across %s sessions, %s bundled calls, %s actionable failures, %s expected/product failures, %s ambiguous bundled failures, %s truncations, ~%s attributed output tokens, ~%s ambiguous bundled output tokens",
+		evidence := fmt.Sprintf("%s calls across %s sessions, %s bundled calls, %s actionable failures across %s failure sessions, %s expected/product failures, %s ambiguous bundled failures, %s truncations across %s truncation sessions, ~%s attributed output tokens, ~%s ambiguous bundled output tokens",
 			formatCodexCount(int64(metrics.Calls)),
 			formatCodexCount(int64(metrics.Sessions)),
 			formatCodexCount(int64(metrics.AmbiguousCalls)),
 			formatCodexCount(int64(actionableFailures)),
+			formatCodexCount(int64(failureSessions)),
 			formatCodexCount(int64(expectedFailures)),
 			formatCodexCount(int64(metrics.AmbiguousFailedCalls)),
 			formatCodexCount(int64(metrics.TruncatedCalls)),
+			formatCodexCount(int64(truncationSessions)),
 			formatCodexCount(metrics.EstimatedOutputTokens),
 			formatCodexCount(metrics.EstimatedAmbiguousOutputTokens),
 		)
@@ -150,7 +155,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		}
 		evidence += recentOwnedOperationEvidence(report, ownership, operation)
 		confidence := "high"
-		if outputHeavy && !repeated && actionableFailures < 2 && metrics.TruncatedCalls < 3 {
+		if outputHeavy && !repeated && !recurringFailures && !recurringTruncations {
 			confidence = "medium"
 		}
 		findings = append(findings, sessionFinding{
@@ -162,7 +167,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Count:      metrics.Calls,
 			Sessions:   metrics.Sessions,
 			Target:     operation,
-			LastSeen:   ownedOperationFindingLastSeen(report, operation, actionableFailures, metrics.TruncatedCalls),
+			LastSeen:   ownedOperationFindingLastSeen(report, operation, recurringFailures || recurringTruncations),
 			Lever:      "tooling",
 			Confidence: confidence,
 			score:      650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + min(metrics.Calls, 200) + int(metrics.EstimatedOutputTokens/5_000),
@@ -1583,6 +1588,29 @@ func ownedToolFrictionSessions(report codexSessionInsightsReport, tool string) (
 	return failureSessions, truncationSessions
 }
 
+func ownedOperationFrictionSessions(
+	report codexSessionInsightsReport,
+	ownership ownershipCatalog,
+	operation string,
+) (failureSessions, truncationSessions int) {
+	for _, record := range report.sessionRecords {
+		hasActionableFailure := false
+		for reason, count := range record.OwnedOperationFailureReasons[operation] {
+			if count > 0 && !ownership.operationFailureExpected(operation, reason) {
+				hasActionableFailure = true
+				break
+			}
+		}
+		if hasActionableFailure {
+			failureSessions++
+		}
+		if record.OwnedOperations[operation].TruncatedCalls > 0 {
+			truncationSessions++
+		}
+	}
+	return failureSessions, truncationSessions
+}
+
 func ownedOperationExpectedFailure(operation, reason string) bool {
 	if reason == "test failure" || reason == "search no match" {
 		return true
@@ -1594,10 +1622,9 @@ func ownedOperationExpectedFailure(operation, reason string) bool {
 func ownedOperationFindingLastSeen(
 	report codexSessionInsightsReport,
 	operation string,
-	actionableFailures,
-	truncatedCalls int,
+	recurringFriction bool,
 ) string {
-	if actionableFailures >= 2 || truncatedCalls >= 3 {
+	if recurringFriction {
 		if friction := sessionFindingActivity(report, "owned-operation-friction", operation); !friction.IsZero() {
 			return formatSessionFindingTime(friction)
 		}
