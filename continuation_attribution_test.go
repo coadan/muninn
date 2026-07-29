@@ -164,3 +164,44 @@ func TestSessionRecordClearsTerminalContinuationAndIgnoresRecentLiveWork(t *test
 		t.Fatalf("terminal continuation remained pending: %#v", terminal.AbandonedContinuations)
 	}
 }
+
+func TestSessionRecordDoesNotAbandonWorkStartedAfterEarlierTaskCompletion(t *testing.T) {
+	root := t.TempDir()
+	generatedAt := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      root,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt: generatedAt.Add(-10 * time.Minute),
+				Kind:       sessionEventComplete,
+			},
+			{
+				OccurredAt:         generatedAt.Add(-time.Minute),
+				CallOccurredAt:     generatedAt.Add(-time.Minute - time.Second),
+				Kind:               sessionEventToolOutput,
+				ToolName:           "exec",
+				Family:             "delivery",
+				OwnedOperations:    []string{"bwb/publish-here"},
+				OperationContinues: true,
+			},
+		},
+	}
+
+	record, err := sessionRecordFromNormalized(
+		session,
+		root,
+		generatedAt.Add(-time.Hour),
+		generatedAt,
+		ownershipCatalog{},
+	)
+	if err != nil {
+		t.Fatalf("sessionRecordFromNormalized: %v", err)
+	}
+	if !record.Completed {
+		t.Fatal("earlier completed task episode was lost")
+	}
+	if len(record.AbandonedContinuations) != 0 {
+		t.Fatalf("recent post-completion work was classified as abandoned: %#v", record.AbandonedContinuations)
+	}
+}
