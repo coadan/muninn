@@ -35,6 +35,69 @@ func TestBuildSessionFindingsUsesCurrentRepoRelativeSourceState(t *testing.T) {
 	}
 }
 
+func TestInstructionDiscoveryRequiresMaterialWithinSessionRediscovery(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "deps.edn")
+	if err := os.WriteFile(target, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
+	report.Summary.ReadTargets["deps.edn"] = codexTargetMetrics{
+		Reads:               141,
+		SearchReadLoops:     6,
+		Sessions:            128,
+		RediscoverySessions: 6,
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("near-once-per-session manifest reads became friction: %#v", findings)
+	}
+
+	report.Summary.ReadTargets["deps.edn"] = codexTargetMetrics{
+		Reads:               180,
+		SearchReadLoops:     30,
+		Sessions:            100,
+		RediscoverySessions: 30,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "instruction-discovery" ||
+		findings[0].Confidence != "medium" ||
+		!strings.Contains(findings[0].Evidence, "rediscovery affected 30 sessions") {
+		t.Fatalf("material rediscovery finding mismatch: %#v", findings)
+	}
+
+	report.Summary.ReadTargets["deps.edn"] = codexTargetMetrics{
+		Reads:               300,
+		SearchReadLoops:     80,
+		Sessions:            100,
+		RediscoverySessions: 80,
+	}
+	findings = buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Confidence != "high" {
+		t.Fatalf("majority-session rediscovery should be high confidence: %#v", findings)
+	}
+}
+
+func TestDiversifySessionFindingsKeepsHighestImpactWithinCategory(t *testing.T) {
+	findings := []sessionFinding{
+		{Category: "instruction-discovery", Target: "recent-low.md", LastSeen: "2026-07-29T12:00:00Z", score: 10},
+		{Category: "instruction-discovery", Target: "recent-two.md", LastSeen: "2026-07-29T11:00:00Z", score: 20},
+		{Category: "instruction-discovery", Target: "recent-three.md", LastSeen: "2026-07-29T10:00:00Z", score: 30},
+		{Category: "instruction-discovery", Target: "recent-four.md", LastSeen: "2026-07-29T09:00:00Z", score: 40},
+		{Category: "instruction-discovery", Target: "older-high.md", LastSeen: "2026-07-20T09:00:00Z", score: 1_000},
+	}
+	got := diversifySessionFindings(findings)
+	if len(got) != 4 {
+		t.Fatalf("diversified findings=%#v want four", got)
+	}
+	targets := map[string]bool{}
+	for _, finding := range got {
+		targets[finding.Target] = true
+	}
+	if !targets["older-high.md"] || targets["recent-low.md"] {
+		t.Fatalf("category cap did not retain highest impact: %#v", got)
+	}
+}
+
 func TestCodexInlineOrchestrationExcludesEdits(t *testing.T) {
 	large := strings.Repeat("x", 5000)
 	if got := codexInlineOrchestrationBytes("exec", "", large); got != int64(len(large)) {
@@ -1103,7 +1166,7 @@ func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
 	if got := sessionFindingDisplayTarget(finding); got != "" {
 		t.Fatalf("embedded target should not be repeated: %q", got)
 	}
-	finding.Title = "a small current owner is repeatedly reread"
+	finding.Title = "an authoritative owner is repeatedly rediscovered"
 	if got := sessionFindingDisplayTarget(finding); got != " · file reads" {
 		t.Fatalf("distinct target should remain visible: %q", got)
 	}
