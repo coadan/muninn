@@ -57,3 +57,37 @@ func TestParseCodexSessionUsesPrivacySafeRolloutLineage(t *testing.T) {
 		t.Fatalf("provider identifiers escaped privacy-safe lineage: %s", encoded)
 	}
 }
+
+func TestParseCodexSessionCarriesOnlyNestedToolNames(t *testing.T) {
+	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "nested-tool-context", []any{
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:00Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call", "call_id": "nested", "name": "exec",
+				"input": `const result = await tools.web__run({secret:"private-query"}); text(result);`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:01Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call_output", "call_id": "nested",
+				"output": strings.Repeat("x", 35_000),
+			},
+		},
+	})
+	session, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatalf("parse nested tool context: %v", err)
+	}
+	if len(session.Events) != 2 ||
+		session.Events[0].NestedToolContext != "nested tool web__run" ||
+		session.Events[1].NestedToolContext != "nested tool web__run" {
+		t.Fatalf("nested tool context was not propagated: %#v", session.Events)
+	}
+	encoded, _ := json.Marshal(session)
+	if strings.Contains(string(encoded), "private-query") {
+		t.Fatalf("nested tool arguments escaped normalization: %s", encoded)
+	}
+}

@@ -269,6 +269,18 @@ func TestCodexConcurrentToolBatchRecognizesBoundedAndCustomBatches(t *testing.T)
 	}
 }
 
+func TestCodexNestedToolContextKeepsOnlyBoundedToolNames(t *testing.T) {
+	input := `const first = await tools.web__run({secret:"hidden"});
+	const second = await tools.exec_command({cmd:"private"});
+	const repeated = await tools.web__run({secret:"hidden-again"});`
+	if got := codexNestedToolContext("exec", input); got != "nested tools exec_command + web__run" {
+		t.Fatalf("nested tool context=%q", got)
+	}
+	if got := codexNestedToolContext("exec_command", input); got != "" {
+		t.Fatalf("non-Code Mode call received nested context %q", got)
+	}
+}
+
 func TestCodexInlineOrchestrationRetainsLargeCustomExecCells(t *testing.T) {
 	sequential := `const first = await tools.exec_command({cmd:"one"});
 	const second = await tools.exec_command({cmd:"two"});` + strings.Repeat("x", 9*1024)
@@ -1034,6 +1046,14 @@ func TestOversizedOutputActionKeepsCompoundWorkflowBundled(t *testing.T) {
 	action := oversizedOutputAction("git inspect -> file reads -> tests", "repository")
 	if !strings.Contains(action, "Keep the workflow bundled") || !strings.Contains(action, "cap each") {
 		t.Fatalf("compound oversized-output action should reduce output without adding roundtrips: %q", action)
+	}
+}
+
+func TestNestedExecOversizedOutputActionNamesTheBoundedControl(t *testing.T) {
+	got := oversizedOutputAction("nested tool exec_command", "repository")
+	if !strings.Contains(got, "max_output_tokens") ||
+		!strings.Contains(got, "narrow or page only") {
+		t.Fatalf("nested exec output action was not concrete: %q", got)
 	}
 }
 

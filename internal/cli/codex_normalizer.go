@@ -55,6 +55,7 @@ type indexedCodexDescriptor struct {
 	EmitsSessionMarker            bool
 	ConcurrentBatch               bool
 	ConcurrentBatchSize           int
+	NestedToolContext             string
 	WorkingDirectories            []string
 }
 
@@ -157,6 +158,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					EmitsSessionMarker:      codexEmitsExplicitSessionMarker(name, payload.Input),
 					ConcurrentBatch:         concurrentBatchSize > 0,
 					ConcurrentBatchSize:     concurrentBatchSize,
+					NestedToolContext:       codexNestedToolContext(name, payload.Input),
 					WorkingDirectories:      codexToolWorkingDirectories(name, payload.Arguments, payload.Input),
 				}
 				descriptor.OperationAttributionAmbiguous = len(descriptor.CommandCandidates) > 1
@@ -198,6 +200,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					ToolName:                      name,
 					Family:                        descriptor.Family,
 					Shape:                         descriptor.Shape,
+					NestedToolContext:             descriptor.NestedToolContext,
 					FirstFamily:                   descriptor.First,
 					LastFamily:                    descriptor.Last,
 					ToolRound:                     toolRound,
@@ -254,6 +257,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					ToolName:                      descriptor.Name,
 					Family:                        descriptor.Family,
 					Shape:                         descriptor.Shape,
+					NestedToolContext:             descriptor.NestedToolContext,
 					CallOccurredAt:                descriptor.OccurredAt,
 					Failed:                        failed,
 					Truncated:                     codexToolOutputTruncated(text),

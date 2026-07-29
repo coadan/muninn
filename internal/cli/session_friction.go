@@ -43,6 +43,12 @@ func oversizedOutputContext(event normalizedSessionEvent, ownedOperations []stri
 	if event.Shape != "" {
 		return event.Shape
 	}
+	if event.Family != "" {
+		return event.Family
+	}
+	if event.NestedToolContext != "" {
+		return event.NestedToolContext
+	}
 	return progressWaitContext(event, nil)
 }
 
