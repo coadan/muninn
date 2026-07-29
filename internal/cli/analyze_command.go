@@ -35,27 +35,24 @@ func cmdAnalyze(root string, args []string) error {
 	noCache := fs.Bool("no-cache", false, "scan provider files directly without the SQLite index")
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
 	compare := fs.String("compare", "", "comparison cohort: previous")
-	detailsOutput := fs.Bool("details", false, "show full human rankings or the full JSON report; with --operation, show all operation rows")
+	detailsOutput := fs.Bool("details", false, "emit the full JSON report; with --operation, show all operation rows")
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
 	operation := fs.String("operation", "", "show configured operations for one locally owned tool or exact tool/operation ID")
-	humanOutput := fs.Bool("human", false, "emit the human-readable report instead of JSON")
-	limit := fs.Int("limit", 5, "maximum intervention or detail rows in human output (0 shows all)")
 	setFlagSetUsage(
 		fs,
-		"muninn analyze [--repo <path>] [--since <duration>] [--task <task-id>] [--focus <area>] [--details] [--operation <tool-or-operation>] [--human] [--compare previous]",
+		"muninn analyze [--repo <path>] [--since <duration>] [--task <task-id>] [--focus <area>] [--details] [--operation <tool-or-operation>] [--compare previous]",
 		"Summarize token usage and tool-output attribution without exposing session content or command text.",
 		[]string{
 			"muninn analyze --repo .",
 			"muninn analyze --repo . --since 24h",
-			"muninn analyze --repo . --since 1d --compare previous --human",
-			"muninn analyze --repo . --since 7d --compare previous --human",
+			"muninn analyze --repo . --since 1d --compare previous",
+			"muninn analyze --repo . --since 7d --compare previous",
 			"muninn analyze --repo . --since 24h --operation repository-cli",
 			"muninn analyze --repo . --since 24h --operation repository-cli/test",
 			"muninn analyze --repo . --since 24h --operation repository-cli --details",
 			"muninn analyze --repo . --focus structure --details",
 			"muninn analyze --repo . --task my-worktree",
 			"muninn analyze --repo . --since 14d --include-archived",
-			"muninn analyze --repo . --human --limit 20",
 		},
 	)
 	if err := fs.Parse(args); err != nil {
@@ -64,23 +61,12 @@ func cmdAnalyze(root string, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("usage: muninn analyze [flags]")
 	}
-	if *limit < 0 {
-		return errors.New("--limit must be 0 or greater")
-	}
 	sinceWasSet := false
-	limitWasSet := false
 	fs.Visit(func(visited *flag.Flag) {
-		switch visited.Name {
-		case "since":
+		if visited.Name == "since" {
 			sinceWasSet = true
-		case "limit":
-			limitWasSet = true
 		}
 	})
-	if *detailsOutput && strings.TrimSpace(*focus) == "" &&
-		strings.TrimSpace(*operation) == "" && !limitWasSet {
-		*limit = 0
-	}
 	if strings.TrimSpace(*sinceCommit) != "" && sinceWasSet {
 		return errors.New("--since and --since-commit are mutually exclusive")
 	}
@@ -97,18 +83,10 @@ func cmdAnalyze(root string, args []string) error {
 	if *noCache && *forceRefresh {
 		return errors.New("--no-cache cannot be combined with --refresh")
 	}
-	if comparison == "previous" && !*humanOutput {
-		return errors.New("--compare previous requires --human")
-	}
-	if limitWasSet && !*humanOutput {
-		return errors.New("--limit requires --human")
-	}
 	outputSelection, err := resolveAnalyzeOutputSelection(
 		*detailsOutput,
 		*focus,
 		*operation,
-		*limit,
-		limitWasSet,
 	)
 	if err != nil {
 		return err
@@ -172,14 +150,14 @@ func cmdAnalyze(root string, args []string) error {
 			return fmt.Errorf("%w (use --no-cache to bypass the index)", err)
 		}
 		defer store.Close()
-		if *forceRefresh && *humanOutput {
+		if *forceRefresh {
 			fmt.Fprintf(os.Stderr, "Refreshing Muninn index for %s...\n", filepath.Base(resolvedRepoRoot))
 		}
 		stats, err := store.refresh(context.Background(), source.Name(), discovery, resolvedRepoRoot, source, ownership, *forceRefresh)
 		if err != nil {
 			return err
 		}
-		if *forceRefresh && *humanOutput {
+		if *forceRefresh {
 			fmt.Fprintln(os.Stderr, formatRefreshCompletion(stats))
 		}
 		analyzeWindow = func(windowSince, windowUntil time.Time) (codexSessionInsightsReport, error) {
@@ -243,29 +221,16 @@ func cmdAnalyze(root string, args []string) error {
 		if err != nil {
 			return err
 		}
-		if !*humanOutput {
-			encoder := json.NewEncoder(os.Stdout)
-			encoder.SetIndent("", "  ")
-			return encoder.Encode(drilldown)
-		}
-		printOwnedOperationsDrilldown(drilldown)
-		return nil
-	}
-	if !*humanOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(analysisJSONPayload(report, *detailsOutput))
+		return encoder.Encode(drilldown)
 	}
-	printCodexSessionInsights(report, config, *limit, outputSelection.View)
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
 	if baseline != nil {
-		printSessionTrend(
-			*baseline,
-			report,
-			"previous non-overlapping "+formatTrendLookback(lookbackSeconds),
-			outputSelection.View == "details",
-		)
+		return encoder.Encode(comparisonJSONPayload(*baseline, report, *detailsOutput))
 	}
-	return nil
+	return encoder.Encode(analysisJSONPayload(report, *detailsOutput))
 }
 
 func startAnalyzeHeartbeat(output io.Writer, initialDelay, interval time.Duration) func() {
@@ -304,7 +269,6 @@ func startAnalyzeHeartbeat(output io.Writer, initialDelay, interval time.Duratio
 }
 
 type analyzeOutputSelection struct {
-	View           string
 	OperationLimit int
 }
 
@@ -312,8 +276,6 @@ func resolveAnalyzeOutputSelection(
 	details bool,
 	focus,
 	operations string,
-	limit int,
-	limitWasSet bool,
 ) (analyzeOutputSelection, error) {
 	focus = strings.TrimSpace(focus)
 	operations = strings.TrimSpace(operations)
@@ -322,20 +284,10 @@ func resolveAnalyzeOutputSelection(
 	}
 
 	selection := analyzeOutputSelection{
-		View:           "findings",
-		OperationLimit: limit,
+		OperationLimit: compactInterventionLimit,
 	}
-	switch {
-	case operations != "":
-		if details && !limitWasSet {
-			selection.OperationLimit = 0
-		}
-	case focus != "":
-		// Focused views add bounded evidence where it helps act on the finding.
-		// Accept --details without requiring a help/retry roundtrip.
-		selection.View = "focused"
-	case details:
-		selection.View = "details"
+	if operations != "" && details {
+		selection.OperationLimit = 0
 	}
 	return selection, nil
 }

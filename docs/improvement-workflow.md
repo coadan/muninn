@@ -14,8 +14,8 @@ loop.
 5. Suppress only findings confirmed to be false positives.
 
 ```bash
-muninn analyze --repo . --since 1d --compare previous --human
-muninn analyze --repo . --since 7d --compare previous --human
+muninn analyze --repo . --since 1d --compare previous
+muninn analyze --repo . --since 7d --compare previous
 ```
 
 Treat a faster period as an improvement only when delivery quality is stable or

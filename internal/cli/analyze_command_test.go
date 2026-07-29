@@ -29,19 +29,17 @@ func TestAnalyzeRejectsRemovedJSONFlag(t *testing.T) {
 	}
 }
 
-func TestAnalyzeHumanOnlyModesAreExplicit(t *testing.T) {
-	err := cmdAnalyze(t.TempDir(), []string{"--compare", "previous"})
-	if err == nil || err.Error() != "--compare previous requires --human" {
-		t.Fatalf("comparison without --human error=%v", err)
-	}
-	err = cmdAnalyze(t.TempDir(), []string{"--limit", "10"})
-	if err == nil || err.Error() != "--limit requires --human" {
-		t.Fatalf("limit without --human error=%v", err)
+func TestAnalyzeRejectsRemovedHumanAndLimitFlags(t *testing.T) {
+	for _, flag := range []string{"--human", "--limit"} {
+		err := cmdAnalyze(t.TempDir(), []string{flag})
+		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("removed %s flag error=%v", flag, err)
+		}
 	}
 }
 
 func TestResolveAnalyzeOutputSelectionComposesDetailsWithOperations(t *testing.T) {
-	selection, err := resolveAnalyzeOutputSelection(true, "", "bwb", 10, false)
+	selection, err := resolveAnalyzeOutputSelection(true, "", "bwb")
 	if err != nil {
 		t.Fatalf("resolve operations details output: %v", err)
 	}
@@ -49,27 +47,23 @@ func TestResolveAnalyzeOutputSelectionComposesDetailsWithOperations(t *testing.T
 		t.Fatalf("operations details limit=%d, want all rows", selection.OperationLimit)
 	}
 
-	selection, err = resolveAnalyzeOutputSelection(true, "", "bwb", 4, true)
+	selection, err = resolveAnalyzeOutputSelection(false, "", "bwb")
 	if err != nil {
-		t.Fatalf("resolve explicitly bounded operations details output: %v", err)
+		t.Fatalf("resolve bounded operations output: %v", err)
 	}
-	if selection.OperationLimit != 4 {
-		t.Fatalf("explicit operations details limit=%d, want 4", selection.OperationLimit)
+	if selection.OperationLimit != compactInterventionLimit {
+		t.Fatalf("operations limit=%d, want %d", selection.OperationLimit, compactInterventionLimit)
 	}
 }
 
 func TestResolveAnalyzeOutputSelectionComposesDetailsWithFocus(t *testing.T) {
-	selection, err := resolveAnalyzeOutputSelection(true, "structure", "", 10, false)
-	if err != nil {
+	if _, err := resolveAnalyzeOutputSelection(true, "structure", ""); err != nil {
 		t.Fatalf("resolve focused details output: %v", err)
-	}
-	if selection.View != "focused" {
-		t.Fatalf("focused details view=%q, want focused", selection.View)
 	}
 }
 
 func TestResolveAnalyzeOutputSelectionRejectsOperationWithFocus(t *testing.T) {
-	if _, err := resolveAnalyzeOutputSelection(false, "structure", "bwb", 10, false); err == nil {
+	if _, err := resolveAnalyzeOutputSelection(false, "structure", "bwb"); err == nil {
 		t.Fatal("expected --operation with --focus to fail")
 	}
 }

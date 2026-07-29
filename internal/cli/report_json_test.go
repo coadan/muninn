@@ -113,3 +113,83 @@ func TestAnalysisJSONPayloadIncludesBoundedDiscoveryFocusEvidence(t *testing.T) 
 		t.Fatalf("bounded discovery focus evidence mismatch: %#v", decoded.FocusEvidence)
 	}
 }
+
+func TestComparisonJSONPayloadKeepsCohortsAndStructuredInterventionTrend(t *testing.T) {
+	baseline := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	current := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	baseline.Summary.Sessions = minimumTrendSessions
+	current.Summary.Sessions = minimumTrendSessions + 1
+	current.AnalysisScope.LookbackSeconds = 24 * 60 * 60
+	baseline.Profiles = modelEffortAnalysis{Available: true}
+	current.Profiles = modelEffortAnalysis{Available: true}
+	baseline.Outcomes.PerformanceCohorts = []taskPerformanceCohort{{
+		AgentKind: "root", Model: "model", ReasoningEffort: "high",
+		TaskFamily: "tooling", CompletedTasks: 3,
+	}}
+	current.Outcomes.PerformanceCohorts = []taskPerformanceCohort{{
+		AgentKind: "root", Model: "model", ReasoningEffort: "high",
+		TaskFamily: "tooling", CompletedTasks: 4,
+	}}
+	baseline.Outcomes.QualityCohorts = []taskQualityCohort{{
+		AgentKind: "root", Model: "model", ReasoningEffort: "high",
+		TaskFamily: "tooling", Deliveries: 5,
+	}}
+	current.Outcomes.QualityCohorts = []taskQualityCohort{{
+		AgentKind: "root", Model: "model", ReasoningEffort: "high",
+		TaskFamily: "tooling", Deliveries: 6,
+	}}
+	baseline.Interventions = []sessionIntervention{
+		{ID: "intervention/resolved", Priority: "medium"},
+		{ID: "intervention/persistent", Priority: "low"},
+	}
+	current.Interventions = []sessionIntervention{
+		{ID: "intervention/persistent", Priority: "high"},
+		{ID: "intervention/new", Priority: "medium"},
+	}
+
+	payload := comparisonJSONPayload(baseline, current, false)
+	if payload.Comparison != "previous" || payload.BaselineLabel != "previous non-overlapping 1d" {
+		t.Fatalf("comparison identity mismatch: %#v", payload)
+	}
+	trend := payload.InterventionTrend
+	if !trend.SufficientEvidence ||
+		len(trend.Resolved) != 1 || trend.Resolved[0].ID != "intervention/resolved" ||
+		len(trend.Persistent) != 1 || trend.Persistent[0].Priority != "high" ||
+		len(trend.New) != 1 || trend.New[0].ID != "intervention/new" {
+		t.Fatalf("intervention trend mismatch: %#v", trend)
+	}
+	if len(payload.Cohorts.Performance) != 1 ||
+		len(payload.Cohorts.Quality) != 1 ||
+		payload.QualityVerdict == "" {
+		t.Fatalf("comparison cohorts missing: %#v", payload)
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"detailLevel":"summary"`,
+		`"baseline"`,
+		`"current"`,
+		`"profiles"`,
+		`"interventionTrend"`,
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("comparison JSON missing %q: %s", want, raw)
+		}
+	}
+}
+
+func TestComparisonJSONPayloadDoesNotDirectionLabelSparseWindows(t *testing.T) {
+	baseline := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	current := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	baseline.Summary.Sessions = minimumTrendSessions - 1
+	current.Summary.Sessions = minimumTrendSessions
+	baseline.Interventions = []sessionIntervention{{ID: "intervention/resolved"}}
+
+	trend := comparisonJSONPayload(baseline, current, false).InterventionTrend
+	if trend.SufficientEvidence || len(trend.Resolved) != 0 {
+		t.Fatalf("sparse windows received direction labels: %#v", trend)
+	}
+}

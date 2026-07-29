@@ -3,8 +3,8 @@
 Use `--compare previous` to compare adjacent, non-overlapping horizons:
 
 ```bash
-muninn analyze --repo . --since 1d --compare previous --human
-muninn analyze --repo . --since 7d --compare previous --human
+muninn analyze --repo . --since 1d --compare previous
+muninn analyze --repo . --since 7d --compare previous
 ```
 
 Choose one day after concentrated session work and one week for a broader
@@ -22,16 +22,17 @@ derived task family, with at least three completed tasks in each period. Each
 matched cohort has equal weight so one high-volume family cannot dominate the
 aggregate direction.
 
-The default comparison classifies stable intervention IDs as `resolved`,
-`persistent`, or `new`. Bounded examples are ordered by priority and
-corroboration. Churn classification requires at least five sessions in each
-period; smaller windows keep the current queue but report the trend as
-insufficient. Use `--details` when lower-level finding churn is useful.
+The JSON comparison contains `baseline` and `current` reports and classifies
+stable intervention IDs as `resolved`, `persistent`, or `new`. Bounded examples
+are ordered by priority and corroboration. Churn classification requires at
+least five sessions in each period; smaller windows return
+`sufficientEvidence: false` without direction labels. Use `--details` for the
+full reports behind both cohorts.
 
-The session-rate table always shows the observed values, but only labels a
-direction when both periods have an adequate denominator: five sessions for
-session rates, ten completed tasks for task rates, and 100 tool calls for
-call-normalized rates. Smaller samples are marked `insufficient`.
+The baseline and current reports always expose their observed values. Treat
+rate changes as material only when both periods have an adequate denominator:
+five sessions for session rates, ten completed tasks for task rates, and 100
+tool calls for call-normalized rates.
 
 ## Quality-adjusted verdict
 

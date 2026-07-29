@@ -176,5 +176,5 @@ high-cardinality maps except bounded focus evidence.
 
 Use `--details` for the complete analytical maps. `detailLevel` is `summary`
 or `full`. Both the complete `interventions` queue and constituent `findings`
-are available in the full report. Use `--human` when readable terminal output
-is preferred.
+are available in the full report. Adjacent-period comparisons contain one
+report at the selected detail level for each non-overlapping cohort.
