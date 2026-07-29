@@ -69,7 +69,10 @@ remain eligible.
 Cross-call workflow findings require at least three matching transitions per
 affected session as well as recurrence across three sessions. A normal
 status-then-diff or search-then-read pair therefore remains evidence without
-becoming an interface intervention.
+becoming an interface intervention. Git inspection transitions use only fixed
+sub-operation labels—`status`, `diff`, `history`, `refs`, or `search`—so
+repeated change inspection is actionable without retaining revisions, paths,
+patterns, or other arguments.
 
 Rapid-poll findings likewise require at least three short continuation polls
 per affected session and at least five polls overall. Occasional early polling

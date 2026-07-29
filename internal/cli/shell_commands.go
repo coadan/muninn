@@ -26,6 +26,7 @@ func codexShellCommandDetails(toolName, arguments, input string) (string, string
 		return "", "", "", ""
 	}
 	var sequence []string
+	var transitionSequence []string
 	families := make(map[string]struct{})
 	for _, command := range commands {
 		for _, segment := range codexShellCommandSegments(command) {
@@ -35,14 +36,19 @@ func codexShellCommandDetails(toolName, arguments, input string) (string, string
 					sequence = append(sequence, family)
 				}
 			}
+			for _, transition := range codexShellSegmentTransitionSequence(segment) {
+				if len(transitionSequence) == 0 || transitionSequence[len(transitionSequence)-1] != transition {
+					transitionSequence = append(transitionSequence, transition)
+				}
+			}
 		}
 	}
 	family := codexCombinedShellFamily(families)
 	first := ""
 	last := ""
-	if len(sequence) > 0 {
-		first = sequence[0]
-		last = sequence[len(sequence)-1]
+	if len(transitionSequence) > 0 {
+		first = transitionSequence[0]
+		last = transitionSequence[len(transitionSequence)-1]
 	}
 	if family != "mixed shell" {
 		return family, "", first, last
@@ -158,6 +164,14 @@ func codexShellSegmentsFamily(segments [][]string) string {
 }
 
 func codexShellSegmentFamilySequence(tokens []string) []string {
+	return codexShellSegmentSequence(tokens, false)
+}
+
+func codexShellSegmentTransitionSequence(tokens []string) []string {
+	return codexShellSegmentSequence(tokens, true)
+}
+
+func codexShellSegmentSequence(tokens []string, detailedGit bool) []string {
 	for len(tokens) > 0 && codexShellAssignment(tokens[0]) {
 		tokens = tokens[1:]
 	}
@@ -166,7 +180,7 @@ func codexShellSegmentFamilySequence(tokens []string) []string {
 	}
 	executable := strings.ToLower(filepath.Base(tokens[0]))
 	if executable == "env" || executable == "command" || executable == "time" || executable == "sudo" {
-		return codexShellSegmentFamilySequence(tokens[1:])
+		return codexShellSegmentSequence(tokens[1:], detailedGit)
 	}
 	if executable == "bash" || executable == "zsh" || executable == "sh" {
 		for index := 1; index < len(tokens); index++ {
@@ -177,12 +191,30 @@ func codexShellSegmentFamilySequence(tokens []string) []string {
 			if !strings.HasPrefix(token, "--") && strings.Contains(strings.TrimPrefix(token, "-"), "c") && index+1 < len(tokens) {
 				var sequence []string
 				for _, segment := range codexShellCommandSegments(tokens[index+1]) {
-					sequence = append(sequence, codexShellSegmentFamilySequence(segment)...)
+					sequence = append(sequence, codexShellSegmentSequence(segment, detailedGit)...)
 				}
 				return sequence
 			}
 		}
 		return []string{"other shell"}
+	}
+	if detailedGit && executable == "git" {
+		lowerTokens := make([]string, len(tokens))
+		for index, token := range tokens {
+			lowerTokens[index] = strings.ToLower(token)
+		}
+		switch codexGitSubcommand(lowerTokens[1:]) {
+		case "status":
+			return []string{"git inspect/status"}
+		case "diff":
+			return []string{"git inspect/diff"}
+		case "log", "show":
+			return []string{"git inspect/history"}
+		case "branch", "rev-parse", "rev-list", "merge-base":
+			return []string{"git inspect/refs"}
+		case "ls-files", "grep":
+			return []string{"git inspect/search"}
+		}
 	}
 	if family := codexShellSegmentFamily(tokens); family != "" {
 		return []string{family}
