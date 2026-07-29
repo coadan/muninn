@@ -27,6 +27,12 @@ func TestOperationsOnlyDoesNotClaimSharedLauncher(t *testing.T) {
 	if operations := catalog.classifyOperations(codexCommandInvocations("exec_command", unrelated, "")); len(operations) != 0 {
 		t.Fatalf("unrelated launcher use should remain unattributed: %#v", operations)
 	}
+	if flags := catalog.classifyFlags(codexCommandInvocations("exec_command", `{"cmd":"npm test --json"}`, "")); len(flags) != 0 {
+		t.Fatalf("unrelated launcher flags should remain unattributed: %#v", flags)
+	}
+	if flags := catalog.classifyFlags(codexCommandInvocations("exec_command", `{"cmd":"npm run --silent void -- context actor --json"}`, "")); !reflect.DeepEqual(flags, []string{"void-cli/json", "void-cli/silent"}) {
+		t.Fatalf("owned launcher flags were not classified: %#v", flags)
+	}
 }
 
 func TestOwnedOperationClassificationPrefersSpecificRule(t *testing.T) {
@@ -44,6 +50,21 @@ func TestOwnedOperationClassificationPrefersSpecificRule(t *testing.T) {
 	}}
 	if got := catalog.classifyOperations(invocations); !reflect.DeepEqual(got, []string{"bwb/comments-wait"}) {
 		t.Fatalf("specific operation was not preferred: %#v", got)
+	}
+}
+
+func TestOwnedFlagClassificationKeepsOnlyPrivacySafeLongNames(t *testing.T) {
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "muninn",
+		Executables: []string{"muninn"},
+	}})
+	invocations := []ownedCommandInvocation{{
+		Executable: "muninn",
+		Args:       []string{"analyze", "--json", "--repo=/private/path", "--since", "14d", "-q", "--help"},
+	}}
+	want := []string{"muninn/json", "muninn/repo", "muninn/since"}
+	if got := catalog.classifyFlags(invocations); !reflect.DeepEqual(got, want) {
+		t.Fatalf("owned flags=%#v want %#v", got, want)
 	}
 }
 

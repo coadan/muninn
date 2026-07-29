@@ -1515,6 +1515,45 @@ func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsSuggestsFrequentlyRepeatedFlagAsDefault(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.OwnedFlagCalls["muninn"] = codexOccurrenceMetrics{
+		Count:    9,
+		Sessions: 3,
+	}
+	report.Summary.OwnedFlags["muninn/json"] = codexOccurrenceMetrics{
+		Count:    8,
+		Sessions: 3,
+	}
+	findings := buildSessionFindings(report, repositoryConfig{
+		SchemaVersion: 1,
+		OwnedTools: []ownedToolConfig{{
+			ID:          "muninn",
+			Executables: []string{"muninn"},
+		}},
+	})
+	if len(findings) != 1 ||
+		findings[0].Target != "muninn/json" ||
+		!strings.Contains(findings[0].Title, "muninn --json") ||
+		!strings.Contains(findings[0].Evidence, "8 of 9") {
+		t.Fatalf("candidate-default finding mismatch: %#v", findings)
+	}
+
+	report.Summary.OwnedFlags["muninn/json"] = codexOccurrenceMetrics{
+		Count:    7,
+		Sessions: 3,
+	}
+	if findings := buildSessionFindings(report, repositoryConfig{
+		SchemaVersion: 1,
+		OwnedTools: []ownedToolConfig{{
+			ID:          "muninn",
+			Executables: []string{"muninn"},
+		}},
+	}); len(findings) != 0 {
+		t.Fatalf("sub-threshold flag produced finding: %#v", findings)
+	}
+}
+
 func TestSessionFindingLeverSeparatesToolingInstructionsAndSource(t *testing.T) {
 	tests := []struct {
 		finding sessionFinding

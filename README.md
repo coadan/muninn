@@ -12,6 +12,8 @@ Muninn helps identify:
 
 - locally controlled tools and operations with recurring failures, truncation,
   oversized output, or excessive repetition;
+- long CLI flags supplied on at least 80% of locally owned tool calls across
+  multiple sessions, which may belong in defaults or repository inference;
 - progress stalls, rapid polling, abandoned continuations, and costly
   cross-call workflow loops;
 - repeated source discovery and navigation into owners associated with high

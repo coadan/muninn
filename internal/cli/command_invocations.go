@@ -10,10 +10,19 @@ import (
 
 var shellCommandSubstitutionExecutablePattern = regexp.MustCompile(`\$\(\s*([A-Za-z0-9._/+-]+)`)
 var shellCommandSubstitutionPattern = regexp.MustCompile(`\$\(([^)]*)\)`)
+var ownedLongFlagPattern = regexp.MustCompile(`^--([a-z][a-z0-9-]{1,63})(?:=.*)?$`)
 
 type ownedCommandInvocation struct {
 	Executable string
 	Args       []string
+}
+
+func ownedLongFlag(argument string) string {
+	match := ownedLongFlagPattern.FindStringSubmatch(strings.ToLower(strings.TrimSpace(argument)))
+	if len(match) != 2 || match[1] == "help" || match[1] == "version" {
+		return ""
+	}
+	return match[1]
 }
 
 func ownershipSelectorDigest(kind, value string) string {

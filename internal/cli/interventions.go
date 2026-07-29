@@ -195,6 +195,9 @@ func interventionPriorityLabel(priority int) string {
 }
 
 func sessionInterventionKey(finding sessionFinding, dominantPhases map[string]bool) string {
+	if strings.HasPrefix(finding.Title, "frequently repeated CLI flag may belong in the default: ") {
+		return signalID("intervention", "default", finding.Target)
+	}
 	if finding.Category == "owned-tool" {
 		return signalID("intervention", "tool", finding.Target)
 	}
@@ -242,6 +245,8 @@ func interventionPrimaryPriority(finding sessionFinding) int {
 	case finding.Category == "owned-operation", finding.Category == "verification-loop":
 		return 6
 	case finding.Category == "owned-tool":
+		return 5
+	case finding.Category == "default-candidate":
 		return 5
 	case strings.HasPrefix(finding.Title, "context compactions concentrate in phase: "):
 		return 5

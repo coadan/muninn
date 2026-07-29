@@ -46,6 +46,7 @@ func TestFilterSessionFindingsKeepsPublicFocusCategoriesDisjoint(t *testing.T) {
 		"recurring-failure",
 		"diagnostic-failure",
 		"output-cost",
+		"default-candidate",
 		"instruction-discovery",
 		"instruction-footprint",
 		"session-loop",
@@ -61,9 +62,9 @@ func TestFilterSessionFindingsKeepsPublicFocusCategoriesDisjoint(t *testing.T) {
 		findings = append(findings, sessionFinding{Category: category, Title: category})
 	}
 	want := map[string]string{
-		"tooling":      "owned-tool,owned-operation,recurring-failure,diagnostic-failure,output-cost",
+		"tooling":      "owned-tool,owned-operation,recurring-failure,diagnostic-failure,output-cost,default-candidate",
 		"instructions": "instruction-discovery,instruction-footprint",
-		"interface":    "agent-interface",
+		"interface":    "default-candidate,agent-interface",
 		"structure":    "code-structure",
 		"discovery":    "instruction-discovery,discovery",
 		"failures":     "recurring-failure,diagnostic-failure",

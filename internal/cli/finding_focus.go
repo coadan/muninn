@@ -14,6 +14,7 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 		"tooling": {
 			"owned-tool":         true,
 			"owned-operation":    true,
+			"default-candidate":  true,
 			"recurring-failure":  true,
 			"diagnostic-failure": true,
 			"output-cost":        true,
@@ -23,7 +24,8 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 			"instruction-footprint": true,
 		},
 		"interface": {
-			"agent-interface": true,
+			"agent-interface":   true,
+			"default-candidate": true,
 		},
 		"structure": {
 			"code-structure": true,
