@@ -3,8 +3,8 @@
 Use `--compare previous` to compare adjacent, non-overlapping horizons:
 
 ```bash
-muninn analyze --repo . --since 1d --compare previous
-muninn analyze --repo . --since 7d --compare previous
+muninn analyze --repo . --since 1d --compare previous --human
+muninn analyze --repo . --since 7d --compare previous --human
 ```
 
 Choose one day after concentrated session work and one week for a broader

@@ -38,24 +38,24 @@ func cmdAnalyze(root string, args []string) error {
 	detailsOutput := fs.Bool("details", false, "show full human rankings or the full JSON report; with --operation, show all operation rows")
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
 	operation := fs.String("operation", "", "show configured operations for one locally owned tool or exact tool/operation ID")
-	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
+	humanOutput := fs.Bool("human", false, "emit the human-readable report instead of JSON")
 	limit := fs.Int("limit", 5, "maximum intervention or detail rows in human output (0 shows all)")
 	setFlagSetUsage(
 		fs,
-		"muninn analyze [--repo <path>] [--since <duration>] [--task <task-id>] [--focus <area>] [--details] [--operation <tool-or-operation>] [--compare previous] [--json]",
+		"muninn analyze [--repo <path>] [--since <duration>] [--task <task-id>] [--focus <area>] [--details] [--operation <tool-or-operation>] [--human] [--compare previous]",
 		"Summarize token usage and tool-output attribution without exposing session content or command text.",
 		[]string{
 			"muninn analyze --repo .",
 			"muninn analyze --repo . --since 24h",
-			"muninn analyze --repo . --since 1d --compare previous",
-			"muninn analyze --repo . --since 7d --compare previous",
+			"muninn analyze --repo . --since 1d --compare previous --human",
+			"muninn analyze --repo . --since 7d --compare previous --human",
 			"muninn analyze --repo . --since 24h --operation repository-cli",
 			"muninn analyze --repo . --since 24h --operation repository-cli/test",
 			"muninn analyze --repo . --since 24h --operation repository-cli --details",
 			"muninn analyze --repo . --focus structure --details",
 			"muninn analyze --repo . --task my-worktree",
-			"muninn analyze --repo . --since 14d --include-archived --limit 20",
-			"muninn analyze --repo . --json",
+			"muninn analyze --repo . --since 14d --include-archived",
+			"muninn analyze --repo . --human --limit 20",
 		},
 	)
 	if err := fs.Parse(args); err != nil {
@@ -97,8 +97,11 @@ func cmdAnalyze(root string, args []string) error {
 	if *noCache && *forceRefresh {
 		return errors.New("--no-cache cannot be combined with --refresh")
 	}
-	if *jsonOutput && comparison == "previous" {
-		return errors.New("--compare previous currently requires human output")
+	if comparison == "previous" && !*humanOutput {
+		return errors.New("--compare previous requires --human")
+	}
+	if limitWasSet && !*humanOutput {
+		return errors.New("--limit requires --human")
 	}
 	outputSelection, err := resolveAnalyzeOutputSelection(
 		*detailsOutput,
@@ -169,14 +172,14 @@ func cmdAnalyze(root string, args []string) error {
 			return fmt.Errorf("%w (use --no-cache to bypass the index)", err)
 		}
 		defer store.Close()
-		if *forceRefresh && !*jsonOutput {
+		if *forceRefresh && *humanOutput {
 			fmt.Fprintf(os.Stderr, "Refreshing Muninn index for %s...\n", filepath.Base(resolvedRepoRoot))
 		}
 		stats, err := store.refresh(context.Background(), source.Name(), discovery, resolvedRepoRoot, source, ownership, *forceRefresh)
 		if err != nil {
 			return err
 		}
-		if *forceRefresh && !*jsonOutput {
+		if *forceRefresh && *humanOutput {
 			fmt.Fprintln(os.Stderr, formatRefreshCompletion(stats))
 		}
 		analyzeWindow = func(windowSince, windowUntil time.Time) (codexSessionInsightsReport, error) {
@@ -240,7 +243,7 @@ func cmdAnalyze(root string, args []string) error {
 		if err != nil {
 			return err
 		}
-		if *jsonOutput {
+		if !*humanOutput {
 			encoder := json.NewEncoder(os.Stdout)
 			encoder.SetIndent("", "  ")
 			return encoder.Encode(drilldown)
@@ -248,7 +251,7 @@ func cmdAnalyze(root string, args []string) error {
 		printOwnedOperationsDrilldown(drilldown)
 		return nil
 	}
-	if *jsonOutput {
+	if !*humanOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(analysisJSONPayload(report, *detailsOutput))

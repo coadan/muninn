@@ -57,15 +57,16 @@ This runs the test suite and installs `muninn` into `$(go env GOPATH)/bin`.
 ```bash
 muninn
 muninn analyze --repo . --since 24h
-muninn analyze --repo . --since 1d --compare previous
-muninn analyze --repo . --since 7d --compare previous
+muninn analyze --repo . --since 1d --compare previous --human
+muninn analyze --repo . --since 7d --compare previous --human
 ```
 
 The main surface has two commands:
 
-- `muninn analyze` returns a ranked intervention queue that consolidates
+- `muninn analyze` returns a compact JSON intervention queue that consolidates
   related findings, and supports focused evidence, owned-operation drill-down,
-  and adjacent-period comparison. `--details` exposes the constituent findings.
+  and adjacent-period comparison. `--details` selects the full JSON report;
+  `--human` selects readable terminal output.
 - `muninn failures <tool/operation>` returns a bounded failure
   timeline for one configured locally controlled operation.
 
@@ -77,17 +78,19 @@ muninn analyze --repo . --focus structure
 muninn analyze --repo . --focus quality
 muninn analyze --repo . --operation repository-cli/test
 muninn analyze --repo . --details
+muninn analyze --repo . --human
 muninn failures repository-cli/test --repo . --since 14d
 ```
 
-`--compare previous` compares the current rolling lookback with the immediately
-preceding window of the same size. Choose `--since 1d` after a day of work or
-`--since 7d` after a week. The cohorts do not overlap, and the comparison leads
-with completed-task duration and outer tool roundtrips. When enough shared
-evidence exists, it also compares matched agent, model, reasoning effort, and
-task-family cohorts and gives a quality-adjusted verdict. The default trend
-tracks stable intervention IDs, so changing supporting evidence does not look
-like resolved-and-new work. Add `--details` to inspect raw finding churn.
+`--compare previous --human` compares the current rolling lookback with the
+immediately preceding window of the same size. Choose `--since 1d` after a day
+of work or `--since 7d` after a week. The cohorts do not overlap, and the
+comparison leads with completed-task duration and outer tool roundtrips. When
+enough shared evidence exists, it also compares matched agent, model, reasoning
+effort, and task-family cohorts and gives a quality-adjusted verdict. The
+default trend tracks stable intervention IDs, so changing supporting evidence
+does not look like resolved-and-new work. Add `--details` to inspect raw
+finding churn.
 
 Muninn does not report prompts, messages, raw commands, raw tool output,
 absolute paths, secrets, or provider session identifiers.
