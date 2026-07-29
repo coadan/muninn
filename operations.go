@@ -20,16 +20,16 @@ type ownedOperationTaskDrilldownRow struct {
 }
 
 type ownedOperationsDrilldown struct {
-	SchemaVersion  int                              `json:"schemaVersion"`
-	Provider       string                           `json:"provider"`
-	Since          string                           `json:"since"`
-	Tool           string                           `json:"tool"`
-	Operation      string                           `json:"operation,omitempty"`
-	Sessions       int                              `json:"sessions"`
-	ToolCalls      int                              `json:"toolCalls"`
-	Operations     []ownedOperationDrilldownRow     `json:"operations"`
-	TaskCohorts    []ownedOperationTaskDrilldownRow `json:"taskCohorts,omitempty"`
-	Recommendation string                           `json:"recommendation,omitempty"`
+	SchemaVersion         int                              `json:"schemaVersion"`
+	Provider              string                           `json:"provider"`
+	Since                 string                           `json:"since"`
+	Tool                  string                           `json:"tool"`
+	Operation             string                           `json:"operation,omitempty"`
+	AnalysisSessions      int                              `json:"analysisSessions"`
+	OperationAssociations int                              `json:"operationAssociations"`
+	Operations            []ownedOperationDrilldownRow     `json:"operations"`
+	TaskCohorts           []ownedOperationTaskDrilldownRow `json:"taskCohorts,omitempty"`
+	Recommendation        string                           `json:"recommendation,omitempty"`
 }
 
 func buildOwnedOperationsDrilldown(
@@ -92,11 +92,13 @@ func buildOwnedOperationsDrilldown(
 
 	prefix := toolID + "/"
 	rows := make([]ownedOperationDrilldownRow, 0)
+	operationAssociations := 0
 	for operation, metrics := range report.Summary.OwnedOperations {
 		if !strings.HasPrefix(operation, prefix) ||
 			(operationFilter != "" && operation != operationFilter) {
 			continue
 		}
+		operationAssociations += metrics.Calls
 		rows = append(rows, ownedOperationDrilldownRow{
 			Operation:      operation,
 			Metrics:        metrics,
@@ -161,16 +163,16 @@ func buildOwnedOperationsDrilldown(
 		taskRows = taskRows[:taskCohortLimit]
 	}
 	return ownedOperationsDrilldown{
-		SchemaVersion:  codexSessionInsightsSchemaVersion,
-		Provider:       report.Provider,
-		Since:          report.Since,
-		Tool:           toolID,
-		Operation:      operationFilter,
-		Sessions:       report.Summary.Sessions,
-		ToolCalls:      report.Summary.OwnedTooling[toolID].Calls,
-		Operations:     rows,
-		TaskCohorts:    taskRows,
-		Recommendation: strings.TrimSpace(selected.Recommendation),
+		SchemaVersion:         codexSessionInsightsSchemaVersion,
+		Provider:              report.Provider,
+		Since:                 report.Since,
+		Tool:                  toolID,
+		Operation:             operationFilter,
+		AnalysisSessions:      report.Summary.Sessions,
+		OperationAssociations: operationAssociations,
+		Operations:            rows,
+		TaskCohorts:           taskRows,
+		Recommendation:        strings.TrimSpace(selected.Recommendation),
 	}, nil
 }
 
@@ -178,10 +180,10 @@ func printOwnedOperationsDrilldown(report ownedOperationsDrilldown) {
 	fmt.Printf("Muninn locally owned operations since %s\n", report.Since)
 	fmt.Printf("Provider: %s\n", report.Provider)
 	fmt.Printf(
-		"Tool: %s · scope %s sessions / %s tool calls\n",
+		"Tool: %s · analyzed %s sessions · %s matched operation associations\n",
 		report.Tool,
-		formatCodexCount(int64(report.Sessions)),
-		formatCodexCount(int64(report.ToolCalls)),
+		formatCodexCount(int64(report.AnalysisSessions)),
+		formatCodexCount(int64(report.OperationAssociations)),
 	)
 	if report.Operation != "" {
 		fmt.Printf("Operation: %s\n", report.Operation)

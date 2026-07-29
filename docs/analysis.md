@@ -36,6 +36,11 @@ rather than correlated symptoms.
 - `--operation <tool-or-operation>` drills into configured locally controlled
   tooling without loading unrelated findings.
 
+Operation drill-down scope reports analyzed sessions and matched configured
+operation associations. Associations are not labeled as physical tool calls:
+one outer call can match multiple operations, and `operationsOnly` tools
+intentionally do not claim every invocation of a shared executable.
+
 Examples:
 
 ```bash
