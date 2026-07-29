@@ -1,7 +1,8 @@
 {
   "schemaVersion": 1,
   "suppressSignals": [
-    "default-candidate/muninn/repo"
+    "default-candidate/muninn/repo",
+    "default-candidate/muninn/since"
   ],
   "ownedTools": [
     {

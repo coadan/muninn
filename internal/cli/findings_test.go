@@ -479,13 +479,30 @@ func TestBuildSessionFindingsRequiresRecurringOwnedToolFriction(t *testing.T) {
 	}
 
 	report.Summary.OwnedTooling["repo"] = codexToolMetrics{
+		Calls: 10, Sessions: 1, FailedCalls: 5,
+	}
+	report.sessionRecords[0].OwnedTooling["repo"] = codexToolMetrics{
+		Calls: 10, FailedCalls: 5,
+	}
+	findings := buildSessionFindings(report, config)
+	if len(findings) != 1 ||
+		!strings.Contains(findings[0].Title, "concentrated single-session friction") ||
+		findings[0].Confidence != "medium" {
+		t.Fatalf("concentrated owned-tool friction mismatch: %#v", findings)
+	}
+	if interventions := buildSessionInterventions(findings); len(interventions) != 1 ||
+		interventions[0].Priority != "medium" {
+		t.Fatalf("concentrated owned-tool priority mismatch: %#v", interventions)
+	}
+
+	report.Summary.OwnedTooling["repo"] = codexToolMetrics{
 		Calls: 20, Sessions: 2, FailedCalls: 2,
 	}
 	report.sessionRecords = []codexSessionRecord{
 		{OwnedTooling: map[string]codexToolMetrics{"repo": {Calls: 10, FailedCalls: 1}}},
 		{OwnedTooling: map[string]codexToolMetrics{"repo": {Calls: 10, FailedCalls: 1}}},
 	}
-	findings := buildSessionFindings(report, config)
+	findings = buildSessionFindings(report, config)
 	if len(findings) != 1 ||
 		!strings.Contains(findings[0].Evidence, "2 attributable failures across 2 failure sessions") {
 		t.Fatalf("cross-session owned-tool friction missing: %#v", findings)
@@ -520,10 +537,39 @@ func TestBuildSessionFindingsRequiresRecurringOwnedOperationFriction(t *testing.
 	}
 
 	report.Summary.OwnedOperations["repo/worktree-land"] = codexOwnedOperationMetrics{
+		Calls: 12, Sessions: 2, FailedCalls: 5,
+	}
+	report.Summary.OwnedOperationFailureReasons["repo/worktree-land"] = map[string]codexOccurrenceMetrics{
+		"other non-zero exit": {Count: 5, Sessions: 1},
+	}
+	report.sessionRecords[0].OwnedOperations["repo/worktree-land"] = codexToolMetrics{
+		Calls: 5, FailedCalls: 5,
+	}
+	report.sessionRecords[0].OwnedOperationFailureReasons["repo/worktree-land"] = map[string]int{
+		"other non-zero exit": 5,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 ||
+		!strings.Contains(findings[0].Title, "concentrated single-session friction") ||
+		findings[0].Confidence != "medium" {
+		t.Fatalf("concentrated owned-operation friction mismatch: %#v", findings)
+	}
+	if interventions := buildSessionInterventions(findings); len(interventions) != 1 ||
+		interventions[0].Priority != "medium" {
+		t.Fatalf("concentrated owned-operation priority mismatch: %#v", interventions)
+	}
+
+	report.Summary.OwnedOperations["repo/worktree-land"] = codexOwnedOperationMetrics{
 		Calls: 13, Sessions: 2, FailedCalls: 3,
 	}
 	report.Summary.OwnedOperationFailureReasons["repo/worktree-land"] = map[string]codexOccurrenceMetrics{
 		"other non-zero exit": {Count: 3, Sessions: 2},
+	}
+	report.sessionRecords[0].OwnedOperations["repo/worktree-land"] = codexToolMetrics{
+		Calls: 2, FailedCalls: 2,
+	}
+	report.sessionRecords[0].OwnedOperationFailureReasons["repo/worktree-land"] = map[string]int{
+		"other non-zero exit": 2,
 	}
 	report.sessionRecords[1].OwnedOperations["repo/worktree-land"] = codexToolMetrics{
 		Calls: 11, FailedCalls: 1,
@@ -531,7 +577,7 @@ func TestBuildSessionFindingsRequiresRecurringOwnedOperationFriction(t *testing.
 	report.sessionRecords[1].OwnedOperationFailureReasons = map[string]map[string]int{
 		"repo/worktree-land": {"other non-zero exit": 1},
 	}
-	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	findings = buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 ||
 		!strings.Contains(findings[0].Evidence, "3 actionable failures across 2 failure sessions") {
 		t.Fatalf("cross-session owned-operation friction missing: %#v", findings)
