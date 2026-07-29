@@ -67,8 +67,7 @@ Muninn separates activity that is often conflated:
 - structured Heimdal failure fingerprints, phases, diagnostic availability,
   and post-failure cost by model and effort;
 - root-agent and delegated work, including coordination and overlap;
-- repository navigation, repeated reads, and instruction footprint;
-- explicit privacy-safe friction feedback from agents or people.
+- repository navigation, repeated reads, and instruction footprint.
 
 Findings include a stable signal ID, likely improvement lever, confidence, and
 recent supporting activity. Counts alone do not establish causality.

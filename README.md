@@ -6,10 +6,22 @@ Muninn is a CLI for finding avoidable cost and friction in coding agent
 sessions. It turns local session metadata into actionable signals about tooling,
 instructions, code navigation, verification, and delivery rework.
 
-Better prompts and agent guidance only address one axis of agent performance.
-Other failure modes come from tool interfaces, repository structure, runtime
-feedback, test setup, and delivery workflows. Muninn helps distinguish these
-causes so the improvement targets the system that produced the friction.
+Muninn helps identify:
+
+- locally controlled tools and operations with recurring failures, truncation,
+  oversized output, or excessive repetition;
+- progress stalls, rapid polling, abandoned continuations, and costly
+  cross-call workflow loops;
+- repeated source discovery and navigation into owners associated with high
+  task cost, review rework, or downstream failures;
+- oversized always-on instructions and recurring instruction-discovery gaps;
+- expensive verification repair loops and missing pre-delivery test evidence;
+- performance changes across matched agent, model, reasoning-effort, and task
+  cohorts without ignoring observed delivery quality.
+
+These signals distinguish tool-interface, repository-structure, instruction,
+verification, and delivery problems so improvements target the system that
+produced the friction.
 
 Muninn currently ingests Codex sessions. Its normalized analysis is designed
 to support additional providers without coupling reports to provider-specific
@@ -26,20 +38,28 @@ This runs the test suite and installs `muninn` into `$(go env GOPATH)/bin`.
 ## Quick start
 
 ```bash
-muninn analyze --repo .
+muninn
 muninn analyze --repo . --since 24h
 muninn analyze --repo . --since 1d --compare previous
 muninn analyze --repo . --since 7d --compare previous
 ```
 
-The default report leads with current findings. Narrow it when investigating a
-specific kind of friction:
+The main surface has two commands:
+
+- `muninn analyze` returns the findings-first action queue and supports focused
+  evidence, owned-operation drill-down, and adjacent-period comparison.
+- `muninn failures --operation <tool/operation>` returns a bounded failure
+  timeline for one configured locally controlled operation.
+
+Narrow the analysis when investigating a specific kind of friction:
 
 ```bash
 muninn analyze --repo . --focus tooling
 muninn analyze --repo . --focus structure
 muninn analyze --repo . --focus quality
+muninn analyze --repo . --operation repository-cli/test
 muninn analyze --repo . --details
+muninn failures --repo . --operation repository-cli/test --since 14d
 ```
 
 `--compare previous` compares the current rolling lookback with the immediately
@@ -60,7 +80,7 @@ absolute paths, secrets, or provider session identifiers.
 - [Improvement workflow](docs/improvement-workflow.md)
 - [Privacy and data model](docs/privacy.md)
 
-Run `muninn help` for the complete command surface.
+Run `muninn --help` for the complete command surface.
 
 ## Development
 

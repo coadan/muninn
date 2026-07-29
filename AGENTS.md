@@ -17,10 +17,6 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
 - A command bundle inside one outer tool call is one roundtrip. Only adjacent
   substantive commands in separate outer calls count as cross-call
   transitions.
-- When friction is clear before it becomes statistically recurrent, record it
-  with `muninn feedback add` using only a fixed category and privacy-safe
-  logical target/signal labels. Mark directly changeable tools as
-  `--control local`, and resolve the same signal after its improvement lands.
 
 ## Workflow
 
