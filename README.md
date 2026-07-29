@@ -85,9 +85,10 @@ muninn failures repository-cli/test --repo . --since 14d
 preceding window of the same size in one JSON report. Choose `--since 1d` after
 a day of work or `--since 7d` after a week. The cohorts do not overlap. The
 report retains completed-task, agent, model, reasoning-effort, task-family, and
-delivery-quality evidence for both periods, and classifies stable intervention
-IDs as resolved, persistent, or new when both windows have enough sessions.
-Add `--details` for the full reports behind both cohorts.
+delivery-quality evidence for both periods. Structured `trends` include
+completed-task cost, matched performance and quality, and normalized rates;
+diagnostic fingerprints and stable intervention IDs have their own comparison
+states. Add `--details` for the full reports behind both cohorts.
 
 Muninn does not report prompts, messages, raw commands, raw tool output,
 absolute paths, secrets, or provider session identifiers.
