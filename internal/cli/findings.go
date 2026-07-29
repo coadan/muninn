@@ -217,56 +217,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	}
 
 	findings = append(findings, buildCausalFindings(report, config)...)
-
-	for context, metrics := range summary.OversizedOutputs {
-		if metrics.Calls < 2 && metrics.MaxOutputBytes < 2*oversizedOutputMinimumBytes {
-			continue
-		}
-		control := "repository"
-		if locallyControlledOutputContext(context, config.OwnedTools) {
-			control = "local"
-		}
-		title := "individual tool calls return oversized output: " + context
-		if context == "concurrent tool batch" {
-			title = "concurrent tool batches exceed the shared output budget"
-		}
-		evidence := fmt.Sprintf("%s returned %s bytes (~%s visible tokens) across %s; largest call %s bytes",
-			formatCodexCountNoun(int64(metrics.Calls), "call"),
-			formatCodexCount(metrics.OutputBytes),
-			formatCodexCount(estimatedTokens(metrics.OutputBytes)),
-			formatCodexCountNoun(int64(metrics.Sessions), "session"),
-			formatCodexCount(metrics.MaxOutputBytes),
-		)
-		if context == "concurrent tool batch" && metrics.NestedCalls > 0 {
-			evidence += fmt.Sprintf("; %s nested calls averaged ~%s visible output tokens each; largest batch contained %s calls",
-				formatCodexCount(int64(metrics.NestedCalls)),
-				formatCodexCount(estimatedTokens(metrics.OutputBytes)/int64(metrics.NestedCalls)),
-				formatCodexCount(int64(metrics.MaxNestedCalls)),
-			)
-		}
-		action := oversizedOutputAction(context, control)
-		if context == "concurrent tool batch" && metrics.MaxNestedCalls > 0 {
-			action = fmt.Sprintf(
-				"Keep independent calls concurrent, but keep the combined stage below ~%s visible tokens; for the largest %s-call batch, budget about %s tokens per result if divided evenly, and inspect every partial result.",
-				formatCodexCount(concurrentBatchOutputBudgetTokens),
-				formatCodexCount(int64(metrics.MaxNestedCalls)),
-				formatCodexCount(concurrentBatchOutputBudgetTokens/int64(metrics.MaxNestedCalls)),
-			)
-		}
-		findings = append(findings, sessionFinding{
-			Category:   "output-cost",
-			Control:    control,
-			Title:      title,
-			Evidence:   evidence,
-			Action:     action,
-			Count:      metrics.Calls,
-			Sessions:   metrics.Sessions,
-			Target:     context,
-			LastSeen:   sessionFindingLastSeen(report, "oversized-output", context),
-			Confidence: oversizedOutputFindingConfidence(metrics),
-			score:      600 + metrics.Calls + int(metrics.OutputBytes/10_000),
-		})
-	}
+	findings = append(findings, buildOutputCostFindings(report, config)...)
 
 	for _, owned := range config.OwnedTools {
 		metrics := summary.OwnedTooling[owned.ID]
@@ -330,7 +281,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			if metrics.Sessions < 2 || metrics.Count < 2 {
 				continue
 			}
-			locallyControlled := locallyControlledOutputContext(context, config.OwnedTools)
+			locallyControlled := locallyControlledToolContext(context, config.OwnedTools)
 			actionableTestFailure := reason == "test failure" &&
 				strings.Contains(context, "tests")
 			if !locallyControlled && !actionableTestFailure {
@@ -671,7 +622,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	for context, metrics := range summary.ProgressStalls {
 		if metrics.Calls < 2 ||
 			metrics.Seconds < 40 ||
-			!locallyControlledOutputContext(context, config.OwnedTools) {
+			!locallyControlledToolContext(context, config.OwnedTools) {
 			continue
 		}
 		findings = append(findings, sessionFinding{
@@ -716,7 +667,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	}
 
 	for context, metrics := range summary.AbandonedContinuations {
-		local := locallyControlledOutputContext(context, config.OwnedTools)
+		local := locallyControlledToolContext(context, config.OwnedTools)
 		if metrics.Count < 2 ||
 			metrics.Sessions < 2 ||
 			(!local && !expectedContinuationContext(context)) {
@@ -920,7 +871,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			if lever == "tooling" {
 				target = check
 				action = "Run " + check + " after the latest relevant edit and before delivery, then compare the downstream failure rate for this check."
-				if locallyControlledOutputContext(check, config.OwnedTools) {
+				if locallyControlledToolContext(check, config.OwnedTools) {
 					control = "local"
 				}
 			}
@@ -1092,13 +1043,6 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		return findings[i].Title < findings[j].Title
 	})
 	return diversifySessionFindings(findings)
-}
-
-func oversizedOutputFindingConfidence(metrics codexOversizedOutputMetrics) string {
-	if metrics.Sessions >= 2 || metrics.MaxOutputBytes >= 4*oversizedOutputMinimumBytes {
-		return "medium"
-	}
-	return "low"
 }
 
 func recurringPatternConfidence(sessions int) string {
@@ -1490,7 +1434,7 @@ func signalID(parts ...string) string {
 	return signal
 }
 
-func locallyControlledOutputContext(context string, ownedTools []ownedToolConfig) bool {
+func locallyControlledToolContext(context string, ownedTools []ownedToolConfig) bool {
 	toolID, _, hasOperation := strings.Cut(context, "/")
 	if !hasOperation {
 		return false
@@ -1501,38 +1445,6 @@ func locallyControlledOutputContext(context string, ownedTools []ownedToolConfig
 		}
 	}
 	return false
-}
-
-func oversizedOutputAction(context, control string) string {
-	if context == "concurrent tool batch" {
-		return "Keep independent calls concurrent, but lower each nested call's output limit so the combined stage stays below the shared output budget; inspect every partial result."
-	}
-	if control == "local" {
-		return "Lower this locally controlled operation's default output and return a compact summary with explicit focused follow-ups."
-	}
-	if strings.HasPrefix(context, "nested tool") {
-		if strings.Contains(context, "exec_command") {
-			return "Set a bounded max_output_tokens on each nested exec_command, then narrow or page only the result that reaches that limit."
-		}
-		return "Request bounded output from the named nested tool and inspect only the focused follow-up needed for the task."
-	}
-	if strings.Contains(context, " -> ") {
-		return "Keep the workflow bundled, but cap each output-heavy stage and return one compact summary with explicit focused follow-ups."
-	}
-	switch context {
-	case "file reads":
-		return "Read the exact owner, symbol, heading, or bounded line window instead of returning the whole file."
-	case "search":
-		return "Narrow the search scope and cap matches or excerpts before retrying."
-	case "git inspect":
-		return "Use a diff summary or path-scoped inspection first, then load only the changed hunk that needs attention."
-	case "tests":
-		return "Keep successful test output compact and route complete failure diagnostics to a log or explicit focused follow-up."
-	case "review":
-		return "Use the compact review summary first and retrieve details only for the selected finding."
-	default:
-		return "Narrow the command, lower its output limit, or add a compact repository-owned surface that returns focused follow-ups."
-	}
 }
 
 func inlineToolEvidence(metrics map[string]codexInlineMetrics) string {
