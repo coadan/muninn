@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+const (
+	minimumTrendSessions = 5
+	minimumTrendTasks    = 10
+	minimumTrendCalls    = 100
+)
+
 type trendMetric struct {
 	Name              string
 	Baseline          float64
@@ -76,7 +82,7 @@ func printSessionTrend(
 			PercentageDisplay: true,
 			BaselineSample:    base.Sessions,
 			CurrentSample:     now.Sessions,
-			MinimumSample:     1,
+			MinimumSample:     minimumTrendSessions,
 		},
 		{
 			Name:           "tool roundtrips / session",
@@ -85,7 +91,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: base.Sessions,
 			CurrentSample:  now.Sessions,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendSessions,
 		},
 		{
 			Name:           "cross-call transitions / task",
@@ -94,7 +100,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: baseline.Outcomes.ToolUsingCompleted,
 			CurrentSample:  current.Outcomes.ToolUsingCompleted,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendTasks,
 		},
 		{
 			Name:           "repeated transitions / task",
@@ -103,7 +109,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: baseline.Outcomes.ToolUsingCompleted,
 			CurrentSample:  current.Outcomes.ToolUsingCompleted,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendTasks,
 		},
 		{
 			Name:           "rapid polls / task",
@@ -112,7 +118,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: baseline.Outcomes.ToolUsingCompleted,
 			CurrentSample:  current.Outcomes.ToolUsingCompleted,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendTasks,
 		},
 		{
 			Name:           "progress stalls / task",
@@ -121,7 +127,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: baseline.Outcomes.ToolUsingCompleted,
 			CurrentSample:  current.Outcomes.ToolUsingCompleted,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendTasks,
 		},
 		{
 			Name:           "visible output tokens / call",
@@ -130,7 +136,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: base.ToolCalls,
 			CurrentSample:  now.ToolCalls,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendCalls,
 		},
 		{
 			Name:           "failures / 1k calls",
@@ -139,7 +145,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: base.ToolCalls,
 			CurrentSample:  now.ToolCalls,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendCalls,
 		},
 		{
 			Name:           "truncations / 1k calls",
@@ -148,7 +154,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: base.ToolCalls,
 			CurrentSample:  now.ToolCalls,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendCalls,
 		},
 		{
 			Name:           "compactions / session",
@@ -157,7 +163,7 @@ func printSessionTrend(
 			LowerIsBetter:  true,
 			BaselineSample: base.Sessions,
 			CurrentSample:  now.Sessions,
-			MinimumSample:  1,
+			MinimumSample:  minimumTrendSessions,
 		},
 		{
 			Name:              "pre-delivery test evidence",
@@ -263,9 +269,18 @@ func printSessionTrend(
 		qualityAdjustedPerformanceVerdict(baseline, current, matchedMetrics, matchedQuality),
 	)
 	printDiagnosticEffectiveness(baseline.Diagnostics, current.Diagnostics)
-	printInterventionTrend(baseline.Interventions, current.Interventions)
-	if includeFindingTrend {
-		printFindingTrend(baseline.Findings, current.Findings)
+	if base.Sessions >= minimumTrendSessions && now.Sessions >= minimumTrendSessions {
+		printInterventionTrend(baseline.Interventions, current.Interventions)
+		if includeFindingTrend {
+			printFindingTrend(baseline.Findings, current.Findings)
+		}
+	} else {
+		fmt.Printf(
+			"\nIntervention trend: insufficient evidence (%s baseline, %s current; need at least %s each).\n",
+			formatCodexCountNoun(int64(base.Sessions), "session"),
+			formatCodexCountNoun(int64(now.Sessions), "session"),
+			formatCodexCount(minimumTrendSessions),
+		)
 	}
 }
 

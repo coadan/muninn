@@ -194,6 +194,102 @@ func TestMaterialTrendDirectionRejectsMissingWindowEvidence(t *testing.T) {
 	}
 }
 
+func TestSessionTrendDoesNotDirectionLabelSparseRates(t *testing.T) {
+	baseline := codexSessionInsightsReport{SchemaVersion: codexSessionInsightsSchemaVersion}
+	current := codexSessionInsightsReport{SchemaVersion: codexSessionInsightsSchemaVersion}
+	baseline.Summary = codexSessionInsightsSummary{
+		codexAggregateMetrics: codexAggregateMetrics{
+			Sessions:          1,
+			CompletedSessions: 1,
+			ToolCalls:         50,
+			FailedToolCalls:   5,
+			Compactions:       1,
+		},
+	}
+	current.Summary = codexSessionInsightsSummary{
+		codexAggregateMetrics: codexAggregateMetrics{
+			Sessions:          2,
+			CompletedSessions: 2,
+			ToolCalls:         200,
+			FailedToolCalls:   2,
+			Compactions:       8,
+		},
+	}
+	baseline.Outcomes.ToolUsingCompleted = 1
+	current.Outcomes.ToolUsingCompleted = 20
+	baseline.Interventions = []sessionIntervention{{ID: "intervention/baseline"}}
+	current.Interventions = []sessionIntervention{{ID: "intervention/current"}}
+
+	out, err := captureStdout(t, func() error {
+		printSessionTrend(baseline, current, "sparse", false)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"completion ratio",
+		"tool roundtrips / session",
+		"cross-call transitions / task",
+		"failures / 1k calls",
+		"compactions / session",
+	} {
+		assertTrendRowDirection(t, out, name, "insufficient")
+	}
+	if !strings.Contains(out, "Intervention trend: insufficient evidence (1 session baseline, 2 sessions current; need at least 5 each).") ||
+		strings.Contains(out, "New interventions:") ||
+		strings.Contains(out, "Resolved interventions:") {
+		t.Fatalf("sparse intervention trend was direction-labeled:\n%s", out)
+	}
+}
+
+func TestSessionTrendLabelsRatesWithAdequateDenominators(t *testing.T) {
+	baseline := codexSessionInsightsReport{SchemaVersion: codexSessionInsightsSchemaVersion}
+	current := codexSessionInsightsReport{SchemaVersion: codexSessionInsightsSchemaVersion}
+	baseline.Summary = codexSessionInsightsSummary{
+		codexAggregateMetrics: codexAggregateMetrics{
+			Sessions:          10,
+			CompletedSessions: 8,
+			ToolCalls:         200,
+			FailedToolCalls:   20,
+		},
+	}
+	current.Summary = codexSessionInsightsSummary{
+		codexAggregateMetrics: codexAggregateMetrics{
+			Sessions:          10,
+			CompletedSessions: 10,
+			ToolCalls:         300,
+			FailedToolCalls:   3,
+		},
+	}
+	baseline.Outcomes.ToolUsingCompleted = 10
+	current.Outcomes.ToolUsingCompleted = 10
+
+	out, err := captureStdout(t, func() error {
+		printSessionTrend(baseline, current, "adequate", false)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTrendRowDirection(t, out, "completion ratio", "improved")
+	assertTrendRowDirection(t, out, "tool roundtrips / session", "regressed")
+	assertTrendRowDirection(t, out, "failures / 1k calls", "improved")
+}
+
+func assertTrendRowDirection(t *testing.T, output, name, direction string) {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, name) {
+			if !strings.HasSuffix(strings.TrimSpace(line), direction) {
+				t.Fatalf("%s row=%q want direction %q", name, line, direction)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing trend row %q:\n%s", name, output)
+}
+
 func TestMatchedPerformanceCohortsRequireSharedAdequateSamples(t *testing.T) {
 	cohort := taskPerformanceCohort{
 		AgentKind:       "root",

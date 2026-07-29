@@ -24,7 +24,14 @@ aggregate direction.
 
 The default comparison classifies stable intervention IDs as `resolved`,
 `persistent`, or `new`. Bounded examples are ordered by priority and
-corroboration. Use `--details` when lower-level finding churn is useful.
+corroboration. Churn classification requires at least five sessions in each
+period; smaller windows keep the current queue but report the trend as
+insufficient. Use `--details` when lower-level finding churn is useful.
+
+The session-rate table always shows the observed values, but only labels a
+direction when both periods have an adequate denominator: five sessions for
+session rates, ten completed tasks for task rates, and 100 tool calls for
+call-normalized rates. Smaller samples are marked `insufficient`.
 
 ## Quality-adjusted verdict
 
