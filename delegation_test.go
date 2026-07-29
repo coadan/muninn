@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -96,6 +97,7 @@ func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
 	delegation := analyzeDelegation(records)
 	if !delegation.Available || delegation.SubagentSessions != 2 ||
 		delegation.LinkedSubagents != 2 || delegation.DelegatingParents != 1 ||
+		!delegation.CoordinationAvailable ||
 		delegation.CoordinationCalls != 4 || delegation.CoordinationFreshTokens != 15 ||
 		delegation.CoordinationOutputTokens != 100 {
 		t.Fatalf("delegation totals mismatch: %#v", delegation)
@@ -104,8 +106,10 @@ func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
 		delegation.ChildrenWithEditOverlap != 1 ||
 		delegation.EditOverlapTargets != 1 ||
 		delegation.ChildrenWithReadOverlap != 1 ||
-		delegation.NoObservableContributionSubagents != 1 ||
-		delegation.NoObservableContributionFreshTokens != 50 {
+		delegation.SubagentsByWorkMode["implementation"] != 1 ||
+		delegation.SubagentsByWorkMode["other tool work"] != 1 ||
+		delegation.SubagentFreshTokensByWorkMode["implementation"] != 80 ||
+		delegation.SubagentFreshTokensByWorkMode["other tool work"] != 50 {
 		t.Fatalf("delegation attribution mismatch: %#v", delegation)
 	}
 	if delegation.SummedSubagentDurationSeconds != 30 ||
@@ -130,18 +134,18 @@ func TestAnalyzeDelegationSeparatesMissingLineageFromParentOutsideScope(t *testi
 	}
 }
 
-func TestAnalyzeDelegationDoesNotTreatUnattributedResearchAsWaste(t *testing.T) {
+func TestAnalyzeDelegationDoesNotTreatResearchWorkModeAsWaste(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Delegation = delegationAnalysis{
-		Available:                           true,
-		SubagentSessions:                    8,
-		DelegatingParents:                   2,
-		SubagentFreshTokens:                 800_000,
-		ParentFreshTokens:                   200_000,
-		SubagentFreshTokenShare:             0.8,
-		NoObservableContributionSubagents:   8,
-		NoObservableContributionFreshTokens: 800_000,
-		SubagentConcurrencyFactor:           2,
+		Available:                     true,
+		SubagentSessions:              8,
+		DelegatingParents:             2,
+		SubagentFreshTokens:           800_000,
+		ParentFreshTokens:             200_000,
+		SubagentFreshTokenShare:       0.8,
+		SubagentsByWorkMode:           map[string]int{"research/review": 8},
+		SubagentFreshTokensByWorkMode: map[string]int64{"research/review": 800_000},
+		SubagentConcurrencyFactor:     2,
 	}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	for _, finding := range findings {
@@ -151,10 +155,68 @@ func TestAnalyzeDelegationDoesNotTreatUnattributedResearchAsWaste(t *testing.T) 
 	}
 }
 
+func TestDelegatedWorkModeUsesStrongestObservableOutcome(t *testing.T) {
+	verification := codexTaskEpisode{
+		Phases: map[string]taskPhaseCost{
+			"verification": {ToolCalls: 1},
+		},
+	}
+	tests := []struct {
+		name   string
+		record codexSessionRecord
+		want   string
+	}{
+		{name: "implementation", record: codexSessionRecord{
+			EditTargets:  map[string]int{"src/owner.go": 1},
+			TaskEpisodes: []codexTaskEpisode{verification},
+		}, want: "implementation"},
+		{name: "delivery", record: codexSessionRecord{
+			DeliveryRework: deliveryReworkMetrics{Deliveries: 1},
+		}, want: "delivery"},
+		{name: "verification", record: codexSessionRecord{
+			TaskEpisodes: []codexTaskEpisode{verification},
+		}, want: "verification"},
+		{name: "research", record: codexSessionRecord{
+			ReadTargets: map[string]codexTargetMetrics{"src/owner.go": {Reads: 1}},
+		}, want: "research/review"},
+		{name: "other tools", record: codexSessionRecord{ToolCalls: 1}, want: "other tool work"},
+		{name: "response", record: codexSessionRecord{}, want: "response only"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := delegatedWorkMode(test.record); got != test.want {
+				t.Fatalf("delegatedWorkMode()=%q want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestPrintDelegationAnalysisDistinguishesUnavailableCoordination(t *testing.T) {
+	out, err := captureStdout(t, func() error {
+		printDelegationAnalysis(delegationAnalysis{
+			Available:                     true,
+			SubagentSessions:              1,
+			LinkedSubagents:               1,
+			DelegatingParents:             1,
+			SubagentsByWorkMode:           map[string]int{"research/review": 1},
+			SubagentFreshTokensByWorkMode: map[string]int64{"research/review": 100},
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Delegation coordination: unavailable") ||
+		strings.Contains(out, "0 coordination calls") {
+		t.Fatalf("unavailable coordination rendered as measured zero:\n%s", out)
+	}
+}
+
 func TestBuildSessionFindingsFlagsMaterialDelegationCoordination(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Delegation = delegationAnalysis{
 		Available:                 true,
+		CoordinationAvailable:     true,
 		SubagentSessions:          4,
 		DelegatingParents:         2,
 		ParentFreshTokens:         250_000,
