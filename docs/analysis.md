@@ -92,7 +92,12 @@ observational and never create findings by themselves because tool use may
 still correlate with unobserved task difficulty.
 
 Interventions include a stable ID, primary signal, supporting signals, likely
-improvement lever, confidence, and recent supporting activity. JSON retains
+improvement lever, confidence, explicit priority, and recent supporting
+activity. `highest` priority is reserved for high-confidence locally
+controlled changes; other high-confidence changes follow, then medium- and
+low-confidence candidates. Impact evidence orders interventions within the
+same priority tier, so raw scores from unlike signal categories are not
+compared as though they had one scale. JSON retains
 both `interventions` and the constituent `findings`. Default JSON also includes
 compact scope, outcome, profile, delegation, and diagnostic summaries; it
 omits task rows and high-cardinality analytical maps. Use `--details --json`
