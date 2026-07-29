@@ -166,6 +166,8 @@ func codexToolFailureReason(statusText string) string {
 	case strings.Contains(preview, "missing test result sentinel") ||
 		strings.Contains(preview, "failed before reporting test results"):
 		return "test harness protocol"
+	case strings.Contains(preview, "verification changed files after staging"):
+		return "verification changed staged state"
 	case strings.Contains(preview, "head sha can't be blank") ||
 		strings.Contains(preview, "base sha can't be blank") ||
 		strings.Contains(preview, "no commits between"):
