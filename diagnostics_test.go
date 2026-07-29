@@ -115,6 +115,30 @@ func TestCodexIngestionAttributesCostAfterHeimdalReport(t *testing.T) {
 			"type":      "event_msg",
 			"payload":   map[string]any{"type": "task_complete"},
 		},
+		map[string]any{
+			"timestamp": "2026-07-27T09:01:03Z",
+			"type":      "event_msg",
+			"payload": map[string]any{
+				"type": "token_count",
+				"info": map[string]any{"total_token_usage": map[string]any{
+					"input_tokens": 1000, "cached_input_tokens": 200, "output_tokens": 100,
+					"reasoning_output_tokens": 20, "total_tokens": 1100,
+				}},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-27T09:01:04Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call", "call_id": "unrelated", "name": "exec_command",
+				"arguments": `{"cmd":"git status --short"}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-27T09:02:02Z",
+			"type":      "event_msg",
+			"payload":   map[string]any{"type": "task_complete"},
+		},
 	})
 	session, err := parseCodexNormalizedSession(sessionPath)
 	if err != nil {
@@ -135,7 +159,7 @@ func TestCodexIngestionAttributesCostAfterHeimdalReport(t *testing.T) {
 	}
 	got := record.DiagnosticFailures[0]
 	if got.ToolCalls != 1 || got.Tokens.TotalTokens != 110 || got.EndedAt.Sub(got.FailedAt) != time.Minute {
-		t.Fatalf("post-failure attribution=%#v", got)
+		t.Fatalf("post-failure attribution crossed task completion=%#v", got)
 	}
 }
 

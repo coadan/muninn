@@ -144,6 +144,10 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 						activeDiagnostic.FailedCalls++
 					}
 				}
+				if event.Kind == sessionEventComplete {
+					record.DiagnosticFailures = append(record.DiagnosticFailures, *activeDiagnostic)
+					activeDiagnostic = nil
+				}
 			}
 		}
 		if event.Diagnostic != nil && event.Diagnostic.Status == "passed" {
