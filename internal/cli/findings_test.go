@@ -1137,7 +1137,22 @@ func TestBuildSessionFindingsFlagsCompletedTaskCostTail(t *testing.T) {
 }
 
 func TestBuildSessionFindingsTurnsActionableHotspotsIntoStableSignals(t *testing.T) {
-	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	root := t.TempDir()
+	for _, target := range []string{
+		"src/expensive.ts",
+		"src/rework.ts",
+		"src/risky.ts",
+		"src/popular.ts",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(target))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", target, err)
+		}
+		if err := os.WriteFile(path, []byte("current"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", target, err)
+		}
+	}
+	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
 	report.Outcomes.FileHotspots = []fileHotspotMetrics{
 		{
 			Target:          "src/expensive.ts",
@@ -1169,6 +1184,13 @@ func TestBuildSessionFindingsTurnsActionableHotspotsIntoStableSignals(t *testing
 			EditCalls:      40,
 			Classification: "healthy-demand",
 		},
+		{
+			Target:         "src/deleted.ts",
+			CompletedTasks: 10,
+			EditCalls:      30,
+			ToolRoundtrips: outcomeDistribution{P50: 100, P90: 200},
+			Classification: "expensive-owner",
+		},
 	}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 3 {
@@ -1180,6 +1202,9 @@ func TestBuildSessionFindingsTurnsActionableHotspotsIntoStableSignals(t *testing
 	}
 	if _, exists := byTarget["src/popular.ts"]; exists {
 		t.Fatalf("healthy demand produced a finding: %#v", findings)
+	}
+	if _, exists := byTarget["src/deleted.ts"]; exists {
+		t.Fatalf("deleted historical target produced a current-owner finding: %#v", findings)
 	}
 	expensive := byTarget["src/expensive.ts"]
 	if expensive.Signal != "code-structure/file-cost/src/expensive.ts" ||

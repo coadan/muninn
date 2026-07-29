@@ -1046,6 +1046,9 @@ func verificationOwnedOperation(operation string) bool {
 func fileHotspotFindings(report codexSessionInsightsReport) []sessionFinding {
 	var findings []sessionFinding
 	for _, hotspot := range report.Outcomes.FileHotspots {
+		if _, _, exists := repositoryTargetSize(report.WorkspaceRoot, hotspot.Target); !exists {
+			continue
+		}
 		switch hotspot.Classification {
 		case "expensive-owner":
 			if hotspot.CompletedTasks < 3 || hotspot.ToolRoundtrips.P50 < 50 {
