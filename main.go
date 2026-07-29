@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 49
+const codexSessionInsightsSchemaVersion = 50
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -153,6 +153,7 @@ type codexSessionInsightsSummary struct {
 
 type codexSessionInsightsReport struct {
 	SchemaVersion  int                            `json:"schemaVersion"`
+	DetailLevel    string                         `json:"detailLevel"`
 	Provider       string                         `json:"provider"`
 	GeneratedAt    string                         `json:"generatedAt"`
 	Since          string                         `json:"since"`
@@ -500,7 +501,7 @@ func cmdAnalyze(root string, args []string) error {
 	noCache := fs.Bool("no-cache", false, "scan provider files directly without the SQLite index")
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
 	compare := fs.String("compare", "", "comparison cohort: previous")
-	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals; with --operation, show all operation rows")
+	detailsOutput := fs.Bool("details", false, "show full human rankings or the full JSON report; with --operation, show all operation rows")
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
 	operation := fs.String("operation", "", "show configured operations for one locally owned tool or exact tool/operation ID")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
@@ -713,7 +714,7 @@ func cmdAnalyze(root string, args []string) error {
 	if *jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(report)
+		return encoder.Encode(analysisJSONPayload(report, *detailsOutput))
 	}
 	printCodexSessionInsights(report, config, *limit, outputSelection.View)
 	if baseline != nil {
@@ -848,6 +849,7 @@ func analyzeCodexSessionsFilteredWithMetadata(sessionDirs []string, workspaceRoo
 func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRoot string, since, generatedAt time.Time) codexSessionInsightsReport {
 	return codexSessionInsightsReport{
 		SchemaVersion: codexSessionInsightsSchemaVersion,
+		DetailLevel:   "full",
 		Provider:      provider,
 		GeneratedAt:   generatedAt.Format(time.RFC3339),
 		Since:         since.Format(time.RFC3339),
