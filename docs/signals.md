@@ -45,6 +45,12 @@ operation output must exceed both a 50,000-token floor and the cohort-relative
 cost threshold; output-only operation findings remain medium priority rather
 than inheriting highest priority solely from local ownership.
 
+Candidate-default findings require a long flag on at least five definitely
+attributed calls, at least two sessions, and 80% of the locally owned tool's
+definite calls. Muninn retains only the normalized flag name, such as `json`;
+it never retains the flag value. `--help` and `--version` are excluded because
+they describe discovery rather than a workflow default.
+
 ## Intervention construction
 
 An intervention contains:

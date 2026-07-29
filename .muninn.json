@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "ownedTools": [
+    {
+      "id": "muninn",
+      "repository": ".",
+      "executables": ["muninn"],
+      "operations": [
+        {"id": "analyze", "args": ["analyze"]},
+        {"id": "failures", "args": ["failures"]}
+      ],
+      "recommendation": "Improve Muninn's analysis defaults or focused query surface when agents repeatedly reconstruct the same invocation."
+    }
+  ]
+}

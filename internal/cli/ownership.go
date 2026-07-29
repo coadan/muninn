@@ -14,10 +14,12 @@ var ownedTaskLabelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,79}
 
 type ownershipCatalog struct {
 	byDigest         map[string][]string
+	byExecutable     map[string][]string
 	operations       []ownedOperationRule
 	expectedFailures map[string]map[string]struct{}
 	expectedWaits    map[string]struct{}
 	taskMarkers      map[string][]string
+	operationsOnly   map[string]bool
 	cacheKey         string
 }
 
@@ -32,6 +34,7 @@ type ownershipIndexConfig struct {
 	ID                string                          `json:"id"`
 	Executables       []string                        `json:"executables,omitempty"`
 	Operations        []ownershipIndexOperationConfig `json:"operations,omitempty"`
+	OperationsOnly    bool                            `json:"operationsOnly,omitempty"`
 	TaskArgumentAfter string                          `json:"taskArgumentAfter,omitempty"`
 }
 
@@ -46,6 +49,7 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 		indexConfig := ownershipIndexConfig{
 			ID:                config.ID,
 			Executables:       config.Executables,
+			OperationsOnly:    config.OperationsOnly,
 			TaskArgumentAfter: config.TaskArgumentAfter,
 		}
 		for _, operation := range config.Operations {
@@ -60,15 +64,19 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 	configDigest := sha256.Sum256(encoded)
 	catalog := ownershipCatalog{
 		byDigest:         map[string][]string{},
+		byExecutable:     map[string][]string{},
 		expectedFailures: map[string]map[string]struct{}{},
 		expectedWaits:    map[string]struct{}{},
 		taskMarkers:      map[string][]string{},
+		operationsOnly:   map[string]bool{},
 		cacheKey:         hex.EncodeToString(configDigest[:8]),
 	}
 	for _, config := range configs {
 		id := strings.TrimSpace(config.ID)
+		catalog.operationsOnly[id] = config.OperationsOnly
 		for _, executable := range config.Executables {
 			normalizedExecutable := strings.ToLower(filepath.Base(strings.TrimSpace(executable)))
+			catalog.byExecutable[normalizedExecutable] = appendUniqueString(catalog.byExecutable[normalizedExecutable], id)
 			if marker := strings.ToLower(strings.TrimSpace(config.TaskArgumentAfter)); marker != "" {
 				catalog.taskMarkers[normalizedExecutable] = appendUniqueString(catalog.taskMarkers[normalizedExecutable], marker)
 			}
@@ -133,6 +141,52 @@ func (catalog ownershipCatalog) match(digests []string) []string {
 	}
 	sort.Strings(matches)
 	return matches
+}
+
+func (catalog ownershipCatalog) classifyFlags(invocations []ownedCommandInvocation) []string {
+	var flags []string
+	for _, invocation := range invocations {
+		executable := strings.ToLower(filepath.Base(invocation.Executable))
+		for _, toolID := range catalog.byExecutable[executable] {
+			if !catalog.invocationOwnsFlags(toolID, invocation) {
+				continue
+			}
+			for _, argument := range invocation.Args {
+				if flag := ownedLongFlag(argument); flag != "" {
+					flags = appendUniqueString(flags, toolID+"/"+flag)
+				}
+			}
+		}
+	}
+	sort.Strings(flags)
+	return flags
+}
+
+func (catalog ownershipCatalog) classifyFlagTools(invocations []ownedCommandInvocation) []string {
+	var tools []string
+	for _, invocation := range invocations {
+		executable := strings.ToLower(filepath.Base(invocation.Executable))
+		for _, toolID := range catalog.byExecutable[executable] {
+			if !catalog.invocationOwnsFlags(toolID, invocation) {
+				continue
+			}
+			tools = appendUniqueString(tools, toolID)
+		}
+	}
+	sort.Strings(tools)
+	return tools
+}
+
+func (catalog ownershipCatalog) invocationOwnsFlags(toolID string, invocation ownedCommandInvocation) bool {
+	if !catalog.operationsOnly[toolID] {
+		return true
+	}
+	for _, operation := range catalog.classifyOperations([]ownedCommandInvocation{invocation}) {
+		if strings.HasPrefix(operation, toolID+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (catalog ownershipCatalog) taskForInvocations(invocations []ownedCommandInvocation) string {

@@ -70,6 +70,8 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, discove
 			}
 			session.Events[index].TargetCandidates = nil
 			session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
+			session.Events[index].OwnedFlags = ownership.classifyFlags(session.Events[index].CommandCandidates)
+			session.Events[index].OwnedFlagTools = ownership.classifyFlagTools(session.Events[index].CommandCandidates)
 			if session.Events[index].OperationTask == "" {
 				session.Events[index].OperationTask = ownership.taskForInvocations(session.Events[index].CommandCandidates)
 			}
@@ -236,11 +238,11 @@ func (store *sessionStore) replaceSession(
 		truncated, output_bytes, failure_reason, failure_context, input_tokens,
 		cached_input_tokens, uncached_input_tokens, output_tokens,
 		reasoning_tokens, total_tokens, selector_digests, owned_operations,
-		operation_task,
+		owned_flags, owned_flag_tools, operation_task,
 		operation_attribution_ambiguous,
 		operation_continues, targets, inline_bytes, concurrent_batch,
 		diagnostic_json, working_directories, in_repository_scope
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -253,6 +255,14 @@ func (store *sessionStore) replaceSession(
 		ownedOperations, err := json.Marshal(event.OwnedOperations)
 		if err != nil {
 			return fmt.Errorf("encode owned operations: %w", err)
+		}
+		ownedFlags, err := json.Marshal(event.OwnedFlags)
+		if err != nil {
+			return fmt.Errorf("encode owned flags: %w", err)
+		}
+		ownedFlagTools, err := json.Marshal(event.OwnedFlagTools)
+		if err != nil {
+			return fmt.Errorf("encode owned flag tools: %w", err)
 		}
 		targets, err := json.Marshal(event.Targets)
 		if err != nil {
@@ -300,6 +310,8 @@ func (store *sessionStore) replaceSession(
 			event.Tokens.TotalTokens,
 			string(selectorDigests),
 			string(ownedOperations),
+			string(ownedFlags),
+			string(ownedFlagTools),
 			event.OperationTask,
 			boolInt(event.OperationAttributionAmbiguous),
 			boolInt(event.OperationContinues),

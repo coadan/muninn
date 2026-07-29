@@ -150,6 +150,16 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		if len(eventOperations) == 0 {
 			eventOperations = ownership.classifyOperations(event.CommandCandidates)
 		}
+		eventFlags := event.OwnedFlags
+		eventFlagTools := event.OwnedFlagTools
+		if len(event.CommandCandidates) > 0 {
+			if len(eventFlags) == 0 {
+				eventFlags = ownership.classifyFlags(event.CommandCandidates)
+			}
+			if len(eventFlagTools) == 0 {
+				eventFlagTools = ownership.classifyFlagTools(event.CommandCandidates)
+			}
+		}
 		if event.Kind != sessionEventToolOutput {
 			episode.observe(event, tokenIncrement, eventOperations)
 		}
@@ -234,6 +244,15 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 					addCodexOwnedToolMetrics(record.OwnedToolUnmatched, ownedTool, event.OperationAttributionAmbiguous, 1, false, false, 0)
 				}
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
+			}
+			if !event.OperationAttributionAmbiguous {
+				for _, toolID := range eventFlagTools {
+					record.OwnedFlagCalls[toolID]++
+				}
+				for _, flag := range eventFlags {
+					record.OwnedFlags[flag]++
+					touchSessionActivity(record.Activity, "owned-flag", flag, event.OccurredAt)
+				}
 			}
 			ownedOperations := eventOperations
 			for _, operation := range ownedOperations {
@@ -432,6 +451,8 @@ func newCodexSessionRecord() codexSessionRecord {
 		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexToolMetrics{},
 		OwnedOperationAmbiguous:      map[string]codexToolMetrics{},
+		OwnedFlags:                   map[string]int{},
+		OwnedFlagCalls:               map[string]int{},
 		OwnedOperationTasks:          map[string]map[string]codexOwnedOperationMetrics{},
 		OwnedOperationFailureReasons: map[string]map[string]int{},
 		ReadTargets:                  map[string]codexTargetMetrics{},

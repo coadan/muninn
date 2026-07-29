@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 22
+const sessionStoreSchemaVersion = 24
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionStore struct {
@@ -152,6 +152,8 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			total_tokens INTEGER NOT NULL DEFAULT 0,
 			selector_digests TEXT NOT NULL DEFAULT '[]',
 			owned_operations TEXT NOT NULL DEFAULT '[]',
+			owned_flags TEXT NOT NULL DEFAULT '[]',
+			owned_flag_tools TEXT NOT NULL DEFAULT '[]',
 			operation_task TEXT NOT NULL DEFAULT '',
 			operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0,
 			operation_continues INTEGER NOT NULL DEFAULT 0,

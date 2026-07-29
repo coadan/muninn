@@ -46,6 +46,8 @@ type normalizedSessionEvent struct {
 	SelectorDigests               []string
 	CommandCandidates             []ownedCommandInvocation
 	OwnedOperations               []string
+	OwnedFlags                    []string
+	OwnedFlagTools                []string
 	OperationTask                 string
 	OperationAttributionAmbiguous bool
 	OperationContinues            bool

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -193,8 +194,8 @@ func TestSessionStoreIsolatesRepositoryDerivedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	startedAt := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
-	invocationA := []ownedCommandInvocation{{Executable: "runner", Args: []string{"a"}}}
-	invocationB := []ownedCommandInvocation{{Executable: "runner", Args: []string{"b"}}}
+	invocationA := []ownedCommandInvocation{{Executable: "runner", Args: []string{"a", "--json"}}}
+	invocationB := []ownedCommandInvocation{{Executable: "runner", Args: []string{"b", "--json"}}}
 	session := normalizedSession{
 		CWD: repositoryA,
 		Events: []normalizedSessionEvent{
@@ -335,6 +336,13 @@ func TestSessionStoreIsolatesRepositoryDerivedState(t *testing.T) {
 			report.Summary.OwnedOperations[want.operation].Calls != 1 ||
 			len(report.Summary.OwnedOperations) != 1 {
 			t.Fatalf("scope %s report=%#v", want.root, report.Summary)
+		}
+		toolID, _, _ := strings.Cut(want.operation, "/")
+		if got := report.Summary.OwnedFlags[toolID+"/json"]; got.Count != 1 || got.Sessions != 1 {
+			t.Fatalf("scope %s owned flag=%#v", want.root, got)
+		}
+		if got := report.Summary.OwnedFlagCalls[toolID]; got.Count != 1 || got.Sessions != 1 {
+			t.Fatalf("scope %s owned flag calls=%#v", want.root, got)
 		}
 	}
 }

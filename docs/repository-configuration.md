@@ -65,8 +65,12 @@ When an outer tool call bundles multiple commands, output and failures remain
 ambiguous rather than being charged to every matched operation. Frequent
 successful use is demand, not friction.
 
-Run with `--refresh` after changing operation patterns so cached source events
-are reclassified.
+For configured executables, Muninn also counts normalized long flag names
+without retaining values. A flag supplied on at least 80% of definite calls
+across multiple sessions becomes a candidate-default finding.
+
+Run with `--refresh` after changing owned tools or operation patterns so cached
+source events are reclassified.
 
 ## Suppress a signal
 

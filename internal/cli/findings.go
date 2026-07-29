@@ -64,6 +64,42 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	for _, owned := range config.OwnedTools {
 		ownedConfigByID[owned.ID] = owned
 	}
+	for target, metrics := range summary.OwnedFlags {
+		toolID, flag, found := strings.Cut(target, "/")
+		if !found {
+			continue
+		}
+		eligibleCalls := summary.OwnedFlagCalls[toolID]
+		if metrics.Count < 5 || metrics.Sessions < 2 || eligibleCalls.Count < 5 {
+			continue
+		}
+		frequency := ratio(float64(metrics.Count), float64(eligibleCalls.Count))
+		if frequency < 0.8 {
+			continue
+		}
+		findings = append(findings, sessionFinding{
+			Category: "default-candidate",
+			Control:  "local",
+			Title:    "frequently repeated CLI flag may belong in the default: " + toolID + " --" + flag,
+			Evidence: fmt.Sprintf("%s of %s definitely attributed %s calls (%.0f%%) supplied --%s across %s sessions",
+				formatCodexCount(int64(metrics.Count)),
+				formatCodexCount(int64(eligibleCalls.Count)),
+				toolID,
+				100*frequency,
+				flag,
+				formatCodexCount(int64(metrics.Sessions)),
+			),
+			Action:     "Review whether this option should become the default or be inferred from repository context; if the human default must remain different, provide a compact agent-facing mode for the repeated workflow.",
+			Count:      metrics.Count,
+			Sessions:   metrics.Sessions,
+			Target:     target,
+			LastSeen:   sessionFindingLastSeen(report, "owned-flag", target),
+			Lever:      "tooling",
+			Confidence: "medium",
+			Why:        "Repeatedly spelling the same option adds command complexity and leaves room for inconsistent invocations.",
+			score:      700 + metrics.Sessions*20 + metrics.Count,
+		})
+	}
 	for operation, metrics := range summary.OwnedOperations {
 		definiteCalls := max(metrics.Calls-metrics.AmbiguousCalls, 0)
 		repeated := verificationOwnedOperation(operation) &&
@@ -1247,7 +1283,7 @@ func sessionFindingLever(finding sessionFinding) (string, string) {
 		default:
 			return "source code", "medium"
 		}
-	case "discovery", "agent-interface", "output-cost":
+	case "discovery", "agent-interface", "default-candidate", "output-cost":
 		return "tooling", "medium"
 	case "session-loop":
 		switch {
@@ -1730,6 +1766,7 @@ func formatAgentInterfaceTransitions(transitions []workflowTransitionEvidence, l
 func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 	limits := map[string]int{
 		"agent-interface":       4,
+		"default-candidate":     6,
 		"code-structure":        6,
 		"instruction-discovery": 4,
 		"instruction-footprint": 1,
