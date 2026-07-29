@@ -54,6 +54,7 @@ type indexedCodexDescriptor struct {
 	OperationAttributionAmbiguous bool
 	EmitsSessionMarker            bool
 	ConcurrentBatch               bool
+	ConcurrentBatchSize           int
 	WorkingDirectories            []string
 }
 
@@ -147,13 +148,15 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				if name == "" {
 					name = "(unknown)"
 				}
+				concurrentBatchSize := codexConcurrentToolBatchSize(name, payload.Input)
 				descriptor := indexedCodexDescriptor{
 					codexToolCallDescriptor: codexToolCallDescriptor{Name: name},
 					OccurredAt:              timestamp,
 					SelectorDigests:         codexSelectorDigests(name, payload.Arguments, payload.Input),
 					CommandCandidates:       codexCommandInvocations(name, payload.Arguments, payload.Input),
 					EmitsSessionMarker:      codexEmitsExplicitSessionMarker(name, payload.Input),
-					ConcurrentBatch:         codexConcurrentToolBatch(name, payload.Input),
+					ConcurrentBatch:         concurrentBatchSize > 0,
+					ConcurrentBatchSize:     concurrentBatchSize,
 					WorkingDirectories:      codexToolWorkingDirectories(name, payload.Arguments, payload.Input),
 				}
 				descriptor.OperationAttributionAmbiguous = len(descriptor.CommandCandidates) > 1
@@ -203,6 +206,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					OwnedOperations:               descriptor.OwnedOperations,
 					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
 					ConcurrentBatch:               descriptor.ConcurrentBatch,
+					ConcurrentBatchSize:           descriptor.ConcurrentBatchSize,
 					TargetCandidates: append(
 						codexReadTargetCandidates(name, payload.Arguments, payload.Input),
 						codexEditTargetCandidates(name, payload.Input)...,
@@ -262,6 +266,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
 					OperationContinues:            len(continuationReferences) > 0,
 					ConcurrentBatch:               descriptor.ConcurrentBatch,
+					ConcurrentBatchSize:           descriptor.ConcurrentBatchSize,
 					Diagnostic:                    diagnostic,
 					WorkingDirectories:            descriptor.WorkingDirectories,
 				})

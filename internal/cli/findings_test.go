@@ -225,6 +225,9 @@ func TestCodexConcurrentToolBatchRecognizesBoundedAndCustomBatches(t *testing.T)
 	if !codexConcurrentToolBatch("exec", batch) {
 		t.Fatal("concurrent Code Mode batch was not recognized")
 	}
+	if size := codexConcurrentToolBatchSize("exec", batch); size != 2 {
+		t.Fatalf("concurrent batch size=%d want 2", size)
+	}
 	if codexConcurrentToolBatch("exec", `const result = await tools.exec_command({cmd:"one"});`) {
 		t.Fatal("single nested tool call was misclassified as a concurrent batch")
 	}
@@ -902,6 +905,7 @@ func TestConcurrentBatchOversizedOutputFindingPreservesBatching(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.OversizedOutputs["concurrent tool batch"] = codexOversizedOutputMetrics{
 		Calls: 2, OutputBytes: 75_000, MaxOutputBytes: 40_000, Sessions: 1,
+		NestedCalls: 5, MaxNestedCalls: 3,
 	}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	outputFindings, err := filterSessionFindings(findings, "output")
@@ -912,7 +916,11 @@ func TestConcurrentBatchOversizedOutputFindingPreservesBatching(t *testing.T) {
 	if finding.Title != "concurrent tool batches exceed the shared output budget" ||
 		finding.Confidence != "low" ||
 		!strings.Contains(finding.Action, "Keep independent calls concurrent") ||
-		!strings.Contains(finding.Action, "inspect every partial result") {
+		!strings.Contains(finding.Action, "inspect every partial result") ||
+		!strings.Contains(finding.Action, "12,000 visible tokens") ||
+		!strings.Contains(finding.Action, "about 4,000 tokens per result") ||
+		!strings.Contains(finding.Evidence, "5 nested calls averaged ~3,750 visible output tokens each") ||
+		!strings.Contains(finding.Evidence, "largest batch contained 3 calls") {
 		t.Fatalf("concurrent batch guidance mismatch: %#v", finding)
 	}
 }

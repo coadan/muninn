@@ -221,6 +221,8 @@ func addCodexOversizedOutputMetrics(target, addition map[string]codexOversizedOu
 		metrics.Calls += value.Calls
 		metrics.OutputBytes += value.OutputBytes
 		metrics.MaxOutputBytes = max(metrics.MaxOutputBytes, value.MaxOutputBytes)
+		metrics.NestedCalls += value.NestedCalls
+		metrics.MaxNestedCalls = max(metrics.MaxNestedCalls, value.MaxNestedCalls)
 		if value.Calls > 0 {
 			metrics.Sessions++
 		}

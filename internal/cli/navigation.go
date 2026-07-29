@@ -207,10 +207,17 @@ func codexRoutineCodeModeWrapper(input string) bool {
 }
 
 func codexConcurrentToolBatch(toolName, input string) bool {
+	return codexConcurrentToolBatchSize(toolName, input) > 0
+}
+
+func codexConcurrentToolBatchSize(toolName, input string) int {
 	if strings.ToLower(strings.TrimSpace(toolName)) != "exec" {
-		return false
+		return 0
 	}
 	matches := codexNestedToolCallPattern.FindAllStringSubmatch(input, -1)
-	return len(matches) >= 2 &&
-		(strings.Contains(input, "Promise.allSettled(") || strings.Contains(input, "Promise.all("))
+	if len(matches) < 2 ||
+		(!strings.Contains(input, "Promise.allSettled(") && !strings.Contains(input, "Promise.all(")) {
+		return 0
+	}
+	return len(matches)
 }

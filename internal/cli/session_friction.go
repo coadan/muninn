@@ -6,9 +6,15 @@ import (
 )
 
 const oversizedOutputMinimumBytes int64 = 30_000
+const concurrentBatchOutputBudgetTokens int64 = 12_000
+const concurrentBatchOutputMinimumBytes = 4 * concurrentBatchOutputBudgetTokens
 
 func recordOversizedOutput(record codexSessionRecord, event normalizedSessionEvent, ownedOperations []string) {
-	if event.OutputBytes < oversizedOutputMinimumBytes {
+	minimumBytes := oversizedOutputMinimumBytes
+	if event.ConcurrentBatch {
+		minimumBytes = concurrentBatchOutputMinimumBytes
+	}
+	if event.OutputBytes < minimumBytes {
 		return
 	}
 	if event.OperationAttributionAmbiguous {
@@ -22,6 +28,10 @@ func recordOversizedOutput(record codexSessionRecord, event normalizedSessionEve
 	metrics.Calls++
 	metrics.OutputBytes += event.OutputBytes
 	metrics.MaxOutputBytes = max(metrics.MaxOutputBytes, event.OutputBytes)
+	if event.ConcurrentBatch {
+		metrics.NestedCalls += event.ConcurrentBatchSize
+		metrics.MaxNestedCalls = max(metrics.MaxNestedCalls, event.ConcurrentBatchSize)
+	}
 	record.OversizedOutputs[context] = metrics
 	touchSessionActivity(record.Activity, "oversized-output", context, event.OccurredAt)
 }

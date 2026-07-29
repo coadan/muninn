@@ -28,7 +28,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.operation_task,
 		events.operation_attribution_ambiguous,
 		events.operation_continues, events.targets, events.inline_bytes,
-		events.concurrent_batch, events.diagnostic_json,
+		events.concurrent_batch, events.concurrent_batch_size,
+		events.diagnostic_json,
 		events.working_directories, events.in_repository_scope
 		FROM sessions
 		JOIN sources ON sources.id = sessions.source_id
@@ -68,6 +69,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			operationAttributionAmbiguous int
 			operationContinues            int
 			concurrentBatch               int
+			concurrentBatchSize           int
 			inRepositoryScope             int
 			targets                       string
 			diagnosticJSON                string
@@ -108,6 +110,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&targets,
 			&event.InlineBytes,
 			&concurrentBatch,
+			&concurrentBatchSize,
 			&diagnosticJSON,
 			&workingDirectories,
 			&inRepositoryScope,
@@ -133,6 +136,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		event.OperationAttributionAmbiguous = operationAttributionAmbiguous != 0
 		event.OperationContinues = operationContinues != 0
 		event.ConcurrentBatch = concurrentBatch != 0
+		event.ConcurrentBatchSize = concurrentBatchSize
 		event.InRepositoryScope = inRepositoryScope != 0
 		event.RepositoryScopeKnown = true
 		if diagnosticJSON != "" {

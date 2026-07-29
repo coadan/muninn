@@ -52,6 +52,7 @@ type normalizedSessionEvent struct {
 	OperationAttributionAmbiguous bool
 	OperationContinues            bool
 	ConcurrentBatch               bool
+	ConcurrentBatchSize           int
 	TargetCandidates              []string
 	Targets                       []string
 	InlineBytes                   int64

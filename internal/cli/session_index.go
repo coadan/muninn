@@ -241,8 +241,9 @@ func (store *sessionStore) replaceSession(
 		owned_flags, owned_flag_tools, operation_task,
 		operation_attribution_ambiguous,
 		operation_continues, targets, inline_bytes, concurrent_batch,
+		concurrent_batch_size,
 		diagnostic_json, working_directories, in_repository_scope
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -318,6 +319,7 @@ func (store *sessionStore) replaceSession(
 			string(targets),
 			event.InlineBytes,
 			boolInt(event.ConcurrentBatch),
+			event.ConcurrentBatchSize,
 			diagnosticJSON,
 			string(workingDirectories),
 			boolInt(event.InRepositoryScope),
