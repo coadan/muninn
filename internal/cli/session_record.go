@@ -160,6 +160,13 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				eventFlagTools = ownership.classifyFlagTools(event.CommandCandidates)
 			}
 		}
+		if event.OperationTask == "" {
+			event.OperationTask = ownership.taskForInvocations(event.CommandCandidates)
+		}
+		if event.OperationTask == "" {
+			eventCWD := eventRepositoryWorkingDirectory(event, session.CWD, workspaceRoot)
+			event.OperationTask = repositoryTaskForWorkingDirectory(eventCWD, workspaceRoot)
+		}
 		if event.Kind != sessionEventToolOutput {
 			episode.observe(event, tokenIncrement, eventOperations)
 		}
