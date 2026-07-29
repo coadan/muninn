@@ -130,7 +130,10 @@ Muninn separately compares cohorts with the same agent kind, model, reasoning
 effort, and derived task family when each period has at least three completed
 tasks in that cohort. Each matched cohort has equal weight in the aggregate
 efficiency direction, so one high-volume task family does not dominate it. The
-quality comparison further requires at least five deliveries in both periods
+default comparison classifies stable intervention IDs as resolved, persistent,
+or new. Use `--details` when the lower-level finding churn is useful for
+diagnosis.
+Quality comparison further requires at least five deliveries in both periods
 and only uses task families also present in the matched performance comparison.
 The quality-adjusted verdict prefers these equal-weight matched quality rates
 and distinguishes faster work with stable quality from work shifted into

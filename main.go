@@ -718,7 +718,12 @@ func cmdAnalyze(root string, args []string) error {
 	}
 	printCodexSessionInsights(report, config, *limit, outputSelection.View)
 	if baseline != nil {
-		printSessionTrend(*baseline, report, "previous non-overlapping "+formatTrendLookback(lookbackSeconds))
+		printSessionTrend(
+			*baseline,
+			report,
+			"previous non-overlapping "+formatTrendLookback(lookbackSeconds),
+			outputSelection.View == "details",
+		)
 	}
 	return nil
 }

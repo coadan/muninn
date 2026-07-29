@@ -56,7 +56,12 @@ func formatTrendLookback(seconds int64) string {
 	return duration.String()
 }
 
-func printSessionTrend(baseline, current codexSessionInsightsReport, baselineLabel string) {
+func printSessionTrend(
+	baseline,
+	current codexSessionInsightsReport,
+	baselineLabel string,
+	includeFindingTrend bool,
+) {
 	base := baseline.Summary
 	now := current.Summary
 	baseRework := base.DeliveryRework
@@ -258,7 +263,10 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, baselineLab
 		qualityAdjustedPerformanceVerdict(baseline, current, matchedMetrics, matchedQuality),
 	)
 	printDiagnosticEffectiveness(baseline.Diagnostics, current.Diagnostics)
-	printFindingTrend(baseline.Findings, current.Findings)
+	printInterventionTrend(baseline.Interventions, current.Interventions)
+	if includeFindingTrend {
+		printFindingTrend(baseline.Findings, current.Findings)
+	}
 }
 
 type matchedQualityCohort struct {
@@ -790,6 +798,61 @@ func ratio(numerator, denominator float64) float64 {
 		return 0
 	}
 	return numerator / denominator
+}
+
+func printInterventionTrend(baseline, current []sessionIntervention) {
+	baselineByID := map[string]sessionIntervention{}
+	currentByID := map[string]sessionIntervention{}
+	for _, intervention := range baseline {
+		baselineByID[intervention.ID] = intervention
+	}
+	for _, intervention := range current {
+		currentByID[intervention.ID] = intervention
+	}
+	var resolved, introduced, persistent []sessionIntervention
+	for id, intervention := range baselineByID {
+		if _, exists := currentByID[id]; exists {
+			persistent = append(persistent, intervention)
+		} else {
+			resolved = append(resolved, intervention)
+		}
+	}
+	for id, intervention := range currentByID {
+		if _, exists := baselineByID[id]; !exists {
+			introduced = append(introduced, intervention)
+		}
+	}
+	fmt.Printf("\nIntervention trend: %s resolved, %s persistent, %s new.\n",
+		formatCodexCount(int64(len(resolved))),
+		formatCodexCount(int64(len(persistent))),
+		formatCodexCount(int64(len(introduced))),
+	)
+	printInterventionTrendRows("Resolved", resolved, 4)
+	printInterventionTrendRows("New", introduced, 4)
+}
+
+func printInterventionTrendRows(label string, interventions []sessionIntervention, limit int) {
+	if len(interventions) == 0 {
+		return
+	}
+	sort.Slice(interventions, func(i, j int) bool {
+		return interventions[i].ID < interventions[j].ID
+	})
+	rows := interventions
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Printf("%s interventions:\n", label)
+	for _, intervention := range rows {
+		fmt.Printf("- [%s priority] %s · %s\n",
+			intervention.Priority,
+			intervention.ID,
+			intervention.Title,
+		)
+	}
+	if len(rows) < len(interventions) {
+		fmt.Printf("- ... %d more\n", len(interventions)-len(rows))
+	}
 }
 
 func printFindingTrend(baseline, current []sessionFinding) {

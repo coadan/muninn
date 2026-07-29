@@ -36,6 +36,52 @@ func TestPreviousLookbackWindowRejectsMismatchedScope(t *testing.T) {
 	}
 }
 
+func TestInterventionTrendUsesStableInterventionIdentity(t *testing.T) {
+	baseline := []sessionIntervention{
+		{
+			ID:       "intervention/workflow/verification",
+			Title:    "old evidence title",
+			Priority: "high",
+		},
+		{
+			ID:       "intervention/tool/old",
+			Title:    "remove old friction",
+			Priority: "medium",
+		},
+	}
+	current := []sessionIntervention{
+		{
+			ID:       "intervention/workflow/verification",
+			Title:    "new evidence title",
+			Priority: "highest",
+		},
+		{
+			ID:       "intervention/tool/new",
+			Title:    "fix new friction",
+			Priority: "high",
+		},
+	}
+	out, err := captureStdout(t, func() error {
+		printInterventionTrend(baseline, current)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Intervention trend: 1 resolved, 1 persistent, 1 new.",
+		"intervention/tool/old",
+		"intervention/tool/new",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("intervention trend missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "old evidence title") || strings.Contains(out, "new evidence title") {
+		t.Fatalf("persistent intervention should not be printed as churn:\n%s", out)
+	}
+}
+
 func TestCompletedTaskTrendUsesTokenSplitForCurrentSchemas(t *testing.T) {
 	baseline := codexSessionInsightsReport{SchemaVersion: 30}
 	current := codexSessionInsightsReport{SchemaVersion: 30}
