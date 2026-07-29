@@ -703,6 +703,28 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsRequiresMaterialRapidPolling(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.RapidPolls["tests"] = codexWaitMetrics{
+		Calls:    131,
+		Seconds:  587,
+		Sessions: 72,
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("low-density rapid polls produced finding: %#v", findings)
+	}
+
+	report.Summary.RapidPolls["tests"] = codexWaitMetrics{
+		Calls:    216,
+		Seconds:  900,
+		Sessions: 72,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Title != "rapid continuation polling: tests" {
+		t.Fatalf("material rapid polling finding missing: %#v", findings)
+	}
+}
+
 func TestBuildSessionFindingsDoesNotTreatRootAsTaskCohort(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Tasks = []codexTaskInsights{{
