@@ -21,7 +21,14 @@ func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
 		Failures:  []diagnosticFailureAggregate{{Fingerprint: "privacy-safe"}},
 		Passes:    []diagnosticPassAggregate{{Target: "privacy-safe"}},
 	}
-	report.Interventions = []sessionIntervention{{ID: "intervention/tool/example"}}
+	report.Interventions = []sessionIntervention{
+		{ID: "intervention/tool/example"},
+		{ID: "intervention/tool/two"},
+		{ID: "intervention/tool/three"},
+		{ID: "intervention/tool/four"},
+		{ID: "intervention/tool/five"},
+		{ID: "intervention/tool/six"},
+	}
 	report.Findings = []sessionFinding{{Signal: "owned-tool/example"}}
 
 	compactJSON, err := json.Marshal(analysisJSONPayload(report, false))
@@ -34,14 +41,22 @@ func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
 		`"sessions":3`,
 		`"toolCalls":12`,
 		`"failureFingerprints":1`,
+		`"totalInterventions":6`,
 		`"intervention/tool/example"`,
-		`"owned-tool/example"`,
 	} {
 		if !strings.Contains(compact, want) {
 			t.Fatalf("compact JSON missing %q: %s", want, compact)
 		}
 	}
-	for _, unwanted := range []string{`"tasks"`, `"phases"`, `"toolCallsByName"`, `"privacy-safe"`, `"focusEvidence"`} {
+	for _, unwanted := range []string{
+		`"tasks"`,
+		`"phases"`,
+		`"toolCallsByName"`,
+		`"privacy-safe"`,
+		`"focusEvidence"`,
+		`"findings"`,
+		`"intervention/tool/six"`,
+	} {
 		if strings.Contains(compact, unwanted) {
 			t.Fatalf("compact JSON retained detailed field %q: %s", unwanted, compact)
 		}
@@ -52,7 +67,14 @@ func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	full := string(fullJSON)
-	for _, want := range []string{`"detailLevel":"full"`, `"tasks"`, `"phases"`, `"toolCallsByName"`} {
+	for _, want := range []string{
+		`"detailLevel":"full"`,
+		`"tasks"`,
+		`"phases"`,
+		`"toolCallsByName"`,
+		`"owned-tool/example"`,
+		`"intervention/tool/six"`,
+	} {
 		if !strings.Contains(full, want) {
 			t.Fatalf("full JSON missing %q", want)
 		}

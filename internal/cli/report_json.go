@@ -1,5 +1,7 @@
 package cli
 
+const compactInterventionLimit = 5
+
 type compactSessionSummary struct {
 	FilesScanned           int                  `json:"filesScanned"`
 	FilesUnreadable        int                  `json:"filesUnreadable"`
@@ -41,21 +43,21 @@ type compactDiagnosticSummary struct {
 }
 
 type compactSessionInsightsReport struct {
-	SchemaVersion int                            `json:"schemaVersion"`
-	DetailLevel   string                         `json:"detailLevel"`
-	Provider      string                         `json:"provider"`
-	GeneratedAt   string                         `json:"generatedAt"`
-	Since         string                         `json:"since"`
-	AnalysisScope sessionAnalysisScope           `json:"analysisScope"`
-	Instructions  repositoryInstructionFootprint `json:"instructions"`
-	Summary       compactSessionSummary          `json:"summary"`
-	Outcomes      compactOutcomeSummary          `json:"outcomes"`
-	Profiles      modelEffortAnalysis            `json:"profiles"`
-	Delegation    delegationAnalysis             `json:"delegation"`
-	Diagnostics   compactDiagnosticSummary       `json:"diagnostics"`
-	Interventions []sessionIntervention          `json:"interventions"`
-	Findings      []sessionFinding               `json:"findings"`
-	FocusEvidence *discoveryFocusEvidence        `json:"focusEvidence,omitempty"`
+	SchemaVersion      int                            `json:"schemaVersion"`
+	DetailLevel        string                         `json:"detailLevel"`
+	Provider           string                         `json:"provider"`
+	GeneratedAt        string                         `json:"generatedAt"`
+	Since              string                         `json:"since"`
+	AnalysisScope      sessionAnalysisScope           `json:"analysisScope"`
+	Instructions       repositoryInstructionFootprint `json:"instructions"`
+	Summary            compactSessionSummary          `json:"summary"`
+	Outcomes           compactOutcomeSummary          `json:"outcomes"`
+	Profiles           modelEffortAnalysis            `json:"profiles"`
+	Delegation         delegationAnalysis             `json:"delegation"`
+	Diagnostics        compactDiagnosticSummary       `json:"diagnostics"`
+	TotalInterventions int                            `json:"totalInterventions"`
+	Interventions      []sessionIntervention          `json:"interventions"`
+	FocusEvidence      *discoveryFocusEvidence        `json:"focusEvidence,omitempty"`
 }
 
 func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
@@ -112,12 +114,22 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 			FailureFingerprints: len(report.Diagnostics.Failures),
 			PassedTargets:       len(report.Diagnostics.Passes),
 		},
-		Interventions: report.Interventions,
-		Findings:      report.Findings,
+		TotalInterventions: len(report.Interventions),
+		Interventions:      boundedInterventions(report.Interventions, compactInterventionLimit),
 	}
 	if report.AnalysisScope.Focus == "discovery" {
 		evidence := buildDiscoveryFocusEvidence(summary, report.WorkspaceRoot, 5)
 		compact.FocusEvidence = &evidence
 	}
 	return compact
+}
+
+func boundedInterventions(
+	interventions []sessionIntervention,
+	limit int,
+) []sessionIntervention {
+	if limit <= 0 || len(interventions) <= limit {
+		return interventions
+	}
+	return interventions[:limit]
 }
