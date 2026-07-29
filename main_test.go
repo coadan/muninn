@@ -177,6 +177,37 @@ func TestCodexRolloutLineNeededSkipsConversationContent(t *testing.T) {
 	}
 }
 
+func TestParseCodexSessionUsesPrivacySafeRolloutLineage(t *testing.T) {
+	sessionsDir := t.TempDir()
+	childID := "provider-child-secret"
+	parentID := "provider-parent-secret"
+	sessionPath := writeCodexSessionFixture(t, sessionsDir, "lineage", []any{
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:00Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":               childID,
+				"parent_thread_id": parentID,
+				"cwd":              "/workspace",
+			},
+		},
+	})
+
+	session, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatalf("parse Codex lineage: %v", err)
+	}
+	if session.AgentKind != "subagent" ||
+		session.LineageKey != ownershipSelectorDigest("provider-thread", childID) ||
+		session.ParentLineageKey != ownershipSelectorDigest("provider-thread", parentID) {
+		t.Fatalf("rollout lineage mismatch: %#v", session)
+	}
+	encoded, _ := json.Marshal(session)
+	if strings.Contains(string(encoded), childID) || strings.Contains(string(encoded), parentID) {
+		t.Fatalf("provider identifiers escaped privacy-safe lineage: %s", encoded)
+	}
+}
+
 func TestCodexToolOutputFailedUsesStatusBlockOnly(t *testing.T) {
 	raw := json.RawMessage(`[
 		{"type":"input_text","text":"Script completed\nWall time 0.1 seconds"},
