@@ -12,8 +12,8 @@ Choose a horizon that matches the work being evaluated:
 ```bash
 muninn analyze --repo .
 muninn analyze --repo . --since 24h
-muninn analyze --repo . --since 1d --compare previous --human
-muninn analyze --repo . --since 7d --compare previous --human
+muninn analyze --repo . --since 1d --compare previous
+muninn analyze --repo . --since 7d --compare previous
 muninn analyze --repo . --since-commit HEAD~3
 muninn analyze --repo . --task task-id
 muninn analyze --repo . --since 14d --include-archived
@@ -30,21 +30,17 @@ tool, owner, discovery workflow, or verification workflow are consolidated.
 Each intervention includes a `focus` value that can be passed directly to
 `muninn analyze --focus <value>` for the bounded analytical view that owns it.
 
-- `--details` selects the full JSON report or adds analytical rankings and
-  constituent findings to `--human`.
-- `--human` selects readable terminal output and is required by
-  `--compare previous`.
-- `--limit` bounds human detail rows and only applies with `--human`.
+- `--details` selects the full JSON report.
 - `--focus friction` explicitly selects the broad default queue.
 - `--focus tooling`, `instructions`, `interface`, `structure`, `discovery`,
   `failures`, `loops`, `output`, or `quality` selects one concern.
 - `--focus loops` includes verification repair loops as well as session and
   interface loops.
 - `--focus discovery` adds repository-relative read targets and the
-  highest-output bundled search/read shapes. Human rows follow `--limit`;
-  compact JSON includes the top five as `focusEvidence`. Targets inside a
-  managed product repository expose `repository` and a path relative to that
-  repository; disposable cache and worktree prefixes remain internal.
+  highest-output bundled search/read shapes. Compact JSON includes the top five
+  as `focusEvidence`. Targets inside a managed product repository expose
+  `repository` and a path relative to that repository; disposable cache and
+  worktree prefixes remain internal.
 - `--operation <tool-or-operation>` drills into one configured locally
   controlled tool or operation.
 
@@ -54,7 +50,6 @@ muninn analyze --repo . --focus structure
 muninn analyze --repo . --operation repository-cli
 muninn analyze --repo . --operation repository-cli/test --details
 muninn analyze --repo . --details
-muninn analyze --repo . --human
 ```
 
 Operation associations are not physical tool-call counts: one outer call can

@@ -1,5 +1,7 @@
 package cli
 
+import "sort"
+
 const compactInterventionLimit = 5
 
 type compactSessionSummary struct {
@@ -58,6 +60,43 @@ type compactSessionInsightsReport struct {
 	TotalInterventions int                            `json:"totalInterventions"`
 	Interventions      []sessionIntervention          `json:"interventions"`
 	FocusEvidence      *discoveryFocusEvidence        `json:"focusEvidence,omitempty"`
+}
+
+type comparisonSessionInsightsReport struct {
+	SchemaVersion     int                   `json:"schemaVersion"`
+	DetailLevel       string                `json:"detailLevel"`
+	Comparison        string                `json:"comparison"`
+	BaselineLabel     string                `json:"baselineLabel"`
+	Baseline          any                   `json:"baseline"`
+	Current           any                   `json:"current"`
+	Cohorts           comparisonCohortsJSON `json:"cohorts"`
+	QualityVerdict    string                `json:"qualityAdjustedVerdict"`
+	InterventionTrend interventionTrendJSON `json:"interventionTrend"`
+}
+
+type comparisonCohortsJSON struct {
+	Performance []performanceCohortComparisonJSON `json:"performance"`
+	Quality     []qualityCohortComparisonJSON     `json:"quality"`
+}
+
+type performanceCohortComparisonJSON struct {
+	Baseline taskPerformanceCohort `json:"baseline"`
+	Current  taskPerformanceCohort `json:"current"`
+}
+
+type qualityCohortComparisonJSON struct {
+	Baseline taskQualityCohort `json:"baseline"`
+	Current  taskQualityCohort `json:"current"`
+}
+
+type interventionTrendJSON struct {
+	SufficientEvidence bool                  `json:"sufficientEvidence"`
+	MinimumSessions    int                   `json:"minimumSessions"`
+	BaselineSessions   int                   `json:"baselineSessions"`
+	CurrentSessions    int                   `json:"currentSessions"`
+	Resolved           []sessionIntervention `json:"resolved"`
+	Persistent         []sessionIntervention `json:"persistent"`
+	New                []sessionIntervention `json:"new"`
 }
 
 func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
@@ -122,6 +161,135 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 		compact.FocusEvidence = &evidence
 	}
 	return compact
+}
+
+func comparisonJSONPayload(
+	baseline,
+	current codexSessionInsightsReport,
+	detailed bool,
+) comparisonSessionInsightsReport {
+	detailLevel := "summary"
+	if detailed {
+		detailLevel = "full"
+	}
+	performance := matchedPerformanceCohorts(
+		baseline.Outcomes.PerformanceCohorts,
+		current.Outcomes.PerformanceCohorts,
+		3,
+	)
+	quality := matchedQualityCohorts(
+		baseline.Outcomes.QualityCohorts,
+		current.Outcomes.QualityCohorts,
+		performance,
+		5,
+	)
+	return comparisonSessionInsightsReport{
+		SchemaVersion: current.SchemaVersion,
+		DetailLevel:   detailLevel,
+		Comparison:    "previous",
+		BaselineLabel: "previous non-overlapping " + formatTrendLookback(current.AnalysisScope.LookbackSeconds),
+		Baseline:      analysisJSONPayload(baseline, detailed),
+		Current:       analysisJSONPayload(current, detailed),
+		Cohorts:       comparisonCohortPayload(performance, quality),
+		QualityVerdict: qualityAdjustedPerformanceVerdict(
+			baseline,
+			current,
+			matchedPerformanceTrendMetrics(performance),
+			matchedQualityTrendMetrics(quality),
+		),
+		InterventionTrend: buildInterventionTrendJSON(baseline, current, detailed),
+	}
+}
+
+func comparisonCohortPayload(
+	performance []matchedPerformanceCohort,
+	quality []matchedQualityCohort,
+) comparisonCohortsJSON {
+	payload := comparisonCohortsJSON{
+		Performance: make([]performanceCohortComparisonJSON, 0, len(performance)),
+		Quality:     make([]qualityCohortComparisonJSON, 0, len(quality)),
+	}
+	for _, cohort := range performance {
+		payload.Performance = append(payload.Performance, performanceCohortComparisonJSON{
+			Baseline: cohort.Baseline,
+			Current:  cohort.Current,
+		})
+	}
+	for _, cohort := range quality {
+		payload.Quality = append(payload.Quality, qualityCohortComparisonJSON{
+			Baseline: cohort.Baseline,
+			Current:  cohort.Current,
+		})
+	}
+	return payload
+}
+
+func buildInterventionTrendJSON(
+	baseline,
+	current codexSessionInsightsReport,
+	detailed bool,
+) interventionTrendJSON {
+	trend := interventionTrendJSON{
+		SufficientEvidence: baseline.Summary.Sessions >= minimumTrendSessions &&
+			current.Summary.Sessions >= minimumTrendSessions,
+		MinimumSessions:  minimumTrendSessions,
+		BaselineSessions: baseline.Summary.Sessions,
+		CurrentSessions:  current.Summary.Sessions,
+		Resolved:         []sessionIntervention{},
+		Persistent:       []sessionIntervention{},
+		New:              []sessionIntervention{},
+	}
+	if !trend.SufficientEvidence {
+		return trend
+	}
+	baselineByID := map[string]sessionIntervention{}
+	currentByID := map[string]sessionIntervention{}
+	for _, intervention := range baseline.Interventions {
+		baselineByID[intervention.ID] = intervention
+	}
+	for _, intervention := range current.Interventions {
+		currentByID[intervention.ID] = intervention
+	}
+	for id, intervention := range baselineByID {
+		if currentIntervention, exists := currentByID[id]; exists {
+			trend.Persistent = append(trend.Persistent, currentIntervention)
+		} else {
+			trend.Resolved = append(trend.Resolved, intervention)
+		}
+	}
+	for id, intervention := range currentByID {
+		if _, exists := baselineByID[id]; !exists {
+			trend.New = append(trend.New, intervention)
+		}
+	}
+	trend.Resolved = sortInterventionTrendJSON(trend.Resolved, detailed)
+	trend.Persistent = sortInterventionTrendJSON(trend.Persistent, detailed)
+	trend.New = sortInterventionTrendJSON(trend.New, detailed)
+	return trend
+}
+
+func sortInterventionTrendJSON(
+	interventions []sessionIntervention,
+	detailed bool,
+) []sessionIntervention {
+	sort.Slice(interventions, func(i, j int) bool {
+		leftPriority := interventionTrendPriority(interventions[i])
+		rightPriority := interventionTrendPriority(interventions[j])
+		if leftPriority != rightPriority {
+			return leftPriority > rightPriority
+		}
+		if interventions[i].FindingCount != interventions[j].FindingCount {
+			return interventions[i].FindingCount > interventions[j].FindingCount
+		}
+		if interventions[i].score != interventions[j].score {
+			return interventions[i].score > interventions[j].score
+		}
+		return interventions[i].ID < interventions[j].ID
+	})
+	if detailed {
+		return interventions
+	}
+	return boundedInterventions(interventions, compactInterventionLimit)
 }
 
 func boundedInterventions(

@@ -91,14 +91,13 @@ Examples:
   muninn
   muninn analyze --repo .
   muninn analyze --repo /path/to/repository --since 24h
-  muninn analyze --repo . --since 1d --compare previous --human
+  muninn analyze --repo . --since 1d --compare previous
   muninn analyze --repo . --since-commit HEAD~3
   muninn analyze --repo . --task my-worktree
   muninn analyze --repo . --since 14d --include-archived
   muninn analyze --repo . --since 24h --operation repository-cli
   muninn analyze --repo . --focus structure
   muninn analyze --repo . --details
-  muninn analyze --repo . --human
   muninn failures repository-cli/test --repo . --since 14d
 `)
 }
