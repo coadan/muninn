@@ -111,3 +111,48 @@ func TestSessionRecordExcludesWorkInAnotherRepository(t *testing.T) {
 		t.Fatal("final in-repository completion was not retained")
 	}
 }
+
+func TestSessionRecordIncludesWorkEnteredFromAnotherRepository(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "muninn")
+	outside := filepath.Join(filepath.Dir(root), "bwb")
+	startedAt := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      outside,
+		Events: []normalizedSessionEvent{
+			{
+				Sequence: 1, OccurredAt: startedAt, Kind: sessionEventToolCall,
+				ToolName: "exec_command", WorkingDirectories: []string{root},
+			},
+			{
+				Sequence: 2, OccurredAt: startedAt.Add(time.Second),
+				CallOccurredAt: startedAt, Kind: sessionEventToolOutput,
+				ToolName: "exec_command", WorkingDirectories: []string{root},
+				OutputBytes: 40,
+			},
+			{
+				Sequence: 3, OccurredAt: startedAt.Add(2 * time.Second),
+				Kind: sessionEventToken, Tokens: normalizedTokenUsage{TotalTokens: 100},
+			},
+			{Sequence: 4, OccurredAt: startedAt.Add(3 * time.Second), Kind: sessionEventComplete},
+		},
+	}
+
+	record, err := sessionRecordFromNormalized(
+		session,
+		root,
+		startedAt.Add(-time.Minute),
+		startedAt.Add(time.Hour),
+		ownershipCatalog{},
+	)
+	if err != nil {
+		t.Fatalf("sessionRecordFromNormalized: %v", err)
+	}
+	if record.CWD != root || record.Task != "(root)" {
+		t.Fatalf("cross-origin repository identity=(%q, %q)", record.CWD, record.Task)
+	}
+	if record.ToolCalls != 1 || record.ToolOutputBytes != 40 ||
+		record.Tokens.TotalTokens != 100 || !record.Completed {
+		t.Fatalf("cross-origin metrics=%#v", record)
+	}
+}

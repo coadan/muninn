@@ -87,3 +87,53 @@ func eventRepositoryScope(
 	}
 	return false, false
 }
+
+func normalizedSessionTouchesRepository(session normalizedSession, repositoryRoot string) bool {
+	inside, err := pathInsideRoot(repositoryRoot, session.CWD)
+	if err != nil {
+		return false
+	}
+	inRepositoryScope := inside
+	for _, event := range session.Events {
+		if eventInside, explicit := eventRepositoryScope(event, session.CWD, repositoryRoot); explicit {
+			inRepositoryScope = eventInside
+		}
+		if inRepositoryScope {
+			return true
+		}
+	}
+	return false
+}
+
+func markRepositoryEventScope(session *normalizedSession, repositoryRoot string) {
+	inside, err := pathInsideRoot(repositoryRoot, session.CWD)
+	if err != nil {
+		inside = false
+	}
+	for index := range session.Events {
+		event := &session.Events[index]
+		if eventInside, explicit := eventRepositoryScope(*event, session.CWD, repositoryRoot); explicit {
+			inside = eventInside
+		}
+		event.InRepositoryScope = inside
+	}
+}
+
+func eventRepositoryWorkingDirectory(
+	event normalizedSessionEvent,
+	sessionCWD,
+	repositoryRoot string,
+) string {
+	for _, directory := range event.WorkingDirectories {
+		if !filepath.IsAbs(directory) {
+			directory = filepath.Join(sessionCWD, directory)
+		}
+		if inside, err := pathInsideRoot(repositoryRoot, directory); err == nil && inside {
+			return filepath.Clean(directory)
+		}
+	}
+	if inside, err := pathInsideRoot(repositoryRoot, sessionCWD); err == nil && inside {
+		return sessionCWD
+	}
+	return repositoryRoot
+}

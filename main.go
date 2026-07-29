@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 56
+const codexSessionInsightsSchemaVersion = 57
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -491,7 +491,7 @@ func cmdAnalyze(root string, args []string) error {
 	providerName := fs.String("provider", defaultSessionProvider, sessionProviderFlagHelp())
 	sessionsDir := fs.String("sessions-dir", "", "override the selected provider's default session directory")
 	repoRoot := root
-	fs.StringVar(&repoRoot, "repo", root, "only include sessions whose cwd is inside this repository")
+	fs.StringVar(&repoRoot, "repo", root, "only include session activity attributed to this repository")
 	taskFilter := fs.String("task", "", "only include sessions attributed to this exact worktree/task ID")
 	configPath := fs.String("config", "", "repository config path (default: <repo>/.muninn.json when present)")
 	includeArchived := fs.Bool("include-archived", false, "also scan provider archives when supported")
