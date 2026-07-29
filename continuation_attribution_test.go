@@ -73,3 +73,94 @@ func TestContinuationCallDoesNotDuplicateCommandOrOwnedOperationCalls(t *testing
 		t.Fatalf("physical continuation metrics=%#v", got)
 	}
 }
+
+func TestSessionRecordFindsAbandonedYieldedOperation(t *testing.T) {
+	root := t.TempDir()
+	generatedAt := time.Date(2026, 7, 24, 18, 0, 0, 0, time.UTC)
+	startedAt := generatedAt.Add(-time.Hour)
+	session := normalizedSession{
+		Provider: "codex",
+		CWD:      root,
+		Events: []normalizedSessionEvent{
+			{
+				OccurredAt:         startedAt,
+				CallOccurredAt:     startedAt.Add(-time.Second),
+				Kind:               sessionEventToolOutput,
+				ToolName:           "exec_command",
+				Family:             "other shell",
+				OwnedOperations:    []string{"bwb/api-start"},
+				OperationContinues: true,
+			},
+		},
+	}
+
+	record, err := sessionRecordFromNormalized(
+		session,
+		root,
+		generatedAt.Add(-2*time.Hour),
+		generatedAt,
+		ownershipCatalog{},
+	)
+	if err != nil {
+		t.Fatalf("sessionRecordFromNormalized: %v", err)
+	}
+	if got := record.AbandonedContinuations["bwb/api-start"]; got != 1 {
+		t.Fatalf("abandoned continuations=%#v want one bwb/api-start operation", record.AbandonedContinuations)
+	}
+}
+
+func TestSessionRecordClearsTerminalContinuationAndIgnoresRecentLiveWork(t *testing.T) {
+	root := t.TempDir()
+	generatedAt := time.Date(2026, 7, 24, 18, 0, 0, 0, time.UTC)
+	startedAt := generatedAt.Add(-time.Minute)
+	events := []normalizedSessionEvent{
+		{
+			OccurredAt:         startedAt,
+			CallOccurredAt:     startedAt.Add(-time.Second),
+			Kind:               sessionEventToolOutput,
+			ToolName:           "exec_command",
+			Family:             "tests",
+			OperationContinues: true,
+		},
+	}
+	session := normalizedSession{Provider: "codex", CWD: root, Events: events}
+
+	live, err := sessionRecordFromNormalized(
+		session,
+		root,
+		generatedAt.Add(-time.Hour),
+		generatedAt,
+		ownershipCatalog{},
+	)
+	if err != nil {
+		t.Fatalf("live sessionRecordFromNormalized: %v", err)
+	}
+	if len(live.AbandonedContinuations) != 0 {
+		t.Fatalf("recent live operation was classified as abandoned: %#v", live.AbandonedContinuations)
+	}
+
+	session.Events = append(session.Events, normalizedSessionEvent{
+		OccurredAt:     startedAt.Add(10 * time.Second),
+		CallOccurredAt: startedAt.Add(9 * time.Second),
+		Kind:           sessionEventToolOutput,
+		ToolName:       "write_stdin",
+		Family:         "tests",
+	})
+	session.Events = append(session.Events, normalizedSessionEvent{
+		OccurredAt: startedAt.Add(11 * time.Second),
+		Kind:       sessionEventComplete,
+	})
+	terminal, err := sessionRecordFromNormalized(
+		session,
+		root,
+		generatedAt.Add(-time.Hour),
+		generatedAt,
+		ownershipCatalog{},
+	)
+	if err != nil {
+		t.Fatalf("terminal sessionRecordFromNormalized: %v", err)
+	}
+	if len(terminal.AbandonedContinuations) != 0 {
+		t.Fatalf("terminal continuation remained pending: %#v", terminal.AbandonedContinuations)
+	}
+}

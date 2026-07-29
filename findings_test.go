@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,18 @@ func TestCodexInlineOrchestrationExcludesEdits(t *testing.T) {
 	}
 	if got := codexInlineOrchestrationBytes("exec_command", `{"cmd":"go test ./..."}`, ""); got != 0 {
 		t.Fatalf("small shell command was misclassified: %d", got)
+	}
+}
+
+func TestCodexInlineOrchestrationFlagsVeryLongCLIProgram(t *testing.T) {
+	command := "node --import tsx --env-file=.env.local -e '" +
+		strings.Repeat("const value = await import(\"./worker/provider.ts\");", 48) + "'"
+	arguments := `{"cmd":` + strconv.Quote(command) + `}`
+	if got := codexInlineOrchestrationBytes("exec_command", arguments, ""); got != int64(len(command)) {
+		t.Fatalf("very long CLI program bytes=%d want %d", got, len(command))
+	}
+	if got := codexShellCommandFamily("exec_command", arguments, ""); got != "inline runtime" {
+		t.Fatalf("very long CLI program family=%q want inline runtime", got)
 	}
 }
 
@@ -115,6 +128,54 @@ func TestBuildSessionFindingsFlagsOneVeryLongInlineToolCall(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsFlagsOneVeryLongCLIInput(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.InlineOrchestrationCalls = 1
+	report.Summary.InlineOrchestrationBytes = 2300
+	report.Summary.InlineOrchestrationMaxBytes = 2300
+	report.Summary.InlineOrchestrationSessions = 1
+	report.Summary.InlineOrchestrationByTool["exec_command"] = codexInlineMetrics{
+		Calls:    1,
+		Sessions: 1,
+		Bytes:    2300,
+		MaxBytes: 2300,
+	}
+	report.Summary.InlineOrchestrationByFamily["inline runtime"] = codexInlineMetrics{
+		Calls:    1,
+		Sessions: 1,
+		Bytes:    2300,
+		MaxBytes: 2300,
+	}
+	report.Summary.InlineOrchestrationByOwner["void-cli/diagnostic"] = codexInlineMetrics{
+		Calls:    1,
+		Sessions: 1,
+		Bytes:    2300,
+		MaxBytes: 2300,
+	}
+	report.Tasks = []codexTaskInsights{{
+		Task:                        "pressure-proof",
+		InlineOrchestrationCalls:    1,
+		InlineOrchestrationBytes:    2300,
+		InlineOrchestrationMaxBytes: 2300,
+		InlineOrchestrationSessions: 1,
+		InlineOrchestrationByTool:   map[string]codexInlineMetrics{},
+		InlineOrchestrationByFamily: map[string]codexInlineMetrics{},
+		InlineOrchestrationByOwner:  map[string]codexInlineMetrics{},
+	}}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 ||
+		findings[0].Title != "very long CLI input is rebuilding an inspection workflow" ||
+		findings[0].Control != "local" ||
+		findings[0].Lever != "tooling" ||
+		findings[0].Target != "void-cli/diagnostic" ||
+		!strings.Contains(findings[0].Evidence, "exec_command 1 calls/2,300 bytes") ||
+		!strings.Contains(findings[0].Evidence, "families: inline runtime 1 calls/2,300 bytes") ||
+		!strings.Contains(findings[0].Evidence, "ownership: void-cli/diagnostic 1 calls/2,300 bytes") ||
+		!strings.Contains(findings[0].Evidence, "top task cohort pressure-proof: 1 calls/2,300 bytes") {
+		t.Fatalf("very long CLI input finding mismatch: %#v", findings)
+	}
+}
+
 func TestBuildSessionFindingsShowsDominantWorkflowTransitions(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.CrossCallTransitions = map[string]codexTransitionMetrics{
@@ -182,6 +243,28 @@ func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing
 	}
 	if findings[0].LastSeen != latestFriction.Format(time.RFC3339) {
 		t.Fatalf("last seen=%q want latest friction %s", findings[0].LastSeen, latestFriction)
+	}
+}
+
+func TestBuildSessionFindingsFlagsRepeatedSuccessfulOwnedOperation(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.OwnedOperations["repo/check-worker"] = codexOwnedOperationMetrics{
+		Calls: 112, Sessions: 1,
+	}
+	report.Summary.Activity[sessionActivityKey("owned-operation", "repo/check-worker")] = time.Now()
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 ||
+		!strings.Contains(findings[0].Title, "repeated excessively") ||
+		!strings.Contains(findings[0].Evidence, "112.0 calls per session") ||
+		!strings.Contains(findings[0].Action, "once at the verification boundary") {
+		t.Fatalf("repeated successful operation finding mismatch: %#v", findings)
+	}
+
+	report.Summary.OwnedOperations["repo/check-worker"] = codexOwnedOperationMetrics{
+		Calls: 39, Sessions: 1,
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("ordinary successful operation volume became friction: %#v", findings)
 	}
 }
 
@@ -316,6 +399,14 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 		Seconds:  40,
 		Sessions: 1,
 	}
+	report.Summary.AbandonedContinuations["bwb/publish"] = codexOccurrenceMetrics{
+		Count:    3,
+		Sessions: 2,
+	}
+	report.Summary.AbandonedContinuations["tests"] = codexOccurrenceMetrics{
+		Count:    16,
+		Sessions: 16,
+	}
 	report.Summary.ProgressStalls["mixed shell"] = codexWaitMetrics{
 		Calls:    20,
 		Seconds:  900,
@@ -323,6 +414,7 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 	}
 	config := defaultRepositoryConfig()
 	config.OwnedTools = []ownedToolConfig{{ID: "bwb"}}
+	config.Actions.YieldedOperation = "Use `bwb test` and resume it to completion."
 	findings := buildSessionFindings(report, config)
 	bySignal := map[string]sessionFinding{}
 	for _, finding := range findings {
@@ -350,6 +442,19 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 		!strings.Contains(finding.Action, "30-second wait") ||
 		!strings.Contains(finding.Evidence, "8 continuation polls") {
 		t.Fatalf("rapid polling finding mismatch: %#v", finding)
+	}
+	abandonedSignal := "agent-interface/abandoned-continuation/bwb/publish"
+	if finding, ok := bySignal[abandonedSignal]; !ok ||
+		!strings.Contains(finding.Evidence, "3 yielded operations") ||
+		!strings.Contains(finding.Action, "explicitly terminate") {
+		t.Fatalf("abandoned continuation finding mismatch: %#v", finding)
+	}
+	genericAbandonedSignal := "agent-interface/abandoned-continuation/tests"
+	if finding, ok := bySignal[genericAbandonedSignal]; !ok ||
+		finding.Control != "repository" ||
+		!strings.Contains(finding.Action, "`bwb test`") ||
+		!strings.Contains(finding.Evidence, "16 yielded operations") {
+		t.Fatalf("generic abandoned continuation finding mismatch: %#v", finding)
 	}
 }
 
@@ -653,6 +758,33 @@ func TestBuildSessionFindingsIdentifiesEffectiveConfiguredCheck(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsFlagsExpensiveVerificationRepairLoop(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries: 1,
+		Sessions:   1,
+		VerificationChecks: map[string]verificationMetrics{
+			"repo/browser-test": {
+				Deliveries:            1,
+				FailedRuns:            6,
+				FailFixPassDeliveries: 1,
+			},
+			"repo/unit-test": {
+				Deliveries:            1,
+				FailedRuns:            2,
+				FailFixPassDeliveries: 1,
+			},
+		},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "verification-loop" ||
+		findings[0].Target != "repo/browser-test" ||
+		!strings.Contains(findings[0].Evidence, "6 failed runs before 1 fail-fix-pass deliveries") ||
+		!strings.Contains(findings[0].Action, "repeat one boundary") {
+		t.Fatalf("verification repair-loop finding mismatch: %#v", findings)
+	}
+}
+
 func TestBuildSessionFindingsAttributesDownstreamFailureToMissingFreshCheck(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.DownstreamQuality = downstreamQualityMetrics{
@@ -704,6 +836,128 @@ func TestBuildSessionFindingsFlagsCompletedTaskCostTail(t *testing.T) {
 	if len(findings) != 1 || findings[0].Category != "task-cost" ||
 		findings[0].Lever != "unknown" {
 		t.Fatalf("task-cost tail finding mismatch: %#v", findings)
+	}
+}
+
+func TestBuildSessionFindingsTurnsActionableHotspotsIntoStableSignals(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Outcomes.FileHotspots = []fileHotspotMetrics{
+		{
+			Target:          "src/expensive.ts",
+			CompletedTasks:  6,
+			EditCalls:       12,
+			TaskShare:       0.3,
+			ToolRoundtrips:  outcomeDistribution{P50: 70, P90: 140},
+			DurationSeconds: outcomeDistribution{P50: 900, P90: 1800},
+			Classification:  "expensive-owner",
+		},
+		{
+			Target:              "src/rework.ts",
+			CompletedTasks:      5,
+			EditCalls:           9,
+			PostReviewEditCalls: 2,
+			FollowUpEdits:       1,
+			Classification:      "review/rework",
+		},
+		{
+			Target:             "src/risky.ts",
+			CompletedTasks:     4,
+			EditCalls:          8,
+			DownstreamFailures: 2,
+			Classification:     "downstream-risk",
+		},
+		{
+			Target:         "src/popular.ts",
+			CompletedTasks: 20,
+			EditCalls:      40,
+			Classification: "healthy-demand",
+		},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 3 {
+		t.Fatalf("findings=%#v want three actionable hotspots", findings)
+	}
+	byTarget := map[string]sessionFinding{}
+	for _, finding := range findings {
+		byTarget[finding.Target] = finding
+	}
+	if _, exists := byTarget["src/popular.ts"]; exists {
+		t.Fatalf("healthy demand produced a finding: %#v", findings)
+	}
+	expensive := byTarget["src/expensive.ts"]
+	if expensive.Signal != "code-structure/file-cost/src/expensive.ts" ||
+		expensive.Confidence != "medium" ||
+		!strings.Contains(expensive.Action, "split only") {
+		t.Fatalf("expensive-owner finding mismatch: %#v", expensive)
+	}
+	rework := byTarget["src/rework.ts"]
+	if rework.Signal != "delivery-quality/file-rework/src/rework.ts" ||
+		rework.Confidence != "high" {
+		t.Fatalf("rework finding mismatch: %#v", rework)
+	}
+	risky := byTarget["src/risky.ts"]
+	if risky.Signal != "delivery-quality/file-failure/src/risky.ts" ||
+		risky.Confidence != "medium" {
+		t.Fatalf("downstream-risk finding mismatch: %#v", risky)
+	}
+}
+
+func TestConsolidateOwnerFindingsPromotesCorroboratedPrimary(t *testing.T) {
+	findings := []sessionFinding{
+		{
+			Category: "code-structure", Title: "repeated navigation into a current source owner",
+			Target: "src/runtime.ts", Signal: "code-structure/src/runtime.ts",
+			Confidence: "high", Evidence: "navigation", score: 400,
+		},
+		{
+			Category: "code-structure", Title: "repeated edits correlate with high task cost",
+			Target: "src/runtime.ts", Signal: "code-structure/file-cost/src/runtime.ts",
+			Confidence: "medium", Evidence: "cost", score: 600,
+		},
+		{
+			Category: "delivery-quality", Title: "frequently edited target requires repeated rework",
+			Target: "src/runtime.ts", Signal: "delivery-quality/file-rework/src/runtime.ts",
+			Confidence: "medium", Evidence: "quality", score: 700,
+		},
+	}
+	got := consolidateOwnerFindings(findings)
+	if len(got) != 1 {
+		t.Fatalf("consolidated findings=%#v want one", got)
+	}
+	finding := got[0]
+	if finding.Category != "delivery-quality" ||
+		finding.Signal != "owner/src/runtime.ts" ||
+		finding.Confidence != "high" ||
+		len(finding.Supporting) != 3 ||
+		!strings.Contains(finding.Why, "high agent task cost") ||
+		!strings.Contains(finding.Evidence, "corroborating signals") {
+		t.Fatalf("consolidated owner finding mismatch: %#v", finding)
+	}
+}
+
+func TestConsolidateOwnerFindingsDemotesUncorroboratedNavigation(t *testing.T) {
+	got := consolidateOwnerFindings([]sessionFinding{{
+		Category:   "code-structure",
+		Title:      "repeated navigation into a current source owner",
+		Target:     "src/runtime.ts",
+		Confidence: "high",
+		score:      400,
+	}})
+	if len(got) != 1 || got[0].Confidence != "medium" || got[0].score != 325 ||
+		!strings.Contains(got[0].Why, "discovery evidence only") {
+		t.Fatalf("isolated navigation calibration mismatch: %#v", got)
+	}
+}
+
+func TestFilterSessionFindingsKeepsConsolidatedSupportingCategory(t *testing.T) {
+	finding := sessionFinding{
+		Category:   "delivery-quality",
+		Signal:     "owner/src/runtime.ts",
+		Supporting: []string{"code-structure/file-cost/src/runtime.ts"},
+	}
+	got, err := filterSessionFindings([]sessionFinding{finding}, "structure")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("structure focus lost consolidated supporting signal: findings=%#v err=%v", got, err)
 	}
 }
 

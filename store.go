@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 13
+const sessionStoreSchemaVersion = 20
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionNormalizer interface {
@@ -226,6 +226,8 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			targets TEXT NOT NULL DEFAULT '[]',
 			inline_bytes INTEGER NOT NULL DEFAULT 0,
 			concurrent_batch INTEGER NOT NULL DEFAULT 0,
+			diagnostic_json TEXT NOT NULL DEFAULT '',
+			working_directories TEXT NOT NULL DEFAULT '[]',
 			UNIQUE(session_id, sequence)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sources_provider_path ON sources(provider, source_path)`,
@@ -270,7 +272,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 	reindexSources := err == nil && existing != fmt.Sprint(sessionStoreSchemaVersion)
 	if err == nil && existing != fmt.Sprint(sessionStoreSchemaVersion) {
 		switch existing {
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12":
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19":
 			var concurrentBatchColumn int
 			if err := store.db.QueryRowContext(
 				ctx,
@@ -281,6 +283,30 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			if concurrentBatchColumn == 0 {
 				if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN concurrent_batch INTEGER NOT NULL DEFAULT 0`); err != nil {
 					return fmt.Errorf("migrate Muninn concurrent batch state: %w", err)
+				}
+			}
+			var diagnosticColumn int
+			if err := store.db.QueryRowContext(
+				ctx,
+				`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'diagnostic_json'`,
+			).Scan(&diagnosticColumn); err != nil {
+				return fmt.Errorf("inspect Muninn diagnostic state: %w", err)
+			}
+			if diagnosticColumn == 0 {
+				if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN diagnostic_json TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("migrate Muninn diagnostic state: %w", err)
+				}
+			}
+			var workingDirectoriesColumn int
+			if err := store.db.QueryRowContext(
+				ctx,
+				`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'working_directories'`,
+			).Scan(&workingDirectoriesColumn); err != nil {
+				return fmt.Errorf("inspect Muninn working directory state: %w", err)
+			}
+			if workingDirectoriesColumn == 0 {
+				if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN working_directories TEXT NOT NULL DEFAULT '[]'`); err != nil {
+					return fmt.Errorf("migrate Muninn working directory state: %w", err)
 				}
 			}
 		}
@@ -358,6 +384,14 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
 	case existing == "12":
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
+	case existing == "13":
+		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+			return fmt.Errorf("finish Muninn store migration: %w", err)
+		}
+	case existing == "14" || existing == "15" || existing == "16" || existing == "17" || existing == "18" || existing == "19":
 		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
 			return fmt.Errorf("finish Muninn store migration: %w", err)
 		}
@@ -534,8 +568,9 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		reasoning_tokens, total_tokens, selector_digests, owned_operations,
 		operation_task,
 		operation_attribution_ambiguous,
-		operation_continues, targets, inline_bytes, concurrent_batch
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		operation_continues, targets, inline_bytes, concurrent_batch,
+		diagnostic_json, working_directories
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -553,9 +588,21 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		if err != nil {
 			return fmt.Errorf("encode repository targets: %w", err)
 		}
+		workingDirectories, err := json.Marshal(event.WorkingDirectories)
+		if err != nil {
+			return fmt.Errorf("encode working directories: %w", err)
+		}
 		callOccurredAt := int64(0)
 		if !event.CallOccurredAt.IsZero() {
 			callOccurredAt = event.CallOccurredAt.UnixNano()
+		}
+		diagnosticJSON := ""
+		if event.Diagnostic != nil {
+			raw, err := json.Marshal(event.Diagnostic)
+			if err != nil {
+				return fmt.Errorf("encode diagnostic failure: %w", err)
+			}
+			diagnosticJSON = string(raw)
 		}
 		if _, err := statement.ExecContext(
 			ctx,
@@ -589,6 +636,8 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 			string(targets),
 			event.InlineBytes,
 			boolInt(event.ConcurrentBatch),
+			diagnosticJSON,
+			string(workingDirectories),
 		); err != nil {
 			return fmt.Errorf("insert indexed session event: %w", err)
 		}
@@ -623,7 +672,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.owned_operations, events.operation_task,
 		events.operation_attribution_ambiguous,
 		events.operation_continues, events.targets, events.inline_bytes,
-		events.concurrent_batch
+		events.concurrent_batch, events.diagnostic_json,
+		events.working_directories
 		FROM sessions
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
@@ -659,6 +709,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			operationContinues            int
 			concurrentBatch               int
 			targets                       string
+			diagnosticJSON                string
+			workingDirectories            string
 		)
 		err := rows.Scan(
 			&sessionID,
@@ -693,6 +745,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&targets,
 			&event.InlineBytes,
 			&concurrentBatch,
+			&diagnosticJSON,
+			&workingDirectories,
 		)
 		if err != nil {
 			return report, fmt.Errorf("read indexed session event: %w", err)
@@ -715,10 +769,17 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		event.OperationAttributionAmbiguous = operationAttributionAmbiguous != 0
 		event.OperationContinues = operationContinues != 0
 		event.ConcurrentBatch = concurrentBatch != 0
+		if diagnosticJSON != "" {
+			var diagnostic normalizedDiagnosticObservation
+			if json.Unmarshal([]byte(diagnosticJSON), &diagnostic) == nil {
+				event.Diagnostic = &diagnostic
+			}
+		}
 		_ = json.Unmarshal([]byte(selectorDigests), &event.SelectorDigests)
 		_ = json.Unmarshal([]byte(ownedOperations), &event.OwnedOperations)
 		event.OperationTask = operationTask
 		_ = json.Unmarshal([]byte(targets), &event.Targets)
+		_ = json.Unmarshal([]byte(workingDirectories), &event.WorkingDirectories)
 		session.Events = append(session.Events, event)
 	}
 	if err := rows.Err(); err != nil {
@@ -757,30 +818,45 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int64, since time.Time) ([]normalizedSessionEvent, error) {
 	bySequence := map[int]normalizedSessionEvent{}
 	queries := []string{
-		`SELECT sequence, occurred_at_ns, kind, input_tokens, cached_input_tokens,
-			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens
+		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
+			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
+			working_directories
 		 FROM events
 		 WHERE session_id = ? AND kind = 'token' AND occurred_at_ns < ?
 		 ORDER BY sequence DESC LIMIT 1`,
-		`SELECT sequence, occurred_at_ns, kind, input_tokens, cached_input_tokens,
-			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens
+		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
+			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
+			working_directories
 		 FROM events
 		 WHERE session_id = ? AND occurred_at_ns < ?
+		 ORDER BY sequence DESC LIMIT 1`,
+		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
+			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
+			working_directories
+		 FROM events
+		 WHERE session_id = ? AND occurred_at_ns < ?
+		   AND (
+		     working_directories <> '[]'
+		     OR (kind = 'tool_call' AND tool_name IN ('exec', 'exec_command'))
+		   )
 		 ORDER BY sequence DESC LIMIT 1`,
 	}
 	for _, query := range queries {
 		event := normalizedSessionEvent{}
 		var occurredAtNS int64
+		var workingDirectories string
 		err := store.db.QueryRowContext(ctx, query, sessionID, since.UnixNano()).Scan(
 			&event.Sequence,
 			&occurredAtNS,
 			&event.Kind,
+			&event.ToolName,
 			&event.Tokens.InputTokens,
 			&event.Tokens.CachedInputTokens,
 			&event.Tokens.UncachedInputTokens,
 			&event.Tokens.OutputTokens,
 			&event.Tokens.ReasoningTokens,
 			&event.Tokens.TotalTokens,
+			&workingDirectories,
 		)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
@@ -789,6 +865,7 @@ func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int
 			return nil, fmt.Errorf("read indexed analysis boundary: %w", err)
 		}
 		event.OccurredAt = time.Unix(0, occurredAtNS).UTC()
+		_ = json.Unmarshal([]byte(workingDirectories), &event.WorkingDirectories)
 		bySequence[event.Sequence] = event
 	}
 	boundaries := make([]normalizedSessionEvent, 0, len(bySequence))

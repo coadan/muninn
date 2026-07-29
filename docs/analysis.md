@@ -65,12 +65,19 @@ Muninn separates activity that is often conflated:
 - actionable progress stalls, expected waits, and rapid continuation polling;
 - test outcomes after the latest edit and before delivery;
 - oversized output, truncation, repeated failures, and long inline scripts;
+- structured Heimdal failure fingerprints, phases, diagnostic availability,
+  and post-failure cost by model and effort;
 - root-agent and delegated work, including coordination and overlap;
 - repository navigation, repeated reads, and instruction footprint;
 - explicit privacy-safe friction feedback from agents or people.
 
 Findings include a stable signal ID, likely improvement lever, confidence, and
 recent supporting activity. Counts alone do not establish causality.
+
+Failed Heimdal reports are routed by evidence: fixture startup failures point
+to tooling, executed-test failures to source code, and test-selection failures
+to tests or instructions. Recurring fingerprints become findings; one-off
+failures remain available in `--details` and JSON.
 
 ## Compare adjacent periods
 
@@ -88,15 +95,50 @@ progress stalls normalized by completed tool tasks. Quality comparison includes
 pre-delivery test evidence, deliveries requiring review-driven fixes,
 review-to-edit cycles, downstream failures, follow-up edits, recovery, and
 reverts. Rate directions require at least ten observations in both periods.
-The periods can still contain different task or model mixes, so the result is
-observational rather than causal.
+Muninn separately compares cohorts with the same agent kind, model, reasoning
+effort, and derived task family when each period has at least three completed
+tasks in that cohort. Each matched cohort has equal weight in the aggregate
+efficiency direction, so one high-volume task family does not dominate it. The
+quality comparison further requires at least five deliveries in both periods
+and only uses task families also present in the matched performance comparison.
+The quality-adjusted verdict prefers these equal-weight matched quality rates
+and distinguishes faster work with stable quality from work shifted into
+review, failure, follow-up edits, or reverts. It falls back to repository-wide
+quality rates when matched delivery evidence is insufficient.
+
+Diagnostic fingerprints are compared by post-failure fresh tokens, tool calls,
+and elapsed time per occurrence. States are `improving`, `unchanged`,
+`regressed`, `new`, `resolved`, or `not-observed`. `resolved` requires a
+current passed Heimdal report for the same rehashed test target; disappearance
+alone is `not-observed`.
+
+Task families are privacy-safe derived labels based on owned targets and
+operation families; prompts and raw commands are not retained. Even matched
+periods are observational rather than causal because task difficulty can still
+vary inside a cohort. If matched evidence is unavailable, the verdict falls
+back to aggregate task medians.
 
 `--details` also reports frequently edited files with their completed-task
 share, edit calls, roundtrip and duration distributions, and post-review edit
-count. Edit frequency alone is demand, not friction. Use the table to find
-targets where demand also correlates with high task cost or review rework;
-do not restructure a healthy frequently edited owner solely because it is
-popular.
+and downstream-failure counts. Each hotspot is classified as healthy demand,
+an expensive owner, review/rework, or downstream risk. Edit frequency alone is
+demand, not friction; do not restructure a healthy frequently edited owner
+solely because it is popular.
+
+Actionable hotspot classes also feed `--findings`. Expensive owners require at
+least three completed tasks and a median of at least 50 roundtrips. Rework and
+downstream-risk findings require at least two attributed observations. Healthy
+demand never creates a finding. Each finding has a stable target-specific
+signal so an intervention can be suppressed, compared, or observed as resolved
+without conflating it with ordinary navigation findings for the same file.
+
+When multiple findings point to the same exact file owner, Muninn reports one
+primary owner finding. Delivery quality outranks task cost, which outranks
+navigation-only evidence; every component signal ID remains visible as a
+supporting signal. Corroboration raises impact and confidence and adds a
+concise `Why this matters` explanation. An isolated repeated-navigation signal
+is retained but demoted to medium confidence until cost or quality evidence
+supports it.
 
 ## Local index
 

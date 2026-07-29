@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 32
+const codexSessionInsightsSchemaVersion = 44
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -68,11 +68,14 @@ type codexTaskInsights struct {
 	InlineOrchestrationMaxBytes  int64                                        `json:"inlineOrchestrationMaxBytes"`
 	InlineOrchestrationSessions  int                                          `json:"inlineOrchestrationSessions"`
 	InlineOrchestrationByTool    map[string]codexInlineMetrics                `json:"inlineOrchestrationByTool"`
+	InlineOrchestrationByFamily  map[string]codexInlineMetrics                `json:"inlineOrchestrationByFamily"`
+	InlineOrchestrationByOwner   map[string]codexInlineMetrics                `json:"inlineOrchestrationByOwner"`
 	FailureReasons               map[string]int                               `json:"failureReasons"`
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 	RapidPolls                   map[string]codexWaitMetrics                  `json:"rapidPolls"`
+	AbandonedContinuations       map[string]codexOccurrenceMetrics            `json:"abandonedContinuations"`
 	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
 	DeliveryRework               deliveryReworkMetrics                        `json:"deliveryRework"`
 	DownstreamQuality            downstreamQualityMetrics                     `json:"downstreamQuality"`
@@ -167,11 +170,14 @@ type codexSessionInsightsSummary struct {
 	InlineOrchestrationMaxBytes  int64                                        `json:"inlineOrchestrationMaxBytes"`
 	InlineOrchestrationSessions  int                                          `json:"inlineOrchestrationSessions"`
 	InlineOrchestrationByTool    map[string]codexInlineMetrics                `json:"inlineOrchestrationByTool"`
+	InlineOrchestrationByFamily  map[string]codexInlineMetrics                `json:"inlineOrchestrationByFamily"`
+	InlineOrchestrationByOwner   map[string]codexInlineMetrics                `json:"inlineOrchestrationByOwner"`
 	FailureReasons               map[string]int                               `json:"failureReasons"`
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 	RapidPolls                   map[string]codexWaitMetrics                  `json:"rapidPolls"`
+	AbandonedContinuations       map[string]codexOccurrenceMetrics            `json:"abandonedContinuations"`
 	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
 	DeliveryRework               deliveryReworkMetrics                        `json:"deliveryRework"`
 	DownstreamQuality            downstreamQualityMetrics                     `json:"downstreamQuality"`
@@ -194,6 +200,7 @@ type codexSessionInsightsReport struct {
 	Outcomes       completionEpisodeAnalysis      `json:"outcomes"`
 	Profiles       modelEffortAnalysis            `json:"profiles"`
 	Delegation     delegationAnalysis             `json:"delegation"`
+	Diagnostics    diagnosticFailureAnalysis      `json:"diagnostics"`
 	taskEpisodes   []codexTaskEpisode
 	sessionRecords []codexSessionRecord
 	operationTasks map[string]map[string]codexOwnedOperationMetrics
@@ -242,16 +249,21 @@ type codexSessionRecord struct {
 	InlineOrchestrationBytes     int64
 	InlineOrchestrationMaxBytes  int64
 	InlineOrchestrationByTool    map[string]codexInlineMetrics
+	InlineOrchestrationByFamily  map[string]codexInlineMetrics
+	InlineOrchestrationByOwner   map[string]codexInlineMetrics
 	FailureReasons               map[string]int
 	FailureContexts              map[string]map[string]int
 	ProgressStalls               map[string]codexWaitMetrics
 	ExpectedWaits                map[string]codexWaitMetrics
 	RapidPolls                   map[string]codexWaitMetrics
+	AbandonedContinuations       map[string]int
 	OversizedOutputs             map[string]codexOversizedOutputMetrics
 	DeliveryRework               deliveryReworkMetrics
 	DownstreamQuality            downstreamQualityMetrics
 	Activity                     map[string]time.Time
 	TaskEpisodes                 []codexTaskEpisode
+	DiagnosticFailures           []diagnosticFailureEpisode
+	DiagnosticPasses             []normalizedDiagnosticObservation
 }
 
 type codexToolCallDescriptor struct {
@@ -298,6 +310,7 @@ type repositoryConfig struct {
 		CodeStructure       string `json:"codeStructure"`
 		SessionLoop         string `json:"sessionLoop"`
 		InlineOrchestration string `json:"inlineOrchestration"`
+		YieldedOperation    string `json:"yieldedOperation"`
 	} `json:"actions"`
 	OwnedTools []ownedToolConfig `json:"ownedTools"`
 }
@@ -310,6 +323,7 @@ func defaultRepositoryConfig() repositoryConfig {
 	config.Actions.CodeStructure = "Inspect whether this owner mixes responsibilities; split or add a stable routed entry point when the repeated reads reflect real ownership boundaries."
 	config.Actions.SessionLoop = "Checkpoint progress, start a focused continuation, and remove repeated rediscovery or validation loops from the repository workflow."
 	config.Actions.InlineOrchestration = "Extract the repeated orchestration into a tested repository helper or agent-facing CLI command."
+	config.Actions.YieldedOperation = "Use the repository's bounded command for this workflow, resume every yielded process to a terminal result, and explicitly terminate work that should not continue."
 	return config
 }
 
@@ -353,6 +367,9 @@ func loadRepositoryConfig(repoRoot, explicit string) (repositoryConfig, error) {
 	}
 	if strings.TrimSpace(decoded.Actions.InlineOrchestration) != "" {
 		config.Actions.InlineOrchestration = strings.TrimSpace(decoded.Actions.InlineOrchestration)
+	}
+	if strings.TrimSpace(decoded.Actions.YieldedOperation) != "" {
+		config.Actions.YieldedOperation = strings.TrimSpace(decoded.Actions.YieldedOperation)
 	}
 	if err := validateOwnedToolConfig(decoded.OwnedTools); err != nil {
 		return repositoryConfig{}, fmt.Errorf("parse Muninn config %s: %w", path, err)
@@ -1084,11 +1101,14 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
 			ReadTargets:                  map[string]codexTargetMetrics{},
 			InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
+			InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
+			InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
 			FailureReasons:               map[string]int{},
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 			ProgressStalls:               map[string]codexWaitMetrics{},
 			ExpectedWaits:                map[string]codexWaitMetrics{},
 			RapidPolls:                   map[string]codexWaitMetrics{},
+			AbandonedContinuations:       map[string]codexOccurrenceMetrics{},
 			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 			Activity:                     map[string]time.Time{},
 		},
@@ -1114,9 +1134,12 @@ func finishSessionInsightsReport(report *codexSessionInsightsReport, taskMap map
 	report.Outcomes.FileHotspots = analyzeFileHotspots(
 		report.taskEpisodes,
 		report.Summary.DeliveryRework.ReworkTargets,
+		report.Summary.DownstreamQuality,
 	)
+	report.Outcomes.QualityCohorts = analyzeTaskQualityCohorts(report.sessionRecords)
 	report.Profiles = analyzeModelEffortProfiles(report.sessionRecords)
 	report.Delegation = analyzeDelegation(report.sessionRecords)
+	report.Diagnostics = analyzeDiagnosticFailures(report.sessionRecords)
 }
 
 func parseCodexSession(path, workspaceRoot string, since, generatedAt time.Time) (codexSessionRecord, error) {
@@ -1454,6 +1477,26 @@ func codexShellSegmentFamily(tokens []string) string {
 		}
 	case "pytest":
 		return "tests"
+	case "node", "deno", "bun":
+		for _, token := range lowerTokens[1:] {
+			if token == "-e" || token == "--eval" || token == "-p" || token == "--print" {
+				return "inline runtime"
+			}
+		}
+	case "python", "python3", "ruby":
+		for _, token := range lowerTokens[1:] {
+			if token == "-c" || token == "-e" {
+				return "inline runtime"
+			}
+		}
+	case "sqlite3", "psql", "duckdb":
+		return "database query CLI"
+	case "spacetime":
+		for _, token := range lowerTokens[1:] {
+			if token == "sql" {
+				return "database query CLI"
+			}
+		}
 	case "cargo":
 		if len(lowerTokens) > 1 && lowerTokens[1] == "test" {
 			return "tests"
@@ -1885,12 +1928,19 @@ func codexToolFailureReason(statusText string) string {
 		strings.Contains(preview, "unknown flag") ||
 		strings.Contains(preview, "unrecognized option"):
 		return "unsupported command option"
+	case strings.Contains(preview, "cannot combine --table with named views"):
+		return "unsupported command combination"
+	case strings.Contains(preview, "specify --playthrough latest or an exact id"):
+		return "ambiguous playthrough selection"
+	case strings.Contains(preview, "no diagnostic snapshot"):
+		return "missing diagnostic evidence"
 	case strings.Contains(preview, "address already in use") ||
 		strings.Contains(preview, "port already in use") ||
 		strings.Contains(preview, "bind: address in use"):
 		return "port collision"
 	case strings.Contains(preview, "connection refused") ||
-		strings.Contains(preview, "emulator unavailable"):
+		strings.Contains(preview, "emulator unavailable") ||
+		strings.Contains(preview, "spacetimedb is not running"):
 		return "local service unavailable"
 	case strings.Contains(preview, "http 502") ||
 		strings.Contains(preview, "http 503") ||
@@ -2010,6 +2060,8 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	summary.InlineOrchestrationBytes += record.InlineOrchestrationBytes
 	summary.InlineOrchestrationMaxBytes = max(summary.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
 	addCodexInlineMetrics(summary.InlineOrchestrationByTool, record.InlineOrchestrationByTool)
+	addCodexInlineMetrics(summary.InlineOrchestrationByFamily, record.InlineOrchestrationByFamily)
+	addCodexInlineMetrics(summary.InlineOrchestrationByOwner, record.InlineOrchestrationByOwner)
 	if record.InlineOrchestrationCalls > 0 {
 		summary.InlineOrchestrationSessions++
 	}
@@ -2020,6 +2072,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexWaitMetrics(summary.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(summary.ExpectedWaits, record.ExpectedWaits)
 	addCodexWaitMetrics(summary.RapidPolls, record.RapidPolls)
+	addCodexOccurrenceMetrics(summary.AbandonedContinuations, record.AbandonedContinuations)
 	addCodexOversizedOutputMetrics(summary.OversizedOutputs, record.OversizedOutputs)
 	addDeliveryReworkMetrics(&summary.DeliveryRework, record.DeliveryRework)
 	addDownstreamQualityMetrics(&summary.DownstreamQuality, record.DownstreamQuality)
@@ -2038,11 +2091,14 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
 			ReadTargets:                  map[string]codexTargetMetrics{},
 			InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
+			InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
+			InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
 			FailureReasons:               map[string]int{},
 			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 			ProgressStalls:               map[string]codexWaitMetrics{},
 			ExpectedWaits:                map[string]codexWaitMetrics{},
 			RapidPolls:                   map[string]codexWaitMetrics{},
+			AbandonedContinuations:       map[string]codexOccurrenceMetrics{},
 			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 			Activity:                     map[string]time.Time{},
 		}
@@ -2083,6 +2139,8 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	task.InlineOrchestrationBytes += record.InlineOrchestrationBytes
 	task.InlineOrchestrationMaxBytes = max(task.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
 	addCodexInlineMetrics(task.InlineOrchestrationByTool, record.InlineOrchestrationByTool)
+	addCodexInlineMetrics(task.InlineOrchestrationByFamily, record.InlineOrchestrationByFamily)
+	addCodexInlineMetrics(task.InlineOrchestrationByOwner, record.InlineOrchestrationByOwner)
 	if record.InlineOrchestrationCalls > 0 {
 		task.InlineOrchestrationSessions++
 	}
@@ -2093,6 +2151,7 @@ func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[str
 	addCodexWaitMetrics(task.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(task.ExpectedWaits, record.ExpectedWaits)
 	addCodexWaitMetrics(task.RapidPolls, record.RapidPolls)
+	addCodexOccurrenceMetrics(task.AbandonedContinuations, record.AbandonedContinuations)
 	addCodexOversizedOutputMetrics(task.OversizedOutputs, record.OversizedOutputs)
 	addDeliveryReworkMetrics(&task.DeliveryRework, record.DeliveryRework)
 	addDownstreamQualityMetrics(&task.DownstreamQuality, record.DownstreamQuality)
@@ -2107,6 +2166,18 @@ func addCodexWaitMetrics(target, addition map[string]codexWaitMetrics) {
 		if value.Calls > 0 {
 			metrics.Sessions++
 		}
+		target[context] = metrics
+	}
+}
+
+func addCodexOccurrenceMetrics(target map[string]codexOccurrenceMetrics, addition map[string]int) {
+	for context, count := range addition {
+		if count <= 0 {
+			continue
+		}
+		metrics := target[context]
+		metrics.Count += count
+		metrics.Sessions++
 		target[context] = metrics
 	}
 }
@@ -2299,6 +2370,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	}
 	printModelEffortAnalysis(report.Profiles)
 	printDelegationAnalysis(report.Delegation)
+	printDiagnosticFailureAnalysis(report.Diagnostics)
 	printDeliveryReworkAnalysis(summary.DeliveryRework)
 	printDownstreamQualityAnalysis(summary.DownstreamQuality)
 	if summary.FilesUnreadable > 0 {
@@ -2355,6 +2427,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	printCodexWaitMetrics("\nCandidate progress stalls (long, low-output waits):", summary.ProgressStalls, 12)
 	printCodexWaitMetrics("\nExpected long waits excluded from stall findings:", summary.ExpectedWaits, 12)
 	printCodexWaitMetrics("\nRapid continuation polling:", summary.RapidPolls, 12)
+	printCodexOccurrenceMetrics("\nYielded operations without a terminal result:", summary.AbandonedContinuations, 12)
 	printCodexOversizedOutputMetrics(summary.OversizedOutputs, 12)
 	printCodexFailureReasons(summary.FailureReasons)
 	printCodexFailureContexts(summary.FailureContexts, 12)
@@ -2382,6 +2455,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 	stallCalls, stallSeconds := codexWaitTotals(summary.ProgressStalls)
 	expectedWaitCalls, expectedWaitSeconds := codexWaitTotals(summary.ExpectedWaits)
 	rapidPollCalls, rapidPollSeconds := codexWaitTotals(summary.RapidPolls)
+	abandonedContinuations := codexOccurrenceTotal(summary.AbandonedContinuations)
 	oversizedCalls, oversizedBytes := codexOversizedOutputTotals(summary.OversizedOutputs)
 	if stallCalls > 0 {
 		fmt.Printf("- %s candidate low-output waits consumed %s. Remove redundant polling or add bounded progress for non-essential waits.\n",
@@ -2399,6 +2473,11 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		fmt.Printf("- %s rapid continuation polls consumed %s. Resume yielded commands with a wait aligned to their progress heartbeat instead of repeatedly returning to the model.\n",
 			formatCodexCount(int64(rapidPollCalls)),
 			formatDurationSeconds(rapidPollSeconds),
+		)
+	}
+	if abandonedContinuations > 0 {
+		fmt.Printf("- %s yielded operations never reached a terminal result before session completion or 30 minutes of inactivity. Resume or explicitly terminate yielded work before leaving it.\n",
+			formatCodexCount(int64(abandonedContinuations)),
 		)
 	}
 	if oversizedCalls > 0 {
@@ -2488,6 +2567,46 @@ func printCodexWaitMetrics(title string, metrics map[string]codexWaitMetrics, li
 			formatDurationSeconds(row.Metrics.Seconds),
 		)
 	}
+}
+
+func printCodexOccurrenceMetrics(title string, metrics map[string]codexOccurrenceMetrics, limit int) {
+	type row struct {
+		Context string
+		Metrics codexOccurrenceMetrics
+	}
+	rows := make([]row, 0, len(metrics))
+	for context, value := range metrics {
+		rows = append(rows, row{Context: context, Metrics: value})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Metrics.Count != rows[j].Metrics.Count {
+			return rows[i].Metrics.Count > rows[j].Metrics.Count
+		}
+		return rows[i].Context < rows[j].Context
+	})
+	if len(rows) == 0 {
+		return
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	fmt.Println(title)
+	fmt.Printf("%-40s %8s %10s\n", "CONTEXT", "COUNT", "SESSIONS")
+	for _, row := range rows {
+		fmt.Printf("%-40s %8s %10s\n",
+			truncateCodexLabel(row.Context, 40),
+			formatCodexCount(int64(row.Metrics.Count)),
+			formatCodexCount(int64(row.Metrics.Sessions)),
+		)
+	}
+}
+
+func codexOccurrenceTotal(metrics map[string]codexOccurrenceMetrics) int {
+	total := 0
+	for _, value := range metrics {
+		total += value.Count
+	}
+	return total
 }
 
 func codexWaitTotals(metrics map[string]codexWaitMetrics) (calls int, seconds int64) {

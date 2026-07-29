@@ -127,7 +127,13 @@ func TestAnalyzeFileHotspotsCorrelatesDemandCostAndReviewFixes(t *testing.T) {
 			Targets:   map[string]int{"src/other.ts": 1},
 		},
 	}
-	hotspots := analyzeFileHotspots(episodes, map[string]int{"src/runtime.ts": 2})
+	hotspots := analyzeFileHotspots(
+		episodes,
+		map[string]int{"src/runtime.ts": 2},
+		downstreamQualityMetrics{
+			FailureTargets: map[string]int{"src/runtime.ts": 1},
+		},
+	)
 	if len(hotspots) != 1 {
 		t.Fatalf("hotspots=%#v want one repeated target", hotspots)
 	}
@@ -137,8 +143,64 @@ func TestAnalyzeFileHotspotsCorrelatesDemandCostAndReviewFixes(t *testing.T) {
 	}
 	if got.TaskShare != 2.0/3.0 || got.ToolRoundtrips.P50 != 8 ||
 		got.ToolRoundtrips.P90 != 40 || got.DurationSeconds.P90 != 600 ||
-		got.PostReviewEditCalls != 2 {
+		got.PostReviewEditCalls != 2 || got.DownstreamFailures != 1 ||
+		got.Classification != "review/rework" ||
+		got.LastSeen != start.Add(10*time.Minute).Format(time.RFC3339) {
 		t.Fatalf("hotspot correlation mismatch: %#v", got)
+	}
+}
+
+func TestAnalyzeTaskQualityCohortsUsesProfileAndTaskFamily(t *testing.T) {
+	record := codexSessionRecord{
+		AgentKind:       "root",
+		Model:           "gpt-5.6-sol",
+		ReasoningEffort: "high",
+		DeliveryRework: deliveryReworkMetrics{Cohorts: map[string]deliveryCohortMetrics{
+			"src/app": {Deliveries: 8, DeliveriesWithRework: 2},
+		}},
+		DownstreamQuality: downstreamQualityMetrics{Cohorts: map[string]downstreamCohortMetrics{
+			"src/app": {Deliveries: 8, DeliveriesWithFailure: 1, FollowUpEditCycles: 1},
+		}},
+	}
+	cohorts := analyzeTaskQualityCohorts([]codexSessionRecord{record})
+	if len(cohorts) != 1 {
+		t.Fatalf("quality cohorts=%#v want one", cohorts)
+	}
+	got := cohorts[0]
+	if got.AgentKind != "root" || got.Model != "gpt-5.6-sol" ||
+		got.ReasoningEffort != "high" || got.TaskFamily != "src/app" ||
+		got.Deliveries != 8 || got.ReviewFixes != 2 ||
+		got.DownstreamFailure != 1 || got.FollowUpEdits != 1 {
+		t.Fatalf("quality cohort mismatch: %#v", got)
+	}
+}
+
+func TestAnalyzeTaskPerformanceCohortsUsesModelEffortAndTaskFamily(t *testing.T) {
+	start := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	var episodes []codexTaskEpisode
+	for index, calls := range []int{8, 12, 20} {
+		episodes = append(episodes, codexTaskEpisode{
+			AgentKind:       "root",
+			Model:           "gpt-5.6-sol",
+			ReasoningEffort: "high",
+			StartedAt:       start,
+			EndedAt:         start.Add(time.Duration(index+1) * time.Minute),
+			Completed:       true,
+			ToolCalls:       calls,
+			Families:        map[string]int{"browser QA": 1},
+			TargetCohorts:   map[string]int{"src/app": 2},
+		})
+	}
+	cohorts := analyzeTaskPerformanceCohorts(episodes)
+	if len(cohorts) != 1 {
+		t.Fatalf("cohorts=%#v want one", cohorts)
+	}
+	got := cohorts[0]
+	if got.AgentKind != "root" || got.Model != "gpt-5.6-sol" ||
+		got.ReasoningEffort != "high" || got.TaskFamily != "browser-qa" ||
+		got.CompletedTasks != 3 || got.ToolRoundtrips.P50 != 12 ||
+		got.DurationSeconds.P90 != 180 {
+		t.Fatalf("performance cohort mismatch: %#v", got)
 	}
 }
 

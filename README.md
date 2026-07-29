@@ -45,7 +45,9 @@ muninn analyze --repo . --details
 
 `--compare-previous` compares the current rolling lookback with the immediately
 preceding window of the same size. The cohorts do not overlap, and the
-comparison leads with completed-task duration and outer tool roundtrips.
+comparison leads with completed-task duration and outer tool roundtrips. When
+enough shared evidence exists, it also compares matched agent, model, reasoning
+effort, and task-family cohorts and gives a quality-adjusted verdict.
 
 Muninn does not report prompts, messages, raw commands, raw tool output,
 absolute paths, secrets, or provider session identifiers.

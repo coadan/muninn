@@ -309,6 +309,8 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 	}
 	fmt.Printf("\nPerformance comparison against %q:\n", checkpointName)
 	printCompletedTaskTrend(baseline, current)
+	matchedMetrics := printMatchedPerformanceTrend(baseline, current)
+	matchedQuality := printMatchedQualityTrend(baseline, current)
 	fmt.Printf("\nSession and quality rates:\n")
 	fmt.Printf("%-32s %12s %12s %12s\n", "RATE", "BASELINE", "CURRENT", "CHANGE")
 	for _, metric := range metrics {
@@ -329,7 +331,391 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			direction,
 		)
 	}
+	fmt.Printf(
+		"Quality-adjusted verdict: %s\n",
+		qualityAdjustedPerformanceVerdict(baseline, current, matchedMetrics, matchedQuality),
+	)
+	printDiagnosticEffectiveness(baseline.Diagnostics, current.Diagnostics)
 	printFindingTrend(baseline.Findings, current.Findings)
+}
+
+type matchedQualityCohort struct {
+	Baseline taskQualityCohort
+	Current  taskQualityCohort
+}
+
+func matchedQualityCohorts(
+	baseline,
+	current []taskQualityCohort,
+	performance []matchedPerformanceCohort,
+	minimumDeliveries int,
+) []matchedQualityCohort {
+	performanceKeys := map[string]struct{}{}
+	for _, cohort := range performance {
+		performanceKeys[taskPerformanceCohortKey(cohort.Baseline)] = struct{}{}
+	}
+	currentByKey := map[string]taskQualityCohort{}
+	for _, cohort := range current {
+		currentByKey[taskQualityCohortKey(cohort)] = cohort
+	}
+	var matched []matchedQualityCohort
+	for _, base := range baseline {
+		key := taskQualityCohortKey(base)
+		if _, matchedPerformance := performanceKeys[key]; !matchedPerformance {
+			continue
+		}
+		now, ok := currentByKey[key]
+		if !ok || base.Deliveries < minimumDeliveries || now.Deliveries < minimumDeliveries {
+			continue
+		}
+		matched = append(matched, matchedQualityCohort{Baseline: base, Current: now})
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		left := min(matched[i].Baseline.Deliveries, matched[i].Current.Deliveries)
+		right := min(matched[j].Baseline.Deliveries, matched[j].Current.Deliveries)
+		if left != right {
+			return left > right
+		}
+		return taskQualityCohortKey(matched[i].Baseline) <
+			taskQualityCohortKey(matched[j].Baseline)
+	})
+	return matched
+}
+
+func matchedQualityTrendMetrics(matched []matchedQualityCohort) []trendMetric {
+	if len(matched) == 0 {
+		return nil
+	}
+	type qualityMetric struct {
+		name string
+		get  func(taskQualityCohort) int
+	}
+	definitions := []qualityMetric{
+		{"matched review-fix rate", func(cohort taskQualityCohort) int { return cohort.ReviewFixes }},
+		{"matched downstream-failure rate", func(cohort taskQualityCohort) int { return cohort.DownstreamFailure }},
+		{"matched follow-up-edit rate", func(cohort taskQualityCohort) int { return cohort.FollowUpEdits }},
+		{"matched revert rate", func(cohort taskQualityCohort) int { return cohort.Reverts }},
+	}
+	metrics := make([]trendMetric, 0, len(definitions))
+	for _, definition := range definitions {
+		var baselineRate, currentRate float64
+		for _, cohort := range matched {
+			baselineRate += ratio(
+				float64(definition.get(cohort.Baseline)),
+				float64(cohort.Baseline.Deliveries),
+			)
+			currentRate += ratio(
+				float64(definition.get(cohort.Current)),
+				float64(cohort.Current.Deliveries),
+			)
+		}
+		metrics = append(metrics, trendMetric{
+			Name:              definition.name,
+			Baseline:          baselineRate / float64(len(matched)),
+			Current:           currentRate / float64(len(matched)),
+			LowerIsBetter:     true,
+			PercentageDisplay: true,
+		})
+	}
+	return metrics
+}
+
+func printMatchedQualityTrend(baseline, current codexSessionInsightsReport) []trendMetric {
+	performance := matchedPerformanceCohorts(
+		baseline.Outcomes.PerformanceCohorts,
+		current.Outcomes.PerformanceCohorts,
+		3,
+	)
+	matched := matchedQualityCohorts(
+		baseline.Outcomes.QualityCohorts,
+		current.Outcomes.QualityCohorts,
+		performance,
+		5,
+	)
+	if len(matched) == 0 {
+		fmt.Println("Matched quality cohorts: insufficient shared delivery evidence.")
+		return nil
+	}
+	fmt.Println("\nMatched delivery quality (minimum 5 deliveries in each period):")
+	fmt.Printf("%-42s %11s %15s %15s\n", "COHORT", "DELIVERIES", "REVIEW FIX B→C", "FAILURE B→C")
+	rows := matched
+	if len(rows) > 8 {
+		rows = rows[:8]
+	}
+	for _, row := range rows {
+		label := strings.Join([]string{
+			row.Baseline.AgentKind,
+			row.Baseline.Model + "/" + row.Baseline.ReasoningEffort,
+			row.Baseline.TaskFamily,
+		}, " ")
+		fmt.Printf(
+			"%-42s %5d→%-5d %6.1f%%→%-6.1f%% %6.1f%%→%-6.1f%%\n",
+			truncateCodexLabel(label, 42),
+			row.Baseline.Deliveries,
+			row.Current.Deliveries,
+			100*ratio(float64(row.Baseline.ReviewFixes), float64(row.Baseline.Deliveries)),
+			100*ratio(float64(row.Current.ReviewFixes), float64(row.Current.Deliveries)),
+			100*ratio(float64(row.Baseline.DownstreamFailure), float64(row.Baseline.Deliveries)),
+			100*ratio(float64(row.Current.DownstreamFailure), float64(row.Current.Deliveries)),
+		)
+	}
+	metrics := matchedQualityTrendMetrics(matched)
+	label, improved, regressed, unchanged, _ := summarizeQualityDirections(metrics)
+	fmt.Printf(
+		"Matched quality direction: %s (%d improved, %d regressed, %d unchanged across equal-weight cohort rates).\n",
+		label,
+		improved,
+		regressed,
+		unchanged,
+	)
+	return metrics
+}
+
+type matchedPerformanceCohort struct {
+	Baseline taskPerformanceCohort
+	Current  taskPerformanceCohort
+}
+
+func matchedPerformanceCohorts(
+	baseline,
+	current []taskPerformanceCohort,
+	minimumTasks int,
+) []matchedPerformanceCohort {
+	currentByKey := map[string]taskPerformanceCohort{}
+	for _, cohort := range current {
+		currentByKey[taskPerformanceCohortKey(cohort)] = cohort
+	}
+	var matched []matchedPerformanceCohort
+	for _, base := range baseline {
+		now, ok := currentByKey[taskPerformanceCohortKey(base)]
+		if !ok || base.CompletedTasks < minimumTasks || now.CompletedTasks < minimumTasks {
+			continue
+		}
+		matched = append(matched, matchedPerformanceCohort{Baseline: base, Current: now})
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		left := min(matched[i].Baseline.CompletedTasks, matched[i].Current.CompletedTasks)
+		right := min(matched[j].Baseline.CompletedTasks, matched[j].Current.CompletedTasks)
+		if left != right {
+			return left > right
+		}
+		return taskPerformanceCohortKey(matched[i].Baseline) <
+			taskPerformanceCohortKey(matched[j].Baseline)
+	})
+	return matched
+}
+
+func matchedPerformanceTrendMetrics(matched []matchedPerformanceCohort) []trendMetric {
+	if len(matched) == 0 {
+		return nil
+	}
+	var baseRoundtrips, nowRoundtrips, baseDuration, nowDuration []int64
+	for _, cohort := range matched {
+		baseRoundtrips = append(baseRoundtrips, cohort.Baseline.ToolRoundtrips.P50)
+		nowRoundtrips = append(nowRoundtrips, cohort.Current.ToolRoundtrips.P50)
+		baseDuration = append(baseDuration, cohort.Baseline.DurationSeconds.P50)
+		nowDuration = append(nowDuration, cohort.Current.DurationSeconds.P50)
+	}
+	return []trendMetric{
+		{
+			Name:          "matched cohort median roundtrips",
+			Baseline:      float64(summarizeOutcomeDistribution(baseRoundtrips).P50),
+			Current:       float64(summarizeOutcomeDistribution(nowRoundtrips).P50),
+			LowerIsBetter: true,
+		},
+		{
+			Name:          "matched cohort median duration",
+			Baseline:      float64(summarizeOutcomeDistribution(baseDuration).P50),
+			Current:       float64(summarizeOutcomeDistribution(nowDuration).P50),
+			LowerIsBetter: true,
+		},
+	}
+}
+
+func printMatchedPerformanceTrend(
+	baseline,
+	current codexSessionInsightsReport,
+) []trendMetric {
+	matched := matchedPerformanceCohorts(
+		baseline.Outcomes.PerformanceCohorts,
+		current.Outcomes.PerformanceCohorts,
+		3,
+	)
+	if len(matched) == 0 {
+		fmt.Println("Matched performance cohorts: insufficient shared model/effort/task-family evidence.")
+		return nil
+	}
+	fmt.Println("\nMatched model/effort/task-family cohorts (minimum 3 completed tasks in each period):")
+	fmt.Printf(
+		"%-42s %11s %13s %13s\n",
+		"COHORT",
+		"TASKS B→C",
+		"RT P50 B→C",
+		"TIME P50 B→C",
+	)
+	rows := matched
+	if len(rows) > 8 {
+		rows = rows[:8]
+	}
+	for _, row := range rows {
+		label := strings.Join(
+			[]string{
+				row.Baseline.AgentKind,
+				row.Baseline.Model + "/" + row.Baseline.ReasoningEffort,
+				row.Baseline.TaskFamily,
+			},
+			" ",
+		)
+		fmt.Printf(
+			"%-42s %5d→%-5d %6d→%-6d %7s→%-7s\n",
+			truncateCodexLabel(label, 42),
+			row.Baseline.CompletedTasks,
+			row.Current.CompletedTasks,
+			row.Baseline.ToolRoundtrips.P50,
+			row.Current.ToolRoundtrips.P50,
+			formatDurationSeconds(row.Baseline.DurationSeconds.P50),
+			formatDurationSeconds(row.Current.DurationSeconds.P50),
+		)
+	}
+	metrics := matchedPerformanceTrendMetrics(matched)
+	label, improved, regressed, unchanged := summarizeTrendDirections(metrics)
+	fmt.Printf(
+		"Matched efficiency direction: %s (%d improved, %d regressed, %d unchanged across equal-weight cohort medians).\n",
+		label,
+		improved,
+		regressed,
+		unchanged,
+	)
+	return metrics
+}
+
+func qualityAdjustedPerformanceVerdict(
+	baseline,
+	current codexSessionInsightsReport,
+	matchedEfficiency []trendMetric,
+	matchedQuality []trendMetric,
+) string {
+	efficiency := matchedEfficiency
+	if len(efficiency) == 0 &&
+		baseline.Outcomes.ToolUsingCompleted >= 10 &&
+		current.Outcomes.ToolUsingCompleted >= 10 {
+		efficiency = []trendMetric{
+			{
+				Name:          "tool roundtrips p50",
+				Baseline:      float64(baseline.Outcomes.ToolCalls.P50),
+				Current:       float64(current.Outcomes.ToolCalls.P50),
+				LowerIsBetter: true,
+			},
+			{
+				Name:          "duration seconds p50",
+				Baseline:      float64(baseline.Outcomes.DurationSeconds.P50),
+				Current:       float64(current.Outcomes.DurationSeconds.P50),
+				LowerIsBetter: true,
+			},
+		}
+	}
+	efficiencyLabel, _, efficiencyRegressed, _ := summarizeTrendDirections(efficiency)
+	quality := matchedQuality
+	if len(quality) == 0 {
+		quality = qualityOutcomeTrendMetrics(baseline.Summary, current.Summary)
+	}
+	qualityLabel, qualityImproved, qualityRegressed, qualityUnchanged, qualityInsufficient :=
+		summarizeQualityDirections(quality)
+	if len(efficiency) == 0 || qualityInsufficient == len(quality) {
+		return "insufficient evidence"
+	}
+	switch {
+	case efficiencyLabel == "improved" && qualityRegressed == 0:
+		return "improved — faster with stable or better observed delivery quality"
+	case efficiencyLabel == "improved" && qualityRegressed > 0:
+		return "shifted downstream — faster execution but worse observed delivery quality"
+	case efficiencyRegressed > 0 && qualityLabel == "improved":
+		return "quality tradeoff — slower execution with better observed delivery quality"
+	case efficiencyRegressed > 0 && qualityRegressed > 0:
+		return "regressed — slower execution and worse observed delivery quality"
+	case efficiencyLabel == "unchanged" && qualityImproved > 0 && qualityRegressed == 0:
+		return "improved quality at stable execution cost"
+	case efficiencyLabel == "unchanged" && qualityUnchanged == len(quality)-qualityInsufficient:
+		return "unchanged"
+	default:
+		return "mixed or inconclusive"
+	}
+}
+
+func qualityOutcomeTrendMetrics(
+	baseline,
+	current codexSessionInsightsSummary,
+) []trendMetric {
+	baseRework := baseline.DeliveryRework
+	nowRework := current.DeliveryRework
+	baseQuality := baseline.DownstreamQuality
+	nowQuality := current.DownstreamQuality
+	return []trendMetric{
+		{
+			Name:           "deliveries needing review fixes",
+			Baseline:       ratio(float64(baseRework.DeliveriesWithRework), float64(baseRework.Deliveries)),
+			Current:        ratio(float64(nowRework.DeliveriesWithRework), float64(nowRework.Deliveries)),
+			LowerIsBetter:  true,
+			BaselineSample: baseRework.Deliveries,
+			CurrentSample:  nowRework.Deliveries,
+			MinimumSample:  10,
+		},
+		{
+			Name:           "downstream delivery failures",
+			Baseline:       ratio(float64(baseQuality.DeliveriesWithFailure), float64(baseQuality.Deliveries)),
+			Current:        ratio(float64(nowQuality.DeliveriesWithFailure), float64(nowQuality.Deliveries)),
+			LowerIsBetter:  true,
+			BaselineSample: baseQuality.Deliveries,
+			CurrentSample:  nowQuality.Deliveries,
+			MinimumSample:  10,
+		},
+		{
+			Name:           "follow-up edits",
+			Baseline:       ratio(float64(baseQuality.FollowUpEditCycles), float64(baseQuality.Deliveries)),
+			Current:        ratio(float64(nowQuality.FollowUpEditCycles), float64(nowQuality.Deliveries)),
+			LowerIsBetter:  true,
+			BaselineSample: baseQuality.Deliveries,
+			CurrentSample:  nowQuality.Deliveries,
+			MinimumSample:  10,
+		},
+		{
+			Name:           "reverts",
+			Baseline:       ratio(float64(baseQuality.Reverts), float64(baseQuality.Deliveries)),
+			Current:        ratio(float64(nowQuality.Reverts), float64(nowQuality.Deliveries)),
+			LowerIsBetter:  true,
+			BaselineSample: baseQuality.Deliveries,
+			CurrentSample:  nowQuality.Deliveries,
+			MinimumSample:  10,
+		},
+	}
+}
+
+func summarizeQualityDirections(
+	metrics []trendMetric,
+) (label string, improved, regressed, unchanged, insufficient int) {
+	for _, metric := range metrics {
+		switch materialTrendDirection(metric) {
+		case "improved":
+			improved++
+		case "regressed":
+			regressed++
+		case "insufficient":
+			insufficient++
+		default:
+			unchanged++
+		}
+	}
+	switch {
+	case improved > 0 && regressed == 0:
+		label = "improved"
+	case regressed > 0 && improved == 0:
+		label = "regressed"
+	case improved > 0 && regressed > 0:
+		label = "mixed"
+	default:
+		label = "unchanged"
+	}
+	return
 }
 
 func completedTaskTrendMetrics(baseline, current codexSessionInsightsReport) []trendMetric {

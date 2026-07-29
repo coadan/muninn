@@ -12,18 +12,20 @@ import (
 )
 
 type sessionFinding struct {
-	Category   string `json:"category"`
-	Control    string `json:"control"`
-	Signal     string `json:"signal"`
-	Title      string `json:"title"`
-	Evidence   string `json:"evidence"`
-	Action     string `json:"action"`
-	Count      int    `json:"count,omitempty"`
-	Sessions   int    `json:"sessions,omitempty"`
-	Target     string `json:"target,omitempty"`
-	LastSeen   string `json:"lastSeen,omitempty"`
-	Lever      string `json:"lever"`
-	Confidence string `json:"confidence"`
+	Category   string   `json:"category"`
+	Control    string   `json:"control"`
+	Signal     string   `json:"signal"`
+	Title      string   `json:"title"`
+	Evidence   string   `json:"evidence"`
+	Action     string   `json:"action"`
+	Count      int      `json:"count,omitempty"`
+	Sessions   int      `json:"sessions,omitempty"`
+	Target     string   `json:"target,omitempty"`
+	LastSeen   string   `json:"lastSeen,omitempty"`
+	Lever      string   `json:"lever"`
+	Confidence string   `json:"confidence"`
+	Why        string   `json:"why,omitempty"`
+	Supporting []string `json:"supportingSignals,omitempty"`
 	score      int
 }
 
@@ -82,7 +84,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		ownedConfigByID[owned.ID] = owned
 	}
 	for operation, metrics := range summary.OwnedOperations {
-		if metrics.Sessions < 2 {
+		repeated := verificationOwnedOperation(operation) &&
+			metrics.Sessions > 0 &&
+			metrics.Calls >= 40 &&
+			metrics.Calls >= metrics.Sessions*15
+		if metrics.Sessions < 2 && !repeated {
 			continue
 		}
 		reasons := summary.OwnedOperationFailureReasons[operation]
@@ -90,7 +96,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		outputThreshold := max(int64(25_000), summary.ToolOutputTokens/100)
 		outputHeavy := metrics.EstimatedOutputTokens >= outputThreshold &&
 			ratio(float64(metrics.EstimatedOutputTokens), float64(metrics.Calls)) >= 500
-		if actionableFailures < 2 && metrics.TruncatedCalls < 3 && !outputHeavy {
+		if actionableFailures < 2 && metrics.TruncatedCalls < 3 && !outputHeavy && !repeated {
 			continue
 		}
 		toolID, _, _ := strings.Cut(operation, "/")
@@ -100,6 +106,10 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			action = "Improve this locally controlled operation or its defaults before documenting another agent workaround."
 		}
 		title := "high-cost locally controlled operation: " + operation
+		if repeated {
+			title = "locally controlled operation is repeated excessively: " + operation
+			action = "Batch related edits, then run this operation once at the verification boundary; use a faster focused mode only to narrow a reported failure."
+		}
 		if actionableFailures >= 2 || metrics.TruncatedCalls >= 3 {
 			title = "locally controlled operation has recurring friction: " + operation
 		}
@@ -114,6 +124,9 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			formatCodexCount(metrics.EstimatedOutputTokens),
 			formatCodexCount(metrics.EstimatedAmbiguousOutputTokens),
 		)
+		if repeated {
+			evidence += fmt.Sprintf("; %.1f calls per session", ratio(float64(metrics.Calls), float64(metrics.Sessions)))
+		}
 		if formatted := formatOwnedOperationActionableReasons(ownership, operation, reasons); formatted != "" {
 			evidence += "; actionable reasons: " + formatted
 		}
@@ -128,7 +141,32 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Sessions: metrics.Sessions,
 			Target:   operation,
 			LastSeen: ownedOperationFindingLastSeen(report, operation, actionableFailures, metrics.TruncatedCalls),
-			score:    650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + int(metrics.EstimatedOutputTokens/5_000),
+			score:    650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + min(metrics.Calls, 200) + int(metrics.EstimatedOutputTokens/5_000),
+		})
+	}
+
+	verificationName, verification := dominantVerificationRepairLoop(
+		summary.DeliveryRework.VerificationChecks,
+	)
+	if verificationName != "" {
+		findings = append(findings, sessionFinding{
+			Category: "verification-loop",
+			Control:  "repository",
+			Title:    "verification required an expensive repair loop: " + verificationName,
+			Evidence: fmt.Sprintf(
+				"%s failed runs before %s fail-fix-pass deliveries; the check covered %s deliveries",
+				formatCodexCount(int64(verification.FailedRuns)),
+				formatCodexCount(int64(verification.FailFixPassDeliveries)),
+				formatCodexCount(int64(verification.Deliveries)),
+			),
+			Action:     "Inspect the bounded failure sequence for this check. If failures repeat one boundary, improve its diagnostic or test helper; if they expose different invariants after edits, strengthen the earliest source or focused-test boundary that should have caught them.",
+			Count:      verification.FailedRuns,
+			Sessions:   summary.DeliveryRework.Sessions,
+			Target:     verificationName,
+			LastSeen:   report.GeneratedAt,
+			Lever:      "unknown",
+			Confidence: "medium",
+			score:      610 + verification.FailedRuns*20,
 		})
 	}
 
@@ -210,6 +248,42 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				score:    400 + metrics.Sessions*30 + metrics.Count,
 			})
 		}
+	}
+
+	for _, failure := range report.Diagnostics.Failures {
+		if failure.Occurrences < 2 || failure.Sessions < 2 {
+			continue
+		}
+		action := "Fix the repeated failure in its owning source-code boundary and keep the focused regression evidence."
+		if failure.Lever == "tooling" {
+			action = "Reproduce the startup boundary once, then fix the owned fixture or browser tooling instead of repeating session workarounds."
+		} else if failure.Lever == "tests/instructions" {
+			action = "Repair test selection or concise workflow guidance so the intended behavior runs and produces evidence."
+		}
+		findings = append(findings, sessionFinding{
+			Category: "diagnostic-failure",
+			Control:  "repository",
+			Title:    failure.Classification + " failure fingerprint recurs in " + failure.Source,
+			Evidence: fmt.Sprintf(
+				"%s occurrences across %s sessions; phase %s; source %s; diagnostic %s; post-failure cost %s tool calls, %s fresh tokens, %s",
+				formatCodexCount(int64(failure.Occurrences)),
+				formatCodexCount(int64(failure.Sessions)),
+				failure.FixturePhase,
+				failure.FailureSource,
+				failure.DiagnosticStatus,
+				formatCodexCount(int64(failure.PostFailureCalls)),
+				formatCodexCount(diagnosticFreshTokens(failure.PostFailureTokens)),
+				formatDurationSeconds(failure.PostFailureSecs),
+			),
+			Action:     action,
+			Count:      failure.Occurrences,
+			Sessions:   failure.Sessions,
+			Target:     failure.Fingerprint,
+			LastSeen:   sessionFindingLastSeen(report, "diagnostic-failure", failure.Fingerprint),
+			Lever:      failure.Lever,
+			Confidence: "high",
+			score:      700 + failure.Occurrences*30 + int(diagnosticFreshTokens(failure.PostFailureTokens)/1_000),
+		})
 	}
 
 	type workflowEvidence struct {
@@ -321,27 +395,64 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
-	if summary.InlineOrchestrationCalls >= 2 || summary.InlineOrchestrationBytes >= 16*1024 || summary.InlineOrchestrationMaxBytes >= 8*1024 {
+	if summary.InlineOrchestrationCalls > 0 {
 		title := "long inline code is carrying orchestration inside a tool call"
+		if summary.InlineOrchestrationByTool["exec_command"].Calls > 0 {
+			title = "very long CLI input is rebuilding an inspection workflow"
+		}
 		if summary.InlineOrchestrationCalls >= 2 {
 			title = "repeated inline code is rebuilding a workflow inside tool calls"
 		}
+		family, familyMetrics := dominantInlineMetric(summary.InlineOrchestrationByFamily)
+		owner, _ := dominantInlineMetric(summary.InlineOrchestrationByOwner)
+		task, taskMetrics := dominantInlineTask(report.Tasks)
+		control := "repository"
+		lever := "unknown"
+		confidence := "medium"
+		target := family
+		action := config.Actions.InlineOrchestration
+		if owner != "" && owner != "(unowned)" {
+			control = "local"
+			lever = "tooling"
+			confidence = "high"
+			target = owner
+			action = "Improve the locally owned " + owner + " surface so this inspection is one bounded operation, then compare oversized-input recurrence."
+		} else if family == "inline runtime" || family == "database query CLI" {
+			lever = "tooling"
+			target = family
+			action = "Add a compact, tested repository inspection command for this workflow; if one already exists, route agents to it with one concise pointer."
+		}
+		dimensions := fmt.Sprintf("; families: %s; ownership: %s",
+			inlineToolEvidence(summary.InlineOrchestrationByFamily),
+			inlineToolEvidence(summary.InlineOrchestrationByOwner),
+		)
+		if task != "" {
+			dimensions += fmt.Sprintf("; top task cohort %s: %s calls/%s bytes",
+				task,
+				formatCodexCount(int64(taskMetrics.Calls)),
+				formatCodexCount(taskMetrics.Bytes),
+			)
+		}
 		findings = append(findings, sessionFinding{
 			Category: "agent-interface",
-			Control:  "repository",
+			Control:  control,
 			Title:    title,
-			Evidence: fmt.Sprintf("%s large inline calls across %s sessions; %s total input bytes; largest call %s bytes; tool sources: %s",
+			Evidence: fmt.Sprintf("%s large inline calls across %s sessions; %s total input bytes; largest call %s bytes; tool sources: %s%s",
 				formatCodexCount(int64(summary.InlineOrchestrationCalls)),
 				formatCodexCount(int64(summary.InlineOrchestrationSessions)),
 				formatCodexCount(summary.InlineOrchestrationBytes),
 				formatCodexCount(summary.InlineOrchestrationMaxBytes),
 				inlineToolEvidence(summary.InlineOrchestrationByTool),
+				dimensions,
 			),
-			Action:   config.Actions.InlineOrchestration,
-			Count:    summary.InlineOrchestrationCalls,
-			Sessions: summary.InlineOrchestrationSessions,
-			LastSeen: sessionFindingLastSeen(report, "inline", ""),
-			score:    450 + summary.InlineOrchestrationSessions*20 + summary.InlineOrchestrationCalls,
+			Action:     action,
+			Count:      summary.InlineOrchestrationCalls,
+			Sessions:   summary.InlineOrchestrationSessions,
+			Target:     target,
+			LastSeen:   sessionFindingLastSeen(report, "inline", ""),
+			Lever:      lever,
+			Confidence: confidence,
+			score:      450 + summary.InlineOrchestrationSessions*20 + summary.InlineOrchestrationCalls + familyMetrics.Calls,
 		})
 	}
 
@@ -524,6 +635,36 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Target:   context,
 			LastSeen: sessionFindingLastSeen(report, "rapid-poll", context),
 			score:    445 + metrics.Sessions*20 + metrics.Calls*5,
+		})
+	}
+
+	for context, metrics := range summary.AbandonedContinuations {
+		local := locallyControlledOutputContext(context, config.OwnedTools)
+		if metrics.Count < 2 ||
+			metrics.Sessions < 2 ||
+			(!local && !expectedContinuationContext(context)) {
+			continue
+		}
+		control := "repository"
+		action := config.Actions.YieldedOperation
+		if local {
+			control = "local"
+			action = "Resume yielded operations to a terminal result, explicitly terminate them, or make the owning command self-finalizing with bounded progress."
+		}
+		findings = append(findings, sessionFinding{
+			Category: "agent-interface",
+			Control:  control,
+			Title:    "yielded operations never reached a terminal result: " + context,
+			Evidence: fmt.Sprintf("%s yielded operations remained pending after session completion or 30 minutes of inactivity across %s sessions",
+				formatCodexCount(int64(metrics.Count)),
+				formatCodexCount(int64(metrics.Sessions)),
+			),
+			Action:   action,
+			Count:    metrics.Count,
+			Sessions: metrics.Sessions,
+			Target:   context,
+			LastSeen: sessionFindingLastSeen(report, "abandoned-continuation", context),
+			score:    500 + metrics.Sessions*25 + metrics.Count*10,
 		})
 	}
 
@@ -804,7 +945,9 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				int(delegation.OverlappingChildFreshTokens/5_000),
 		})
 	}
+	findings = append(findings, fileHotspotFindings(report)...)
 	findings = assignAndSuppressSessionFindingSignals(findings, config.SuppressSignals)
+	findings = consolidateOwnerFindings(findings)
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].LastSeen != findings[j].LastSeen {
 			return findings[i].LastSeen > findings[j].LastSeen
@@ -818,6 +961,247 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		return findings[i].Title < findings[j].Title
 	})
 	return diversifySessionFindings(findings)
+}
+
+func expectedContinuationContext(context string) bool {
+	switch context {
+	case "tests", "build, lint, or install", "review":
+		return true
+	default:
+		return false
+	}
+}
+
+func verificationOwnedOperation(operation string) bool {
+	normalized := strings.NewReplacer("/", "-", "_", "-").Replace(strings.ToLower(operation))
+	for _, part := range strings.Split(normalized, "-") {
+		switch part {
+		case "check", "test", "verify", "verification", "lint", "typecheck", "review":
+			return true
+		}
+	}
+	return false
+}
+
+func fileHotspotFindings(report codexSessionInsightsReport) []sessionFinding {
+	var findings []sessionFinding
+	for _, hotspot := range report.Outcomes.FileHotspots {
+		switch hotspot.Classification {
+		case "expensive-owner":
+			if hotspot.CompletedTasks < 3 || hotspot.ToolRoundtrips.P50 < 50 {
+				continue
+			}
+			findings = append(findings, sessionFinding{
+				Category: "code-structure",
+				Control:  "repository",
+				Title:    "repeated edits correlate with high task cost",
+				Evidence: fmt.Sprintf(
+					"%s completed tasks (%.1f%% of tool-using tasks) edited this target %s times; task roundtrips p50/p90 %s/%s and duration p50/p90 %s/%s",
+					formatCodexCount(int64(hotspot.CompletedTasks)),
+					100*hotspot.TaskShare,
+					formatCodexCount(int64(hotspot.EditCalls)),
+					formatCodexCount(hotspot.ToolRoundtrips.P50),
+					formatCodexCount(hotspot.ToolRoundtrips.P90),
+					formatDurationSeconds(hotspot.DurationSeconds.P50),
+					formatDurationSeconds(hotspot.DurationSeconds.P90),
+				),
+				Action:     "Trace one representative change through this owner and its smallest verification. Improve navigation, inspection, or the focused test interface if the owner is cohesive; split only when the trace shows independent ownership seams.",
+				Count:      hotspot.CompletedTasks,
+				Target:     hotspot.Target,
+				LastSeen:   hotspot.LastSeen,
+				Lever:      reworkTargetLever(hotspot.Target),
+				Confidence: "medium",
+				Why:        "Repeated work on this owner consumes materially more agent time and tool roundtrips than an ordinary edit target.",
+				score: 520 + hotspot.CompletedTasks*5 +
+					int(hotspot.ToolRoundtrips.P50) +
+					int(hotspot.DurationSeconds.P50/60),
+			})
+		case "review/rework":
+			cycles := hotspot.PostReviewEditCalls + hotspot.FollowUpEdits
+			if cycles < 2 {
+				continue
+			}
+			findings = append(findings, sessionFinding{
+				Category: "delivery-quality",
+				Control:  "repository",
+				Title:    "frequently edited target requires repeated rework",
+				Evidence: fmt.Sprintf(
+					"%s completed tasks edited this target %s times, with %s review-driven edits, %s downstream follow-up edits, %s failures, and %s reverts",
+					formatCodexCount(int64(hotspot.CompletedTasks)),
+					formatCodexCount(int64(hotspot.EditCalls)),
+					formatCodexCount(int64(hotspot.PostReviewEditCalls)),
+					formatCodexCount(int64(hotspot.FollowUpEdits)),
+					formatCodexCount(int64(hotspot.DownstreamFailures)),
+					formatCodexCount(int64(hotspot.Reverts)),
+				),
+				Action:     "Inspect the repeated corrections at this exact target, strengthen the owning invariant and focused pre-delivery check, then compare its rework rate in the next matched period.",
+				Count:      cycles,
+				Target:     hotspot.Target,
+				LastSeen:   hotspot.LastSeen,
+				Lever:      reworkTargetLever(hotspot.Target),
+				Confidence: hotspotFindingConfidence(cycles),
+				Why:        "Repeated corrections at the same owner indicate that implementation cost is surviving into review or downstream repair.",
+				score:      650 + cycles*30,
+			})
+		case "downstream-risk":
+			failures := hotspot.DownstreamFailures + hotspot.Reverts
+			if failures < 2 {
+				continue
+			}
+			findings = append(findings, sessionFinding{
+				Category: "delivery-quality",
+				Control:  "repository",
+				Title:    "frequently edited target is associated with downstream failures",
+				Evidence: fmt.Sprintf(
+					"%s completed tasks edited this target %s times, with %s attributed downstream failures, %s follow-up edits, and %s reverts",
+					formatCodexCount(int64(hotspot.CompletedTasks)),
+					formatCodexCount(int64(hotspot.EditCalls)),
+					formatCodexCount(int64(hotspot.DownstreamFailures)),
+					formatCodexCount(int64(hotspot.FollowUpEdits)),
+					formatCodexCount(int64(hotspot.Reverts)),
+				),
+				Action:     "Reproduce the attributed downstream failure at this exact target, add or strengthen the focused pre-delivery check, and compare the target's failure rate in the next matched period.",
+				Count:      failures,
+				Target:     hotspot.Target,
+				LastSeen:   hotspot.LastSeen,
+				Lever:      reworkTargetLever(hotspot.Target),
+				Confidence: hotspotFindingConfidence(failures),
+				Why:        "Failures attributed after delivery expose quality risk at an owner agents change repeatedly.",
+				score:      680 + failures*35,
+			})
+		}
+	}
+	return findings
+}
+
+func consolidateOwnerFindings(findings []sessionFinding) []sessionFinding {
+	groups := map[string][]int{}
+	for index, finding := range findings {
+		if !consolidatableOwnerFinding(finding) {
+			continue
+		}
+		groups[finding.Target] = append(groups[finding.Target], index)
+	}
+	removed := map[int]bool{}
+	for target, indices := range groups {
+		if len(indices) < 2 {
+			index := indices[0]
+			if findings[index].Title == "repeated navigation into a current source owner" {
+				findings[index].Confidence = "medium"
+				findings[index].score = max(0, findings[index].score-75)
+				findings[index].Why = "This is repeated discovery evidence only; treat it as a navigation candidate until cost or quality signals corroborate it."
+			}
+			continue
+		}
+		primaryIndex := indices[0]
+		for _, index := range indices[1:] {
+			if ownerFindingPriority(findings[index]) > ownerFindingPriority(findings[primaryIndex]) ||
+				(ownerFindingPriority(findings[index]) == ownerFindingPriority(findings[primaryIndex]) &&
+					sessionFindingHigherImpact(findings[index], findings[primaryIndex])) {
+				primaryIndex = index
+			}
+		}
+		primary := findings[primaryIndex]
+		var supportingSignals, supportingTitles []string
+		for _, index := range indices {
+			member := findings[index]
+			primary.Count = max(primary.Count, member.Count)
+			primary.Sessions = max(primary.Sessions, member.Sessions)
+			if member.LastSeen > primary.LastSeen {
+				primary.LastSeen = member.LastSeen
+			}
+			supportingSignals = append(supportingSignals, member.Signal)
+			if index == primaryIndex {
+				continue
+			}
+			removed[index] = true
+			supportingTitles = append(supportingTitles, member.Title)
+		}
+		sort.Strings(supportingSignals)
+		sort.Strings(supportingTitles)
+		primary.Signal = signalID("owner", target)
+		primary.Supporting = supportingSignals
+		primary.Evidence += "; corroborating signals: " + strings.Join(supportingTitles, "; ")
+		primary.Why = ownerFindingWhy(indices, findings)
+		primary.score += 100 * (len(indices) - 1)
+		if len(indices) >= 3 || ownerFindingsIncludeCategory(indices, findings, "delivery-quality") {
+			primary.Confidence = "high"
+		} else if primary.Confidence == "low" {
+			primary.Confidence = "medium"
+		}
+		findings[primaryIndex] = primary
+	}
+	result := make([]sessionFinding, 0, len(findings)-len(removed))
+	for index, finding := range findings {
+		if !removed[index] {
+			result = append(result, finding)
+		}
+	}
+	return result
+}
+
+func consolidatableOwnerFinding(finding sessionFinding) bool {
+	if finding.Target == "" || filepath.Ext(filepath.Base(finding.Target)) == "" {
+		return false
+	}
+	switch finding.Category {
+	case "code-structure", "instruction-discovery", "delivery-quality":
+		return true
+	default:
+		return false
+	}
+}
+
+func ownerFindingPriority(finding sessionFinding) int {
+	switch {
+	case finding.Category == "delivery-quality":
+		return 4
+	case finding.Title == "repeated edits correlate with high task cost":
+		return 3
+	case finding.Category == "code-structure":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func ownerFindingWhy(indices []int, findings []sessionFinding) string {
+	hasQuality := ownerFindingsIncludeCategory(indices, findings, "delivery-quality")
+	hasCost := false
+	hasNavigation := false
+	for _, index := range indices {
+		finding := findings[index]
+		hasCost = hasCost || finding.Title == "repeated edits correlate with high task cost"
+		hasNavigation = hasNavigation ||
+			finding.Title == "repeated navigation into a current source owner" ||
+			finding.Category == "instruction-discovery"
+	}
+	switch {
+	case hasQuality && hasCost:
+		return "This owner combines high agent task cost with observed delivery-quality exposure, making it a stronger improvement candidate than either signal alone."
+	case hasQuality && hasNavigation:
+		return "Agents repeatedly rediscover this owner and observed corrections or failures survive delivery, linking navigation friction with quality exposure."
+	case hasCost && hasNavigation:
+		return "Agents repeatedly rediscover this owner and spend materially high roundtrips or time changing it, so the navigation signal has direct task-cost support."
+	default:
+		return "Multiple independent findings point to the same owner, increasing confidence that the reported friction is actionable."
+	}
+}
+
+func ownerFindingsIncludeCategory(indices []int, findings []sessionFinding, category string) bool {
+	for _, index := range indices {
+		if findings[index].Category == category {
+			return true
+		}
+	}
+	return false
+}
+
+func hotspotFindingConfidence(observations int) string {
+	if observations >= 3 {
+		return "high"
+	}
+	return "medium"
 }
 
 func repositoryTargetSize(repositoryRoot, target string) (size int64, lines int, ok bool) {
@@ -907,6 +1291,24 @@ func dominantVerificationCheck(checks map[string]verificationMetrics) (string, v
 			(value.Deliveries == metrics.Deliveries &&
 				(value.FailFixPassDeliveries > metrics.FailFixPassDeliveries ||
 					(value.FailFixPassDeliveries == metrics.FailFixPassDeliveries && candidate < name))) {
+			name = candidate
+			metrics = value
+		}
+	}
+	return name, metrics
+}
+
+func dominantVerificationRepairLoop(
+	checks map[string]verificationMetrics,
+) (string, verificationMetrics) {
+	name := ""
+	metrics := verificationMetrics{}
+	for candidate, value := range checks {
+		if value.FailedRuns < 4 || value.FailFixPassDeliveries < 1 {
+			continue
+		}
+		if value.FailedRuns > metrics.FailedRuns ||
+			(value.FailedRuns == metrics.FailedRuns && candidate < name) {
 			name = candidate
 			metrics = value
 		}
@@ -1118,6 +1520,14 @@ func sessionFindingSignal(finding sessionFinding) string {
 		return signalID("session-loop", "progress-stall", target)
 	case strings.HasPrefix(finding.Title, "rapid continuation polling: "):
 		return signalID("agent-interface", "rapid-poll", target)
+	case strings.HasPrefix(finding.Title, "yielded operations never reached a terminal result: "):
+		return signalID("agent-interface", "abandoned-continuation", target)
+	case finding.Title == "repeated edits correlate with high task cost":
+		return signalID("code-structure", "file-cost", target)
+	case finding.Title == "frequently edited target requires repeated rework":
+		return signalID("delivery-quality", "file-rework", target)
+	case finding.Title == "frequently edited target is associated with downstream failures":
+		return signalID("delivery-quality", "file-failure", target)
 	case finding.Category == "owned-operation":
 		return signalID("owned-operation", target)
 	case finding.Category == "owned-tool":
@@ -1248,6 +1658,43 @@ func inlineToolEvidence(metrics map[string]codexInlineMetrics) string {
 		return "(unknown)"
 	}
 	return strings.Join(parts, ", ")
+}
+
+func dominantInlineMetric(metrics map[string]codexInlineMetrics) (string, codexInlineMetrics) {
+	name := ""
+	value := codexInlineMetrics{}
+	for candidate, metrics := range metrics {
+		if metrics.Bytes > value.Bytes ||
+			(metrics.Bytes == value.Bytes && metrics.Calls > value.Calls) ||
+			(metrics.Bytes == value.Bytes && metrics.Calls == value.Calls && candidate < name) {
+			name = candidate
+			value = metrics
+		}
+	}
+	return name, value
+}
+
+func dominantInlineTask(tasks []codexTaskInsights) (string, codexInlineMetrics) {
+	name := ""
+	value := codexInlineMetrics{}
+	for _, task := range tasks {
+		metrics := codexInlineMetrics{
+			Calls:    task.InlineOrchestrationCalls,
+			Sessions: task.InlineOrchestrationSessions,
+			Bytes:    task.InlineOrchestrationBytes,
+			MaxBytes: task.InlineOrchestrationMaxBytes,
+		}
+		if metrics.Bytes > value.Bytes ||
+			(metrics.Bytes == value.Bytes && metrics.Calls > value.Calls) ||
+			(metrics.Bytes == value.Bytes && metrics.Calls == value.Calls && task.Task < name) {
+			name = task.Task
+			value = metrics
+		}
+	}
+	if value.Calls == 0 {
+		return "", codexInlineMetrics{}
+	}
+	return name, value
 }
 
 func ownedOperationFailureCounts(ownership ownershipCatalog, operation string, reasons map[string]codexOccurrenceMetrics) (actionable int, expected int) {
@@ -1413,10 +1860,11 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 	}
 	allowed := map[string]map[string]bool{
 		"tooling": {
-			"owned-tool":        true,
-			"owned-operation":   true,
-			"recurring-failure": true,
-			"output-cost":       true,
+			"owned-tool":         true,
+			"owned-operation":    true,
+			"recurring-failure":  true,
+			"diagnostic-failure": true,
+			"output-cost":        true,
 		},
 		"instructions": {
 			"instruction-discovery": true,
@@ -1434,7 +1882,8 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 			"instruction-discovery": true,
 		},
 		"failures": {
-			"recurring-failure": true,
+			"recurring-failure":  true,
+			"diagnostic-failure": true,
 		},
 		"loops": {
 			"agent-interface": true,
@@ -1456,11 +1905,21 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 	}
 	filtered := make([]sessionFinding, 0, len(findings))
 	for _, finding := range findings {
-		if categories[finding.Category] {
+		if categories[finding.Category] || supportingSignalsMatchCategories(finding.Supporting, categories) {
 			filtered = append(filtered, finding)
 		}
 	}
 	return filtered, nil
+}
+
+func supportingSignalsMatchCategories(signals []string, categories map[string]bool) bool {
+	for _, signal := range signals {
+		category, _, _ := strings.Cut(signal, "/")
+		if categories[category] {
+			return true
+		}
+	}
+	return false
 }
 
 func agentInterfaceWorkflow(transition string) string {
@@ -1524,6 +1983,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"instruction-discovery": 4,
 		"instruction-footprint": 1,
 		"recurring-failure":     4,
+		"diagnostic-failure":    6,
 		"owned-tool":            4,
 		"owned-operation":       6,
 		"session-loop":          6,
@@ -1646,6 +2106,12 @@ func printSessionFindings(findings []sessionFinding, limit int) {
 		fmt.Printf("- [%s/%s] %s%s\n", finding.Category, finding.Control, finding.Title, target)
 		fmt.Printf("  Signal: %s\n", finding.Signal)
 		fmt.Printf("  Evidence: %s.\n", strings.TrimSuffix(finding.Evidence, "."))
+		if finding.Why != "" {
+			fmt.Printf("  Why this matters: %s\n", finding.Why)
+		}
+		if len(finding.Supporting) > 0 {
+			fmt.Printf("  Supporting signals: %s\n", strings.Join(finding.Supporting, ", "))
+		}
 		if finding.LastSeen != "" {
 			fmt.Printf("  Last seen: %s\n", formatSessionFindingAge(finding.LastSeen, time.Now().UTC()))
 		}
