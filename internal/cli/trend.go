@@ -268,7 +268,6 @@ func printSessionTrend(
 		"Quality-adjusted verdict: %s\n",
 		qualityAdjustedPerformanceVerdict(baseline, current, matchedMetrics, matchedQuality),
 	)
-	printDiagnosticEffectiveness(baseline.Diagnostics, current.Diagnostics)
 	if base.Sessions >= minimumTrendSessions && now.Sessions >= minimumTrendSessions {
 		printInterventionTrend(baseline.Interventions, current.Interventions)
 		if includeFindingTrend {

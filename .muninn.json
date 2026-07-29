@@ -3,7 +3,6 @@
   "suppressSignals": [
     "default-candidate/muninn/analyze/repo",
     "default-candidate/muninn/analyze/since",
-    "default-candidate/muninn/analyze/json",
     "default-candidate/muninn/failures/repo",
     "default-candidate/muninn/failures/since"
   ],

@@ -1620,46 +1620,6 @@ func sessionFindingRepositoryScope(finding sessionFinding) string {
 	return "workspace"
 }
 
-func printSessionFindings(findings []sessionFinding, limit int) {
-	fmt.Println("\nFindings:")
-	if len(findings) == 0 {
-		fmt.Println("- No current findings met the recurrence and impact thresholds.")
-		return
-	}
-	rows := findings
-	if limit > 0 && len(rows) > limit {
-		rows = rows[:limit]
-	}
-	for _, finding := range rows {
-		target := sessionFindingDisplayTarget(finding)
-		fmt.Printf("- [%s/%s] %s%s\n", finding.Category, finding.Control, finding.Title, target)
-		fmt.Printf("  Signal: %s\n", finding.Signal)
-		fmt.Printf("  Evidence: %s.\n", strings.TrimSuffix(finding.Evidence, "."))
-		if finding.Why != "" {
-			fmt.Printf("  Why this matters: %s\n", finding.Why)
-		}
-		if len(finding.Supporting) > 0 {
-			fmt.Printf("  Supporting signals: %s\n", strings.Join(finding.Supporting, ", "))
-		}
-		if finding.LastSeen != "" {
-			fmt.Printf("  Last seen: %s\n", formatSessionFindingAge(finding.LastSeen, time.Now().UTC()))
-		}
-		fmt.Printf("  Likely lever: %s (%s confidence)\n", finding.Lever, finding.Confidence)
-		fmt.Printf("  Next: %s\n", finding.Action)
-	}
-	if len(rows) < len(findings) {
-		fmt.Printf("... %d more findings; use --limit 0 for the full list.\n", len(findings)-len(rows))
-	}
-}
-
-func sessionFindingDisplayTarget(finding sessionFinding) string {
-	target := sessionFindingTargetIdentity(finding)
-	if target == "" || strings.Contains(finding.Title, target) {
-		return ""
-	}
-	return " · " + target
-}
-
 func sessionFindingTargetIdentity(finding sessionFinding) string {
 	target := strings.TrimSpace(finding.Target)
 	repository := strings.TrimSpace(finding.Repository)
@@ -1678,22 +1638,4 @@ func splitManagedRepositoryTarget(target string) (repository, relative string, o
 		return "", target, false
 	}
 	return parts[2], strings.Join(parts[3:], "/"), true
-}
-
-func formatSessionFindingAge(lastSeen string, now time.Time) string {
-	seen, err := time.Parse(time.RFC3339, lastSeen)
-	if err != nil || seen.After(now) {
-		return lastSeen
-	}
-	age := now.Sub(seen)
-	switch {
-	case age < time.Minute:
-		return "just now"
-	case age < time.Hour:
-		return fmt.Sprintf("%dm ago", int(age/time.Minute))
-	case age < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(age/time.Hour))
-	default:
-		return fmt.Sprintf("%dd ago", int(age/(24*time.Hour)))
-	}
 }

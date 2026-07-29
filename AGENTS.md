@@ -72,6 +72,8 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
   and corroboration policy.
 - `internal/cli/report_json.go`: compact, detailed, and adjacent-period JSON
   rendering.
+- `internal/cli/format.go`: privacy-safe count and label formatting shared by
+  JSON evidence and the failure timeline.
 
 ## Storage
 

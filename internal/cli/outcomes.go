@@ -1721,44 +1721,6 @@ func hotspotClassification(tasks, reviewFixes, failures, followUps, reverts int,
 	}
 }
 
-func printFileHotspots(hotspots []fileHotspotMetrics, limit int) {
-	if len(hotspots) == 0 {
-		return
-	}
-	if limit > 0 && len(hotspots) > limit {
-		hotspots = hotspots[:limit]
-	}
-	fmt.Println("\nFile edit hotspots (frequency is demand; classification also uses cost and observed rework):")
-	fmt.Printf(
-		"%-42s %7s %7s %7s %13s %15s %7s %7s %-15s\n",
-		"TARGET",
-		"TASKS",
-		"SHARE",
-		"EDITS",
-		"FRESH P50/P90",
-		"RT P50/P90",
-		"REVIEW",
-		"FAIL",
-		"CLASS",
-	)
-	for _, hotspot := range hotspots {
-		fmt.Printf(
-			"%-42s %7s %6.0f%% %7s %7s/%-7s %6s/%-6s %7s %7s %-15s\n",
-			truncateCodexLabel(hotspot.Target, 42),
-			formatCodexCount(int64(hotspot.CompletedTasks)),
-			100*hotspot.TaskShare,
-			formatCodexCount(int64(hotspot.EditCalls)),
-			formatCodexCount(hotspot.FreshTokens.P50),
-			formatCodexCount(hotspot.FreshTokens.P90),
-			formatCodexCount(hotspot.ToolRoundtrips.P50),
-			formatCodexCount(hotspot.ToolRoundtrips.P90),
-			formatCodexCount(int64(hotspot.PostReviewEditCalls)),
-			formatCodexCount(int64(hotspot.DownstreamFailures)),
-			hotspot.Classification,
-		)
-	}
-}
-
 func analyzeTaskPhases(episodes []codexTaskEpisode) map[string]taskPhaseAnalysis {
 	type phaseValues struct {
 		freshTokens, toolCalls, outputTokens, durations, failures, compactions []int64
@@ -2134,52 +2096,6 @@ func taskEpisodeDuration(episode codexTaskEpisode) int64 {
 	return int64(episode.EndedAt.Sub(episode.StartedAt).Seconds())
 }
 
-func printCompletionEpisodeAnalysis(analysis completionEpisodeAnalysis) {
-	if analysis.Completed == 0 && analysis.Incomplete == 0 {
-		return
-	}
-	fmt.Printf(
-		"Completion episodes: %s tool-using, %s response-only, %s left-censored, %s incomplete\n",
-		formatCodexCount(int64(analysis.ToolUsingCompleted)),
-		formatCodexCount(int64(analysis.ResponseOnlyCompleted)),
-		formatCodexCount(int64(analysis.LeftCensoredCompleted)),
-		formatCodexCount(int64(analysis.Incomplete)),
-	)
-	if analysis.ToolUsingCompleted == 0 {
-		return
-	}
-	fmt.Printf(
-		"Completed tool-task outcomes p50/p75/p90: fresh tokens %s/%s/%s; tool roundtrips %s/%s/%s; duration %s/%s/%s\n",
-		formatCodexCount(analysis.FreshTokens.P50),
-		formatCodexCount(analysis.FreshTokens.P75),
-		formatCodexCount(analysis.FreshTokens.P90),
-		formatCodexCount(analysis.ToolCalls.P50),
-		formatCodexCount(analysis.ToolCalls.P75),
-		formatCodexCount(analysis.ToolCalls.P90),
-		formatDurationSeconds(analysis.DurationSeconds.P50),
-		formatDurationSeconds(analysis.DurationSeconds.P75),
-		formatDurationSeconds(analysis.DurationSeconds.P90),
-	)
-	fmt.Printf(
-		"Completed task token split p50/p90: cached input %s/%s; uncached input %s/%s; model output %s/%s\n",
-		formatCodexCount(analysis.CachedInputTokens.P50),
-		formatCodexCount(analysis.CachedInputTokens.P90),
-		formatCodexCount(analysis.UncachedInputTokens.P50),
-		formatCodexCount(analysis.UncachedInputTokens.P90),
-		formatCodexCount(analysis.ModelOutputTokens.P50),
-		formatCodexCount(analysis.ModelOutputTokens.P90),
-	)
-	if phases := formatTaskPhaseAnalysis(analysis.Phases); phases != "" {
-		fmt.Printf("Task phase outcomes: %s\n", phases)
-	}
-	if phases := formatTaskPhaseTailAssociations(analysis.TailPhases, 3); phases != "" {
-		fmt.Printf("High-tail phase mix: %s\n", phases)
-	}
-	if drivers := formatTaskCostTailDrivers(analysis.TailDrivers); drivers != "" {
-		fmt.Printf("Fresh-token tail associations: %s\n", drivers)
-	}
-}
-
 func formatTaskPhaseAnalysis(phases map[string]taskPhaseAnalysis) string {
 	order := []string{"discovery", "editing", "verification", "delivery", "rework", "delegation"}
 	var parts []string
@@ -2280,100 +2196,6 @@ func dominantTaskCostTailDriver(drivers taskCostTailDrivers) (kind string, drive
 		}
 	}
 	return "", taskCostTailDriver{}
-}
-
-func printDeliveryReworkAnalysis(metrics deliveryReworkMetrics) {
-	if metrics.Deliveries == 0 && metrics.PostDeliveryReviewChecks == 0 {
-		return
-	}
-	reworkRate := 100 * ratio(float64(metrics.DeliveriesWithRework), float64(metrics.Deliveries))
-	fmt.Printf(
-		"Delivery quality: %s deliveries, %s with post-delivery edits (%.0f%%), %s review→edit cycles, %s post-delivery review checks\n",
-		formatCodexCount(int64(metrics.Deliveries)),
-		formatCodexCount(int64(metrics.DeliveriesWithRework)),
-		reworkRate,
-		formatCodexCount(int64(metrics.ReviewToEditCycles)),
-		formatCodexCount(int64(metrics.PostDeliveryReviewChecks)),
-	)
-	if metrics.Deliveries > 0 {
-		fmt.Printf(
-			"Pre-delivery evidence after latest edit: tests %s/%s deliveries; review %s/%s deliveries\n",
-			formatCodexCount(int64(metrics.DeliveriesWithPreTests)),
-			formatCodexCount(int64(metrics.Deliveries)),
-			formatCodexCount(int64(metrics.DeliveriesWithPreReview)),
-			formatCodexCount(int64(metrics.Deliveries)),
-		)
-	}
-	if metrics.PostDeliveryEditCalls > 0 {
-		fmt.Printf(
-			"Post-delivery edit attribution: levers %s; scopes %s\n",
-			formatMetricDimensions(metrics.ReworkLevers),
-			formatMetricDimensions(metrics.ReworkScopes),
-		)
-		if cohorts := formatDeliveryReworkCohorts(metrics.Cohorts, 3); cohorts != "" {
-			fmt.Printf("Top delivery cohorts: %s\n", cohorts)
-		}
-		if len(metrics.ReworkTargets) > 0 {
-			fmt.Printf("Top rework targets: %s\n", formatDeliveryReworkTargets(metrics.ReworkTargets))
-		}
-	}
-	if checks := formatVerificationChecks(
-		metrics.Deliveries,
-		metrics.DeliveriesWithRework,
-		metrics.VerificationChecks,
-		3,
-	); checks != "" {
-		fmt.Printf("Verification effectiveness: %s\n", checks)
-	}
-}
-
-func printDownstreamQualityAnalysis(metrics downstreamQualityMetrics) {
-	if metrics.Deliveries == 0 && metrics.DeliveriesWithFailure == 0 && metrics.Reverts == 0 {
-		return
-	}
-	fmt.Printf(
-		"Downstream quality: %s deliveries, %s failed downstream (%.0f%%), %s failure runs, %s follow-up edit cycles, %s/%s recovery redeliveries, %s reverts\n",
-		formatCodexCount(int64(metrics.Deliveries)),
-		formatCodexCount(int64(metrics.DeliveriesWithFailure)),
-		100*ratio(float64(metrics.DeliveriesWithFailure), float64(metrics.Deliveries)),
-		formatCodexCount(int64(metrics.FailureRuns)),
-		formatCodexCount(int64(metrics.FollowUpEditCycles)),
-		formatCodexCount(int64(metrics.RecoveredDeliveries)),
-		formatCodexCount(int64(metrics.RedeliveryAttempts)),
-		formatCodexCount(int64(metrics.Reverts)),
-	)
-	if metrics.DeliveriesWithFailure > 0 {
-		fmt.Printf(
-			"Fresh verification before downstream failure: %s/%s affected deliveries; failure checks %s\n",
-			formatCodexCount(int64(metrics.FailedDeliveriesWithPreTests)),
-			formatCodexCount(int64(metrics.DeliveriesWithFailure)),
-			formatMetricDimensions(metrics.FailureChecks),
-		)
-	}
-	var timings []string
-	if metrics.TimeToFailureSeconds.Count > 0 {
-		timings = append(timings, fmt.Sprintf(
-			"failure p50/p90 %s/%s",
-			formatDurationSeconds(metrics.TimeToFailureSeconds.P50),
-			formatDurationSeconds(metrics.TimeToFailureSeconds.P90),
-		))
-	}
-	if metrics.TimeToRecoverySeconds.Count > 0 {
-		timings = append(timings, fmt.Sprintf(
-			"recovery p50/p90 %s/%s",
-			formatDurationSeconds(metrics.TimeToRecoverySeconds.P50),
-			formatDurationSeconds(metrics.TimeToRecoverySeconds.P90),
-		))
-	}
-	if len(timings) > 0 {
-		fmt.Printf("Downstream timing: %s\n", strings.Join(timings, "; "))
-	}
-	if checks := formatDownstreamPreDeliveryChecks(metrics); checks != "" {
-		fmt.Printf("Downstream rate by pre-delivery check: %s\n", checks)
-	}
-	if cohorts := formatDownstreamCohorts(metrics.Cohorts, 3); cohorts != "" {
-		fmt.Printf("Downstream rate by cohort: %s\n", cohorts)
-	}
 }
 
 func formatDownstreamPreDeliveryChecks(metrics downstreamQualityMetrics) string {

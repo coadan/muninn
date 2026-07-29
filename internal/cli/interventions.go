@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 )
 
 type sessionIntervention struct {
@@ -288,32 +287,4 @@ func latestInterventionFinding(findings []sessionFinding) string {
 		}
 	}
 	return latest
-}
-
-func printSessionInterventions(interventions []sessionIntervention, limit int) {
-	fmt.Println("\nInterventions:")
-	if len(interventions) == 0 {
-		fmt.Println("- No current findings met the recurrence and impact thresholds.")
-		return
-	}
-	rows := interventions
-	if limit > 0 && len(rows) > limit {
-		rows = rows[:limit]
-	}
-	for _, intervention := range rows {
-		fmt.Printf("- [%s priority · %s/%s] %s\n", intervention.Priority, intervention.Lever, intervention.Confidence, intervention.Title)
-		fmt.Printf("  Intervention: %s\n", intervention.ID)
-		fmt.Printf("  Primary signal: %s\n", intervention.PrimarySignal)
-		fmt.Printf("  Evidence: %s.\n", strings.TrimSuffix(intervention.Evidence, "."))
-		if len(intervention.SupportingSignals) > 0 {
-			fmt.Printf("  Supporting signals: %s\n", strings.Join(intervention.SupportingSignals, ", "))
-		}
-		if intervention.LastSeen != "" {
-			fmt.Printf("  Last seen: %s\n", formatSessionFindingAge(intervention.LastSeen, time.Now().UTC()))
-		}
-		fmt.Printf("  Next: %s\n", intervention.Action)
-	}
-	if len(rows) < len(interventions) {
-		fmt.Printf("... %d more interventions; use --limit 0 for the full queue or --details for constituent findings.\n", len(interventions)-len(rows))
-	}
 }

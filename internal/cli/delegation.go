@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -362,81 +361,4 @@ func delegationToolName(name string) bool {
 	default:
 		return false
 	}
-}
-
-func printModelEffortAnalysis(analysis modelEffortAnalysis) {
-	if !analysis.Available || len(analysis.Profiles) == 0 {
-		return
-	}
-	fmt.Println("Model/effort cohorts:")
-	for _, profile := range analysis.Profiles {
-		fmt.Printf(
-			"- %s %s/%s: %s sessions, %s total fresh tokens (%.1f%%, %s/session), %s completed tool tasks at %s fresh tokens/task, %.1f tool calls/task, %.2f tasks/hour; task duration p50/p90 %s/%s\n",
-			profile.AgentKind,
-			profile.Model,
-			profile.ReasoningEffort,
-			formatCodexCount(int64(profile.Sessions)),
-			formatCodexCount(profile.FreshTokens),
-			100*profile.FreshTokenShare,
-			formatCodexCount(profile.FreshTokensPerSession),
-			formatCodexCount(int64(profile.CompletedToolTasks)),
-			formatCodexCount(profile.FreshTokensPerCompletedTask),
-			profile.ToolCallsPerCompletedTask,
-			profile.CompletedToolTasksPerHour,
-			formatDurationSeconds(profile.CompletedTaskDurationSeconds.P50),
-			formatDurationSeconds(profile.CompletedTaskDurationSeconds.P90),
-		)
-	}
-}
-
-func printDelegationAnalysis(analysis delegationAnalysis) {
-	if !analysis.Available || analysis.SubagentSessions == 0 {
-		return
-	}
-	fmt.Printf(
-		"Delegation: %s/%s subagent sessions linked to %s in-scope parents used %.1f%% of fresh tokens; %s children overlapped parent edits; observed concurrency %.2fx\n",
-		formatCodexCount(int64(analysis.LinkedSubagents)),
-		formatCodexCount(int64(analysis.SubagentSessions)),
-		formatCodexCount(int64(analysis.DelegatingParents)),
-		100*analysis.SubagentFreshTokenShare,
-		formatCodexCount(int64(analysis.ChildrenWithEditOverlap)),
-		analysis.SubagentConcurrencyFactor,
-	)
-	if analysis.CoordinationAvailable {
-		fmt.Printf(
-			"Delegation coordination: %s captured calls used ~%s fresh tokens.\n",
-			formatCodexCount(int64(analysis.CoordinationCalls)),
-			formatCodexCount(analysis.CoordinationFreshTokens),
-		)
-	} else {
-		fmt.Println("Delegation coordination: unavailable because the selected provider events do not contain spawn, wait, or message calls.")
-	}
-	if analysis.UnlinkedSubagents > 0 || analysis.ParentsOutsideScope > 0 {
-		fmt.Printf(
-			"Delegation coverage: %s subagents lacked provider parent lineage; %s had parents outside the selected repository or time window.\n",
-			formatCodexCount(int64(analysis.UnlinkedSubagents)),
-			formatCodexCount(int64(analysis.ParentsOutsideScope)),
-		)
-	}
-	if len(analysis.SubagentsByWorkMode) > 0 {
-		fmt.Printf("Delegated work modes: %s.\n", formatDelegatedWorkModes(analysis))
-	}
-}
-
-func formatDelegatedWorkModes(analysis delegationAnalysis) string {
-	order := []string{"implementation", "delivery", "verification", "research/review", "other tool work", "response only"}
-	parts := make([]string, 0, len(order))
-	for _, mode := range order {
-		count := analysis.SubagentsByWorkMode[mode]
-		if count == 0 {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf(
-			"%s %s (~%s fresh tokens)",
-			formatCodexCount(int64(count)),
-			mode,
-			formatCodexCount(analysis.SubagentFreshTokensByWorkMode[mode]),
-		))
-	}
-	return strings.Join(parts, "; ")
 }

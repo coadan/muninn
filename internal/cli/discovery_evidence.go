@@ -29,6 +29,22 @@ type discoveryShapeEvidence struct {
 	EstimatedOutputTokens int64  `json:"estimatedOutputTokens"`
 }
 
+func codexMixedSearchReadMetrics(shapes map[string]codexToolMetrics) codexToolMetrics {
+	var result codexToolMetrics
+	for shape, metrics := range shapes {
+		if !strings.Contains(shape, "search") || !strings.Contains(shape, "file reads") {
+			continue
+		}
+		result.Calls += metrics.Calls
+		result.Sessions = max(result.Sessions, metrics.Sessions)
+		result.FailedCalls += metrics.FailedCalls
+		result.TruncatedCalls += metrics.TruncatedCalls
+		result.OutputBytes += metrics.OutputBytes
+	}
+	result.EstimatedOutputTokens = estimatedTokens(result.OutputBytes)
+	return result
+}
+
 func buildDiscoveryFocusEvidence(summary codexSessionInsightsSummary, repositoryRoot string, limit int) discoveryFocusEvidence {
 	evidence := discoveryFocusEvidence{
 		ReadTargets: make([]discoveryReadTargetEvidence, 0, len(summary.ReadTargets)),
