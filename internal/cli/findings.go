@@ -220,9 +220,15 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			if metrics.Sessions < 2 || metrics.Count < 2 {
 				continue
 			}
+			locallyControlled := locallyControlledOutputContext(context, config.OwnedTools)
+			actionableTestFailure := reason == "test failure" &&
+				strings.Contains(context, "tests")
+			if !locallyControlled && !actionableTestFailure {
+				continue
+			}
 			control := "repository"
 			action := config.Actions.RecurringFailure
-			if locallyControlledOutputContext(context, config.OwnedTools) {
+			if locallyControlled {
 				control = "local"
 				action = "Inspect this operation with `muninn failures --operation " + context + "`, fix the dominant owned failure boundary, and keep one focused regression check."
 			}
