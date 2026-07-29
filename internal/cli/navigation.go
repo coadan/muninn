@@ -1,0 +1,216 @@
+package cli
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+var codexPatchTargetPattern = regexp.MustCompile(`(?m)^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$`)
+var codexNestedToolCallPattern = regexp.MustCompile(`\btools\.([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
+
+func codexReadTargetCandidates(toolName, arguments, input string) []string {
+	var candidates []string
+	for _, command := range codexShellCommands(toolName, arguments, input) {
+		for _, segment := range codexShellCommandSegments(command) {
+			tokens := unwrapShellTokens(segment)
+			if len(tokens) == 0 {
+				continue
+			}
+			switch strings.ToLower(filepath.Base(tokens[0])) {
+			case "cat", "head", "tail", "sed":
+				for _, token := range tokens[1:] {
+					if token == "" || strings.HasPrefix(token, "-") {
+						continue
+					}
+					candidates = appendUniqueString(candidates, token)
+				}
+			}
+		}
+	}
+	return candidates
+}
+
+func codexEditTargetCandidates(toolName, input string) []string {
+	if strings.ToLower(strings.TrimSpace(toolName)) != "apply_patch" {
+		return nil
+	}
+	var targets []string
+	for _, match := range codexPatchTargetPattern.FindAllStringSubmatch(input, -1) {
+		for _, target := range match[1:] {
+			target = strings.TrimSpace(target)
+			if target != "" {
+				targets = appendUniqueString(targets, target)
+			}
+		}
+	}
+	return targets
+}
+
+func unwrapShellTokens(tokens []string) []string {
+	for len(tokens) > 0 && codexShellAssignment(tokens[0]) {
+		tokens = tokens[1:]
+	}
+	for len(tokens) > 0 {
+		switch strings.ToLower(filepath.Base(tokens[0])) {
+		case "env", "command", "time", "sudo":
+			tokens = tokens[1:]
+			for len(tokens) > 0 && (codexShellAssignment(tokens[0]) || strings.HasPrefix(tokens[0], "-")) {
+				tokens = tokens[1:]
+			}
+		default:
+			return tokens
+		}
+	}
+	return nil
+}
+
+func normalizeRepositoryTargets(candidates []string, cwd, repositoryRoot string) []string {
+	return normalizeRepositoryTargetCandidates(candidates, cwd, repositoryRoot, true)
+}
+
+func normalizeRepositoryEditTargets(candidates []string, cwd, repositoryRoot string) []string {
+	return normalizeRepositoryTargetCandidates(candidates, cwd, repositoryRoot, false)
+}
+
+func repositoryTaskForTargetCandidates(candidates []string, cwd, repositoryRoot string) string {
+	task := ""
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || strings.ContainsAny(candidate, "*?[]{}") {
+			continue
+		}
+		path := candidate
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		relative, err := filepath.Rel(repositoryRoot, absolute)
+		if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
+			continue
+		}
+		parts := strings.Split(filepath.ToSlash(filepath.Clean(relative)), "/")
+		candidateTask := ""
+		switch {
+		case len(parts) >= 2 && parts[0] == ".worktrees":
+			candidateTask = parts[1]
+		case len(parts) >= 3 && parts[0] == ".workbench" && parts[1] == "worktrees":
+			candidateTask = parts[2]
+		}
+		if !ownedTaskLabelPattern.MatchString(candidateTask) {
+			continue
+		}
+		if task != "" && task != candidateTask {
+			return ""
+		}
+		task = candidateTask
+	}
+	return task
+}
+
+func normalizeRepositoryTargetCandidates(candidates []string, cwd, repositoryRoot string, requireCurrentFile bool) []string {
+	var targets []string
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || strings.ContainsAny(candidate, "*?[]{}") {
+			continue
+		}
+		path := candidate
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		inside, err := pathInsideRoot(repositoryRoot, absolute)
+		if err != nil || !inside {
+			continue
+		}
+		if requireCurrentFile {
+			info, err := os.Stat(absolute)
+			if err != nil || info.IsDir() {
+				continue
+			}
+		}
+		relative, err := filepath.Rel(repositoryRoot, absolute)
+		if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
+			continue
+		}
+		targets = appendUniqueString(targets, canonicalRepositoryTarget(repositoryRoot, relative))
+	}
+	return targets
+}
+
+func canonicalRepositoryTarget(repositoryRoot, relative string) string {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(relative)), "/")
+	repo := ""
+	remainder := []string(nil)
+	switch {
+	case len(parts) >= 4 && parts[0] == ".worktrees":
+		repo = parts[2]
+		remainder = parts[3:]
+	case len(parts) >= 5 && parts[0] == ".workbench" && parts[1] == "worktrees":
+		repo = parts[3]
+		remainder = parts[4:]
+	}
+	if repo != "" && dirExists(filepath.Join(repositoryRoot, ".workbench", "repos", repo)) {
+		return strings.Join(append([]string{".workbench", "repos", repo}, remainder...), "/")
+	}
+	return strings.Join(parts, "/")
+}
+
+func codexInlineOrchestrationBytes(toolName, arguments, input string) int64 {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	var size int
+	threshold := 4096
+	switch name {
+	case "exec":
+		if codexRoutineCodeModeWrapper(input) {
+			return 0
+		}
+		size = len(input)
+	case "exec_command":
+		threshold = 2048
+		for _, command := range codexShellCommands(toolName, arguments, input) {
+			size += len(command)
+		}
+	default:
+		return 0
+	}
+	if size < threshold {
+		return 0
+	}
+	return int64(size)
+}
+
+func codexRoutineCodeModeWrapper(input string) bool {
+	matches := codexNestedToolCallPattern.FindAllStringSubmatch(input, -1)
+	if len(matches) == 1 && matches[0][1] == "apply_patch" {
+		return true
+	}
+	if len(matches) < 2 ||
+		(!strings.Contains(input, "Promise.allSettled(") && !strings.Contains(input, "Promise.all(")) {
+		return false
+	}
+	for _, match := range matches {
+		if match[1] == "apply_patch" {
+			return false
+		}
+	}
+	const maximumRoutineBatchBytesPerCall = 8 * 1024
+	return len(input)/len(matches) <= maximumRoutineBatchBytesPerCall
+}
+
+func codexConcurrentToolBatch(toolName, input string) bool {
+	if strings.ToLower(strings.TrimSpace(toolName)) != "exec" {
+		return false
+	}
+	matches := codexNestedToolCallPattern.FindAllStringSubmatch(input, -1)
+	return len(matches) >= 2 &&
+		(strings.Contains(input, "Promise.allSettled(") || strings.Contains(input, "Promise.all("))
+}

@@ -6,8 +6,14 @@ reports consume only the normalized session model.
 
 ## Add a provider
 
-Keep the provider parser and its fixtures in one provider-owned file, then add
-one declarative `sessionProviderAdapter` entry in `session_provider.go`:
+Keep provider code and fixtures under a provider-named prefix in
+`internal/cli`, then add one declarative `sessionProviderAdapter` entry in
+`internal/cli/session_provider.go`. A compact format can use one file. When the
+responsibilities are independently substantial, use
+`internal/cli/<provider>_discovery.go`,
+`internal/cli/<provider>_metadata.go`, and
+`internal/cli/<provider>_normalizer.go`; provider wire types stay with the
+normalizer:
 
 ```go
 var otherSessionProvider = sessionProviderAdapter{
