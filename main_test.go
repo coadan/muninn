@@ -267,8 +267,12 @@ func TestCodexToolFailureReasonUsesFixedPrivacySafeLabels(t *testing.T) {
 		"GraphQL: Head sha can't be blank, No commits between main and task/x":    "PR branch state",
 		"unknown nREPL target \"test\"":                                           "unsupported command target",
 		"Unknown option: --path":                                                  "unsupported command option",
+		"diagnostic query cannot combine --table with named views.":               "unsupported command combination",
+		"Specify --playthrough latest or an exact id because there are two.":      "ambiguous playthrough selection",
+		"The completed run has no diagnostic snapshot (no_playthrough).":          "missing diagnostic evidence",
 		"listen tcp 127.0.0.1:8080: bind: address already in use":                 "port collision",
 		"dial tcp 127.0.0.1:8090: connection refused":                             "local service unavailable",
+		"Void development runtime stopped because SpacetimeDB is not running.":    "local service unavailable",
 		"HTTP 502: Bad Gateway":                                                   "transient service failure",
 		"GitHub couldn't respond to GitHub's servers":                             "transient service failure",
 		"zsh: command not found: playwright-cli":                                  "missing executable",
@@ -1733,7 +1737,10 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	}
 	override := `{
 		"schemaVersion": 1,
-		"actions": {"sourceContext": "Use repo context."},
+		"actions": {
+			"sourceContext": "Use repo context.",
+			"yieldedOperation": "Use the managed test command."
+		},
 		"suppressSignals": [
 			"session-loop/progress-stall/bwb/api-start",
 			"session-loop/progress-stall/bwb/api-start"
@@ -1761,6 +1768,9 @@ func TestLoadRepositoryConfigUsesGenericDefaultsAndRepositoryOverride(t *testing
 	}
 	if config.Actions.SourceContext != "Use repo context." {
 		t.Fatalf("repository action override missing: %#v", config)
+	}
+	if config.Actions.YieldedOperation != "Use the managed test command." {
+		t.Fatalf("yielded-operation action override missing: %#v", config)
 	}
 	if len(config.OwnedTools) != 1 || config.OwnedTools[0].ID != "bwb" {
 		t.Fatalf("owned tooling config missing: %#v", config)

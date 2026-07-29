@@ -12,6 +12,9 @@ import (
 // A completion episode is the privacy-safe analytical proxy for one task. It
 // starts after the previous completion marker and ends at the next marker.
 type codexTaskEpisode struct {
+	AgentKind         string
+	Model             string
+	ReasoningEffort   string
 	StartedAt         time.Time
 	EndedAt           time.Time
 	Completed         bool
@@ -91,6 +94,9 @@ type downstreamQualityMetrics struct {
 	Reverts                           int                                `json:"reverts"`
 	Sessions                          int                                `json:"sessions"`
 	FailureChecks                     map[string]int                     `json:"failureChecks,omitempty"`
+	FailureTargets                    map[string]int                     `json:"failureTargets,omitempty"`
+	FollowUpTargets                   map[string]int                     `json:"followUpTargets,omitempty"`
+	RevertTargets                     map[string]int                     `json:"revertTargets,omitempty"`
 	PreDeliveryChecks                 map[string]downstreamCheckMetrics  `json:"preDeliveryChecks,omitempty"`
 	Cohorts                           map[string]downstreamCohortMetrics `json:"cohorts,omitempty"`
 	TimeToFailureSeconds              outcomeDistribution                `json:"timeToFailureSeconds"`
@@ -186,6 +192,7 @@ func (tracker *downstreamQualityTracker) observeEdit(event normalizedSessionEven
 	matchedTargets := matchingTargets(event.Targets, tracker.currentDeliveryTargets)
 	if tracker.failureActive && len(matchedTargets) > 0 {
 		tracker.metrics.FollowUpEditCycles++
+		incrementTargetCounts(&tracker.metrics.FollowUpTargets, matchedTargets)
 		tracker.recoveryEditSeen = true
 		tracker.recoveryPassedChecks = nil
 		if tracker.recoveryCohorts == nil {
@@ -259,6 +266,10 @@ func (tracker *downstreamQualityTracker) observeFailure(event normalizedSessionE
 	if !tracker.currentDeliveryFailed {
 		tracker.currentDeliveryFailed = true
 		tracker.metrics.DeliveriesWithFailure++
+		incrementTargetCounts(
+			&tracker.metrics.FailureTargets,
+			stringSetValues(tracker.currentDeliveryTargets),
+		)
 		if tracker.currentDeliveryPreTests {
 			tracker.metrics.FailedDeliveriesWithPreTests++
 		}
@@ -297,6 +308,10 @@ func (tracker *downstreamQualityTracker) observeRevert(event normalizedSessionEv
 		return
 	}
 	tracker.metrics.Reverts++
+	incrementTargetCounts(
+		&tracker.metrics.RevertTargets,
+		stringSetValues(tracker.currentDeliveryTargets),
+	)
 	for cohort := range tracker.currentDeliveryCohorts {
 		metrics := tracker.cohort(cohort)
 		metrics.Reverts++
@@ -307,6 +322,10 @@ func (tracker *downstreamQualityTracker) observeRevert(event normalizedSessionEv
 	}
 	tracker.currentDeliveryFailed = true
 	tracker.metrics.DeliveriesWithFailure++
+	incrementTargetCounts(
+		&tracker.metrics.FailureTargets,
+		stringSetValues(tracker.currentDeliveryTargets),
+	)
 	if tracker.currentDeliveryPreTests {
 		tracker.metrics.FailedDeliveriesWithPreTests++
 	}
@@ -653,6 +672,23 @@ func cloneStringSet(values map[string]struct{}) map[string]struct{} {
 	return cloned
 }
 
+func stringSetValues(values map[string]struct{}) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	return result
+}
+
+func incrementTargetCounts(target *map[string]int, values []string) {
+	if *target == nil {
+		*target = map[string]int{}
+	}
+	for _, value := range values {
+		(*target)[value]++
+	}
+}
+
 func matchingTargets(targets []string, candidates map[string]struct{}) []string {
 	var matched []string
 	for _, target := range targets {
@@ -960,6 +996,9 @@ func addDownstreamQualityMetrics(target *downstreamQualityMetrics, addition down
 	for check, count := range addition.FailureChecks {
 		target.FailureChecks[check] += count
 	}
+	addIntCounts(&target.FailureTargets, addition.FailureTargets)
+	addIntCounts(&target.FollowUpTargets, addition.FollowUpTargets)
+	addIntCounts(&target.RevertTargets, addition.RevertTargets)
 	if target.PreDeliveryChecks == nil {
 		target.PreDeliveryChecks = map[string]downstreamCheckMetrics{}
 	}
@@ -994,6 +1033,15 @@ func addDownstreamQualityMetrics(target *downstreamQualityMetrics, addition down
 		addition.timeToRecoverySecondsObservations...,
 	)
 	finalizeDownstreamQualityMetrics(target)
+}
+
+func addIntCounts(target *map[string]int, addition map[string]int) {
+	if *target == nil {
+		*target = map[string]int{}
+	}
+	for key, count := range addition {
+		(*target)[key] += count
+	}
 }
 
 func finalizeDownstreamQualityMetrics(metrics *downstreamQualityMetrics) {
@@ -1233,6 +1281,31 @@ type completionEpisodeAnalysis struct {
 	Phases                   map[string]taskPhaseAnalysis `json:"phases,omitempty"`
 	TailPhases               []taskPhaseTailAssociation   `json:"tailPhases,omitempty"`
 	FileHotspots             []fileHotspotMetrics         `json:"fileHotspots,omitempty"`
+	PerformanceCohorts       []taskPerformanceCohort      `json:"performanceCohorts,omitempty"`
+	QualityCohorts           []taskQualityCohort          `json:"qualityCohorts,omitempty"`
+}
+
+type taskPerformanceCohort struct {
+	AgentKind       string              `json:"agentKind"`
+	Model           string              `json:"model"`
+	ReasoningEffort string              `json:"reasoningEffort"`
+	TaskFamily      string              `json:"taskFamily"`
+	CompletedTasks  int                 `json:"completedTasks"`
+	FreshTokens     outcomeDistribution `json:"freshTokens"`
+	ToolRoundtrips  outcomeDistribution `json:"toolRoundtrips"`
+	DurationSeconds outcomeDistribution `json:"durationSeconds"`
+}
+
+type taskQualityCohort struct {
+	AgentKind         string `json:"agentKind"`
+	Model             string `json:"model"`
+	ReasoningEffort   string `json:"reasoningEffort"`
+	TaskFamily        string `json:"taskFamily"`
+	Deliveries        int    `json:"deliveries"`
+	ReviewFixes       int    `json:"reviewFixes"`
+	DownstreamFailure int    `json:"downstreamFailures"`
+	FollowUpEdits     int    `json:"followUpEdits"`
+	Reverts           int    `json:"reverts"`
 }
 
 type fileHotspotMetrics struct {
@@ -1243,6 +1316,11 @@ type fileHotspotMetrics struct {
 	ToolRoundtrips      outcomeDistribution `json:"toolRoundtrips"`
 	DurationSeconds     outcomeDistribution `json:"durationSeconds"`
 	PostReviewEditCalls int                 `json:"postReviewEditCalls"`
+	DownstreamFailures  int                 `json:"downstreamFailures"`
+	FollowUpEdits       int                 `json:"followUpEdits"`
+	Reverts             int                 `json:"reverts"`
+	Classification      string              `json:"classification"`
+	LastSeen            string              `json:"lastSeen,omitempty"`
 }
 
 type taskPhaseAnalysis struct {
@@ -1332,18 +1410,167 @@ func analyzeCompletionEpisodes(episodes []codexTaskEpisode) completionEpisodeAna
 	analysis.TailDrivers = analyzeTaskCostTailDrivers(eligible)
 	analysis.Phases = analyzeTaskPhases(eligible)
 	analysis.TailPhases = analyzeTaskPhaseTailAssociations(eligible)
+	analysis.PerformanceCohorts = analyzeTaskPerformanceCohorts(eligible)
 	return analysis
+}
+
+func analyzeTaskPerformanceCohorts(episodes []codexTaskEpisode) []taskPerformanceCohort {
+	type observations struct {
+		cohort     taskPerformanceCohort
+		fresh      []int64
+		roundtrips []int64
+		durations  []int64
+	}
+	byKey := map[string]*observations{}
+	for _, episode := range episodes {
+		agentKind := nonemptyProfileLabel(episode.AgentKind, "(unknown)")
+		model := nonemptyProfileLabel(episode.Model, "(unknown)")
+		effort := nonemptyProfileLabel(episode.ReasoningEffort, "(unknown)")
+		family := taskPerformanceFamily(episode)
+		key := strings.Join([]string{agentKind, model, effort, family}, "\x00")
+		current := byKey[key]
+		if current == nil {
+			current = &observations{cohort: taskPerformanceCohort{
+				AgentKind:       agentKind,
+				Model:           model,
+				ReasoningEffort: effort,
+				TaskFamily:      family,
+			}}
+			byKey[key] = current
+		}
+		current.fresh = append(current.fresh, episodeFreshTokens(episode))
+		current.roundtrips = append(current.roundtrips, int64(episode.ToolCalls))
+		current.durations = append(current.durations, taskEpisodeDuration(episode))
+	}
+	cohorts := make([]taskPerformanceCohort, 0, len(byKey))
+	for _, current := range byKey {
+		current.cohort.CompletedTasks = len(current.fresh)
+		current.cohort.FreshTokens = summarizeOutcomeDistribution(current.fresh)
+		current.cohort.ToolRoundtrips = summarizeOutcomeDistribution(current.roundtrips)
+		current.cohort.DurationSeconds = summarizeOutcomeDistribution(current.durations)
+		cohorts = append(cohorts, current.cohort)
+	}
+	sort.Slice(cohorts, func(i, j int) bool {
+		if cohorts[i].CompletedTasks != cohorts[j].CompletedTasks {
+			return cohorts[i].CompletedTasks > cohorts[j].CompletedTasks
+		}
+		return taskPerformanceCohortKey(cohorts[i]) < taskPerformanceCohortKey(cohorts[j])
+	})
+	return cohorts
+}
+
+func taskPerformanceFamily(episode codexTaskEpisode) string {
+	if episode.Families["browser QA"] > 0 {
+		return "browser-qa"
+	}
+	if family := dominantCountLabel(episode.TargetCohorts); family != "" {
+		return family
+	}
+	if family := dominantCountLabel(episode.Families); family != "" {
+		return "operation:" + family
+	}
+	return "(unknown)"
+}
+
+func dominantCountLabel(values map[string]int) string {
+	best := ""
+	bestCount := 0
+	for label, count := range values {
+		if count > bestCount || (count == bestCount && (best == "" || label < best)) {
+			best = label
+			bestCount = count
+		}
+	}
+	return best
+}
+
+func taskPerformanceCohortKey(cohort taskPerformanceCohort) string {
+	return strings.Join(
+		[]string{cohort.AgentKind, cohort.Model, cohort.ReasoningEffort, cohort.TaskFamily},
+		"\x00",
+	)
+}
+
+func taskQualityCohortKey(cohort taskQualityCohort) string {
+	return strings.Join(
+		[]string{cohort.AgentKind, cohort.Model, cohort.ReasoningEffort, cohort.TaskFamily},
+		"\x00",
+	)
+}
+
+func analyzeTaskQualityCohorts(records []codexSessionRecord) []taskQualityCohort {
+	byKey := map[string]taskQualityCohort{}
+	for _, record := range records {
+		agentKind := nonemptyProfileLabel(record.AgentKind, "(unknown)")
+		model := nonemptyProfileLabel(record.Model, "(unknown)")
+		effort := nonemptyProfileLabel(record.ReasoningEffort, "(unknown)")
+		families := map[string]struct{}{}
+		for family := range record.DeliveryRework.Cohorts {
+			families[family] = struct{}{}
+		}
+		for family := range record.DownstreamQuality.Cohorts {
+			families[family] = struct{}{}
+		}
+		for sourceFamily := range families {
+			family := qualityTaskFamily(record, sourceFamily)
+			cohort := taskQualityCohort{
+				AgentKind:       agentKind,
+				Model:           model,
+				ReasoningEffort: effort,
+				TaskFamily:      family,
+			}
+			key := taskQualityCohortKey(cohort)
+			cohort = byKey[key]
+			cohort.AgentKind = agentKind
+			cohort.Model = model
+			cohort.ReasoningEffort = effort
+			cohort.TaskFamily = family
+			rework := record.DeliveryRework.Cohorts[sourceFamily]
+			quality := record.DownstreamQuality.Cohorts[sourceFamily]
+			cohort.Deliveries += max(rework.Deliveries, quality.Deliveries)
+			cohort.ReviewFixes += rework.DeliveriesWithRework
+			cohort.DownstreamFailure += quality.DeliveriesWithFailure
+			cohort.FollowUpEdits += quality.FollowUpEditCycles
+			cohort.Reverts += quality.Reverts
+			byKey[key] = cohort
+		}
+	}
+	cohorts := make([]taskQualityCohort, 0, len(byKey))
+	for _, cohort := range byKey {
+		cohorts = append(cohorts, cohort)
+	}
+	sort.Slice(cohorts, func(i, j int) bool {
+		if cohorts[i].Deliveries != cohorts[j].Deliveries {
+			return cohorts[i].Deliveries > cohorts[j].Deliveries
+		}
+		return taskQualityCohortKey(cohorts[i]) < taskQualityCohortKey(cohorts[j])
+	})
+	return cohorts
+}
+
+func qualityTaskFamily(record codexSessionRecord, family string) string {
+	if family != "tests/browser" {
+		return family
+	}
+	for _, episode := range record.TaskEpisodes {
+		if taskPerformanceFamily(episode) == "browser-qa" {
+			return "browser-qa"
+		}
+	}
+	return family
 }
 
 func analyzeFileHotspots(
 	episodes []codexTaskEpisode,
 	reworkTargets map[string]int,
+	quality downstreamQualityMetrics,
 ) []fileHotspotMetrics {
 	type observations struct {
 		tasks      int
 		editCalls  int
 		roundtrips []int64
 		durations  []int64
+		lastSeen   time.Time
 	}
 	eligibleTasks := 0
 	byTarget := map[string]*observations{}
@@ -1366,12 +1593,18 @@ func analyzeFileHotspots(
 			current.editCalls += calls
 			current.roundtrips = append(current.roundtrips, int64(episode.ToolCalls))
 			current.durations = append(current.durations, taskEpisodeDuration(episode))
+			if episode.EndedAt.After(current.lastSeen) {
+				current.lastSeen = episode.EndedAt
+			}
 		}
 	}
 	reworkByTarget := map[string]int{}
 	for target, calls := range reworkTargets {
 		reworkByTarget[deliveryTargetLabel(target)] += calls
 	}
+	failuresByTarget := normalizedTargetCounts(quality.FailureTargets)
+	followUpsByTarget := normalizedTargetCounts(quality.FollowUpTargets)
+	revertsByTarget := normalizedTargetCounts(quality.RevertTargets)
 	var hotspots []fileHotspotMetrics
 	for target, current := range byTarget {
 		if current.tasks < 2 {
@@ -1385,11 +1618,30 @@ func analyzeFileHotspots(
 			ToolRoundtrips:      summarizeOutcomeDistribution(current.roundtrips),
 			DurationSeconds:     summarizeOutcomeDistribution(current.durations),
 			PostReviewEditCalls: reworkByTarget[target],
+			DownstreamFailures:  failuresByTarget[target],
+			FollowUpEdits:       followUpsByTarget[target],
+			Reverts:             revertsByTarget[target],
+			LastSeen:            formatSessionFindingTime(current.lastSeen),
+			Classification: hotspotClassification(
+				current.tasks,
+				reworkByTarget[target],
+				failuresByTarget[target],
+				followUpsByTarget[target],
+				revertsByTarget[target],
+				summarizeOutcomeDistribution(current.roundtrips),
+			),
 		})
 	}
 	sort.Slice(hotspots, func(i, j int) bool {
 		if hotspots[i].CompletedTasks != hotspots[j].CompletedTasks {
 			return hotspots[i].CompletedTasks > hotspots[j].CompletedTasks
+		}
+		leftRisk := hotspots[i].PostReviewEditCalls + hotspots[i].DownstreamFailures +
+			hotspots[i].FollowUpEdits + hotspots[i].Reverts
+		rightRisk := hotspots[j].PostReviewEditCalls + hotspots[j].DownstreamFailures +
+			hotspots[j].FollowUpEdits + hotspots[j].Reverts
+		if leftRisk != rightRisk {
+			return leftRisk > rightRisk
 		}
 		if hotspots[i].PostReviewEditCalls != hotspots[j].PostReviewEditCalls {
 			return hotspots[i].PostReviewEditCalls > hotspots[j].PostReviewEditCalls
@@ -1402,6 +1654,27 @@ func analyzeFileHotspots(
 	return hotspots
 }
 
+func normalizedTargetCounts(values map[string]int) map[string]int {
+	result := map[string]int{}
+	for target, count := range values {
+		result[deliveryTargetLabel(target)] += count
+	}
+	return result
+}
+
+func hotspotClassification(tasks, reviewFixes, failures, followUps, reverts int, roundtrips outcomeDistribution) string {
+	switch {
+	case reviewFixes > 0 || followUps > 0:
+		return "review/rework"
+	case failures > 0 || reverts > 0:
+		return "downstream-risk"
+	case tasks >= 3 && roundtrips.P50 >= 50:
+		return "expensive-owner"
+	default:
+		return "healthy-demand"
+	}
+}
+
 func printFileHotspots(hotspots []fileHotspotMetrics, limit int) {
 	if len(hotspots) == 0 {
 		return
@@ -1409,21 +1682,23 @@ func printFileHotspots(hotspots []fileHotspotMetrics, limit int) {
 	if limit > 0 && len(hotspots) > limit {
 		hotspots = hotspots[:limit]
 	}
-	fmt.Println("\nFile edit hotspots (frequency is demand; correlate cost and post-review edits before acting):")
+	fmt.Println("\nFile edit hotspots (frequency is demand; classification also uses cost and observed rework):")
 	fmt.Printf(
-		"%-48s %7s %7s %7s %13s %15s %10s\n",
+		"%-42s %7s %7s %7s %13s %15s %7s %7s %-15s\n",
 		"TARGET",
 		"TASKS",
 		"SHARE",
 		"EDITS",
 		"RT P50/P90",
 		"TIME P50/P90",
-		"POST-REVIEW",
+		"REVIEW",
+		"FAIL",
+		"CLASS",
 	)
 	for _, hotspot := range hotspots {
 		fmt.Printf(
-			"%-48s %7s %6.0f%% %7s %6s/%-6s %7s/%-7s %10s\n",
-			truncateCodexLabel(hotspot.Target, 48),
+			"%-42s %7s %6.0f%% %7s %6s/%-6s %7s/%-7s %7s %7s %-15s\n",
+			truncateCodexLabel(hotspot.Target, 42),
 			formatCodexCount(int64(hotspot.CompletedTasks)),
 			100*hotspot.TaskShare,
 			formatCodexCount(int64(hotspot.EditCalls)),
@@ -1432,6 +1707,8 @@ func printFileHotspots(hotspots []fileHotspotMetrics, limit int) {
 			formatDurationSeconds(hotspot.DurationSeconds.P50),
 			formatDurationSeconds(hotspot.DurationSeconds.P90),
 			formatCodexCount(int64(hotspot.PostReviewEditCalls)),
+			formatCodexCount(int64(hotspot.DownstreamFailures)),
+			hotspot.Classification,
 		)
 	}
 }

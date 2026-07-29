@@ -167,6 +167,7 @@ func canonicalRepositoryTarget(repositoryRoot, relative string) string {
 func codexInlineOrchestrationBytes(toolName, arguments, input string) int64 {
 	name := strings.ToLower(strings.TrimSpace(toolName))
 	var size int
+	threshold := 4096
 	switch name {
 	case "exec":
 		if codexRoutineCodeModeWrapper(input) {
@@ -174,14 +175,14 @@ func codexInlineOrchestrationBytes(toolName, arguments, input string) int64 {
 		}
 		size = len(input)
 	case "exec_command":
+		threshold = 2048
 		for _, command := range codexShellCommands(toolName, arguments, input) {
 			size += len(command)
 		}
 	default:
 		return 0
 	}
-	const inlineOrchestrationThreshold = 4096
-	if size < inlineOrchestrationThreshold {
+	if size < threshold {
 		return 0
 	}
 	return int64(size)

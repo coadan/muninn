@@ -209,3 +209,133 @@ func TestRoundtripTrendHelpersCountTransitionsAndWaits(t *testing.T) {
 		t.Fatalf("wait calls=%d want 7", got)
 	}
 }
+
+func TestMatchedPerformanceCohortsRequireSharedAdequateSamples(t *testing.T) {
+	cohort := taskPerformanceCohort{
+		AgentKind:       "root",
+		Model:           "gpt-5.6-sol",
+		ReasoningEffort: "high",
+		TaskFamily:      "worker",
+		CompletedTasks:  4,
+	}
+	other := cohort
+	other.CompletedTasks = 2
+	if got := matchedPerformanceCohorts(
+		[]taskPerformanceCohort{cohort},
+		[]taskPerformanceCohort{other},
+		3,
+	); len(got) != 0 {
+		t.Fatalf("undersized cohort matched: %#v", got)
+	}
+	other.CompletedTasks = 5
+	if got := matchedPerformanceCohorts(
+		[]taskPerformanceCohort{cohort},
+		[]taskPerformanceCohort{other},
+		3,
+	); len(got) != 1 {
+		t.Fatalf("shared cohort mismatch: %#v", got)
+	}
+}
+
+func TestQualityAdjustedVerdictDetectsShiftedDownstreamWork(t *testing.T) {
+	baseline := codexSessionInsightsReport{}
+	current := codexSessionInsightsReport{}
+	baseline.Summary.DeliveryRework = deliveryReworkMetrics{Deliveries: 20}
+	current.Summary.DeliveryRework = deliveryReworkMetrics{Deliveries: 20}
+	baseline.Summary.DownstreamQuality = downstreamQualityMetrics{
+		Deliveries:            20,
+		DeliveriesWithFailure: 2,
+	}
+	current.Summary.DownstreamQuality = downstreamQualityMetrics{
+		Deliveries:            20,
+		DeliveriesWithFailure: 8,
+	}
+	verdict := qualityAdjustedPerformanceVerdict(
+		baseline,
+		current,
+		[]trendMetric{{
+			Name:          "matched duration",
+			Baseline:      100,
+			Current:       70,
+			LowerIsBetter: true,
+		}},
+		nil,
+	)
+	if !strings.HasPrefix(verdict, "shifted downstream") {
+		t.Fatalf("verdict=%q want shifted downstream", verdict)
+	}
+}
+
+func TestQualityAdjustedVerdictRecognizesQualityTradeoff(t *testing.T) {
+	baseline := codexSessionInsightsReport{}
+	current := codexSessionInsightsReport{}
+	baseline.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries:           20,
+		DeliveriesWithRework: 8,
+	}
+	current.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries:           20,
+		DeliveriesWithRework: 2,
+	}
+	baseline.Summary.DownstreamQuality = downstreamQualityMetrics{Deliveries: 20}
+	current.Summary.DownstreamQuality = downstreamQualityMetrics{Deliveries: 20}
+	verdict := qualityAdjustedPerformanceVerdict(
+		baseline,
+		current,
+		[]trendMetric{{
+			Name:          "matched duration",
+			Baseline:      100,
+			Current:       130,
+			LowerIsBetter: true,
+		}},
+		nil,
+	)
+	if !strings.HasPrefix(verdict, "quality tradeoff") {
+		t.Fatalf("verdict=%q want quality tradeoff", verdict)
+	}
+}
+
+func TestMatchedQualityCohortsRequireSamePerformanceCohort(t *testing.T) {
+	performance := []matchedPerformanceCohort{{
+		Baseline: taskPerformanceCohort{
+			AgentKind: "root", Model: "sol", ReasoningEffort: "high", TaskFamily: "src/app",
+		},
+		Current: taskPerformanceCohort{
+			AgentKind: "root", Model: "sol", ReasoningEffort: "high", TaskFamily: "src/app",
+		},
+	}}
+	baseline := []taskQualityCohort{
+		{AgentKind: "root", Model: "sol", ReasoningEffort: "high", TaskFamily: "src/app", Deliveries: 8},
+		{AgentKind: "root", Model: "sol", ReasoningEffort: "high", TaskFamily: "docs", Deliveries: 8},
+	}
+	current := []taskQualityCohort{
+		{AgentKind: "root", Model: "sol", ReasoningEffort: "high", TaskFamily: "src/app", Deliveries: 6},
+		{AgentKind: "root", Model: "sol", ReasoningEffort: "high", TaskFamily: "docs", Deliveries: 8},
+	}
+	got := matchedQualityCohorts(baseline, current, performance, 5)
+	if len(got) != 1 || got[0].Baseline.TaskFamily != "src/app" {
+		t.Fatalf("matched quality cohorts=%#v want only shared performance cohort", got)
+	}
+}
+
+func TestQualityAdjustedVerdictPrefersMatchedQuality(t *testing.T) {
+	baseline := codexSessionInsightsReport{}
+	current := codexSessionInsightsReport{}
+	baseline.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries: 20, DeliveriesWithRework: 0,
+	}
+	current.Summary.DeliveryRework = deliveryReworkMetrics{
+		Deliveries: 20, DeliveriesWithRework: 10,
+	}
+	baseline.Summary.DownstreamQuality = downstreamQualityMetrics{Deliveries: 20}
+	current.Summary.DownstreamQuality = downstreamQualityMetrics{Deliveries: 20}
+	verdict := qualityAdjustedPerformanceVerdict(
+		baseline,
+		current,
+		[]trendMetric{{Name: "duration", Baseline: 100, Current: 70, LowerIsBetter: true}},
+		[]trendMetric{{Name: "matched review", Baseline: 0, Current: 0, LowerIsBetter: true}},
+	)
+	if !strings.HasPrefix(verdict, "improved") {
+		t.Fatalf("verdict=%q should use matched quality over aggregate regression", verdict)
+	}
+}

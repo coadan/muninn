@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"strings"
 	"time"
 )
@@ -56,6 +57,8 @@ type normalizedSessionEvent struct {
 	TargetCandidates              []string
 	Targets                       []string
 	InlineBytes                   int64
+	Diagnostic                    *normalizedDiagnosticObservation
+	WorkingDirectories            []string
 }
 
 func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string, since, generatedAt time.Time, ownership ownershipCatalog) (codexSessionRecord, error) {
@@ -81,17 +84,25 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	previousCommand := normalizedSessionEvent{}
 	previousTokens := codexTokenUsage{}
 	hasPreviousTokens := false
-	episode := codexTaskEpisode{}
+	episode := newTaskEpisode(record)
 	deliveryTrackers := map[string]*deliveryReworkTracker{}
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
+	var activeDiagnostic *diagnosticFailureEpisode
+	pendingContinuations := map[string]int{}
+	inRepositoryScope := true
 	for _, event := range session.Events {
 		event = withoutContinuationCallAttribution(event)
+		if inside, explicit := eventRepositoryScope(event, session.CWD, workspaceRoot); explicit {
+			inRepositoryScope = inside
+		}
 		if event.OccurredAt.Before(since) {
 			if event.Kind == sessionEventToken {
 				previousTokens = event.Tokens
 				hasPreviousTokens = true
 			}
-			episode.LeftCensored = event.Kind != sessionEventComplete
+			if inRepositoryScope {
+				episode.LeftCensored = event.Kind != sessionEventComplete
+			}
 			continue
 		}
 		if event.OccurredAt.After(generatedAt) {
@@ -100,9 +111,59 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		tokenIncrement := codexTokenUsage{}
 		if event.Kind == sessionEventToken {
 			tokenIncrement = codexTokenUsageIncrement(event.Tokens, previousTokens, hasPreviousTokens)
-			addCodexTokenUsage(&record.Tokens, tokenIncrement)
 			previousTokens = event.Tokens
 			hasPreviousTokens = true
+		}
+		if !inRepositoryScope {
+			continue
+		}
+		if event.Kind == sessionEventToken {
+			addCodexTokenUsage(&record.Tokens, tokenIncrement)
+		}
+		if activeDiagnostic != nil &&
+			event.Kind != sessionEventToolOutput &&
+			event.OccurredAt.Sub(activeDiagnostic.EndedAt) > 30*time.Minute {
+			record.DiagnosticFailures = append(record.DiagnosticFailures, *activeDiagnostic)
+			activeDiagnostic = nil
+		}
+		if activeDiagnostic != nil {
+			if event.Diagnostic != nil {
+				record.DiagnosticFailures = append(record.DiagnosticFailures, *activeDiagnostic)
+				activeDiagnostic = nil
+			} else {
+				activeDiagnostic.EndedAt = event.OccurredAt
+				switch event.Kind {
+				case sessionEventToken:
+					addCodexTokenUsage(&activeDiagnostic.Tokens, tokenIncrement)
+				case sessionEventToolCall:
+					activeDiagnostic.ToolCalls++
+				case sessionEventToolOutput:
+					activeDiagnostic.OutputBytes += event.OutputBytes
+					if event.Failed {
+						activeDiagnostic.FailedCalls++
+					}
+				}
+			}
+		}
+		if event.Diagnostic != nil && event.Diagnostic.Status == "passed" {
+			record.DiagnosticPasses = append(record.DiagnosticPasses, *event.Diagnostic)
+			touchSessionActivity(record.Activity, "diagnostic-pass", event.Diagnostic.Target, event.OccurredAt)
+		}
+		if event.Diagnostic != nil && event.Diagnostic.Failure != nil {
+			failedAt := event.Diagnostic.Failure.FailedAt
+			if failedAt.IsZero() || failedAt.After(event.OccurredAt) {
+				failedAt = event.OccurredAt
+			}
+			activeDiagnostic = &diagnosticFailureEpisode{
+				normalizedDiagnosticFailure: *event.Diagnostic.Failure,
+				Target:                      event.Diagnostic.Target,
+				Model:                       record.Model,
+				ReasoningEffort:             record.ReasoningEffort,
+				AgentKind:                   record.AgentKind,
+				EndedAt:                     event.OccurredAt,
+			}
+			activeDiagnostic.FailedAt = failedAt
+			touchSessionActivity(record.Activity, "diagnostic-failure", event.Diagnostic.Failure.Fingerprint, event.OccurredAt)
 		}
 		if record.StartedAt.IsZero() || event.OccurredAt.Before(record.StartedAt) {
 			record.StartedAt = event.OccurredAt
@@ -169,7 +230,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			record.Completed = true
 			touchSessionActivity(record.Activity, "completion", "", event.OccurredAt)
 			record.TaskEpisodes = append(record.TaskEpisodes, episode)
-			episode = codexTaskEpisode{}
+			episode = newTaskEpisode(record)
 			previousCommand = normalizedSessionEvent{}
 			previousCommandRound = 0
 		case sessionEventCompaction:
@@ -184,11 +245,17 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				record.InlineOrchestrationCalls++
 				record.InlineOrchestrationBytes += event.InlineBytes
 				record.InlineOrchestrationMaxBytes = max(record.InlineOrchestrationMaxBytes, event.InlineBytes)
-				metrics := record.InlineOrchestrationByTool[event.ToolName]
-				metrics.Calls++
-				metrics.Bytes += event.InlineBytes
-				metrics.MaxBytes = max(metrics.MaxBytes, event.InlineBytes)
-				record.InlineOrchestrationByTool[event.ToolName] = metrics
+				recordInlineMetric(record.InlineOrchestrationByTool, event.ToolName, event.InlineBytes)
+				family := event.Family
+				if family == "" {
+					family = "other CLI"
+				}
+				recordInlineMetric(record.InlineOrchestrationByFamily, family, event.InlineBytes)
+				recordInlineMetric(
+					record.InlineOrchestrationByOwner,
+					inlineOrchestrationOwner(event, eventOperations, ownership),
+					event.InlineBytes,
+				)
 				touchSessionActivity(record.Activity, "inline", "", event.OccurredAt)
 			}
 			record.ToolCallsByName[event.ToolName]++
@@ -227,6 +294,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				metrics := record.ReadTargets[target]
 				if event.ToolName == "apply_patch" {
 					record.EditTargets[target]++
+					touchSessionActivity(record.Activity, "edit", target, event.OccurredAt)
 				} else {
 					metrics.Reads++
 				}
@@ -279,6 +347,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
 			ownedOperations := eventOperations
+			recordContinuationState(pendingContinuations, event, ownedOperations)
 			recordProgressWait(record, event, ownedOperations, ownership)
 			recordRapidContinuationPoll(record, event, ownedOperations)
 			recordOversizedOutput(record, event, ownedOperations)
@@ -315,6 +384,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if !episode.StartedAt.IsZero() {
 		record.TaskEpisodes = append(record.TaskEpisodes, episode)
 	}
+	if activeDiagnostic != nil {
+		record.DiagnosticFailures = append(record.DiagnosticFailures, *activeDiagnostic)
+	}
 	for _, tracker := range deliveryTrackers {
 		addDeliveryReworkMetrics(&record.DeliveryRework, tracker.metrics)
 	}
@@ -333,6 +405,17 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if record.StartedAt.IsZero() {
 		return codexSessionRecord{}, nil
 	}
+	if record.Completed || generatedAt.Sub(record.EndedAt) >= 30*time.Minute {
+		// ponytail: context-level accounting can undercount concurrent yielded
+		// operations with the same attribution; add provider operation IDs if
+		// this becomes material in real session evidence.
+		for context, count := range pendingContinuations {
+			if count > 0 {
+				record.AbandonedContinuations[context] += count
+				touchSessionActivity(record.Activity, "abandoned-continuation", context, record.EndedAt)
+			}
+		}
+	}
 	for operation, tasks := range record.OwnedOperationTasks {
 		for task, metrics := range tasks {
 			if metrics.Calls > 0 {
@@ -343,6 +426,14 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	}
 	touchSessionActivity(record.Activity, "task", record.Task, record.EndedAt)
 	return record, nil
+}
+
+func newTaskEpisode(record codexSessionRecord) codexTaskEpisode {
+	return codexTaskEpisode{
+		AgentKind:       record.AgentKind,
+		Model:           record.Model,
+		ReasoningEffort: record.ReasoningEffort,
+	}
 }
 
 func codexTokenUsageIncrement(current, previous codexTokenUsage, hasPrevious bool) codexTokenUsage {
@@ -374,13 +465,69 @@ func newCodexSessionRecord() codexSessionRecord {
 		ReadTargets:                  map[string]codexTargetMetrics{},
 		EditTargets:                  map[string]int{},
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
+		InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
+		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
 		FailureReasons:               map[string]int{},
 		FailureContexts:              map[string]map[string]int{},
 		ProgressStalls:               map[string]codexWaitMetrics{},
 		ExpectedWaits:                map[string]codexWaitMetrics{},
 		RapidPolls:                   map[string]codexWaitMetrics{},
+		AbandonedContinuations:       map[string]int{},
 		OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 		Activity:                     map[string]time.Time{},
+	}
+}
+
+func recordInlineMetric(target map[string]codexInlineMetrics, key string, bytes int64) {
+	metrics := target[key]
+	metrics.Calls++
+	metrics.Bytes += bytes
+	metrics.MaxBytes = max(metrics.MaxBytes, bytes)
+	target[key] = metrics
+}
+
+func inlineOrchestrationOwner(
+	event normalizedSessionEvent,
+	operations []string,
+	ownership ownershipCatalog,
+) string {
+	owner := ""
+	for _, operation := range operations {
+		if len(operation) > len(owner) || len(operation) == len(owner) && operation < owner {
+			owner = operation
+		}
+	}
+	if owner != "" {
+		return owner
+	}
+	tools := ownership.match(event.SelectorDigests)
+	sort.Strings(tools)
+	if len(tools) > 0 {
+		return tools[0]
+	}
+	return "(unowned)"
+}
+
+func recordContinuationState(pending map[string]int, event normalizedSessionEvent, ownedOperations []string) {
+	context := progressWaitContext(event, ownedOperations)
+	if event.OperationContinues {
+		if pending[context] == 0 || !continuedOperationToolName(event.ToolName) {
+			pending[context]++
+		}
+		return
+	}
+	if !continuedOperationToolName(event.ToolName) || pending[context] == 0 {
+		return
+	}
+	pending[context]--
+}
+
+func continuedOperationToolName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "exec", "wait", "write_stdin":
+		return true
+	default:
+		return false
 	}
 }
 

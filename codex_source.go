@@ -18,6 +18,7 @@ type indexedCodexDescriptor struct {
 	OperationAttributionAmbiguous bool
 	EmitsSessionMarker            bool
 	ConcurrentBatch               bool
+	WorkingDirectories            []string
 }
 
 func parseCodexNormalizedSession(path string) (normalizedSession, error) {
@@ -106,6 +107,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					CommandCandidates:       codexCommandInvocations(name, payload.Arguments, payload.Input),
 					EmitsSessionMarker:      codexEmitsExplicitSessionMarker(name, payload.Input),
 					ConcurrentBatch:         codexConcurrentToolBatch(name, payload.Input),
+					WorkingDirectories:      codexToolWorkingDirectories(name, payload.Arguments, payload.Input),
 				}
 				descriptor.OperationAttributionAmbiguous = len(descriptor.CommandCandidates) > 1
 				continuation := false
@@ -158,7 +160,8 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 						codexReadTargetCandidates(name, payload.Arguments, payload.Input),
 						codexEditTargetCandidates(name, payload.Input)...,
 					),
-					InlineBytes: codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
+					InlineBytes:        codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
+					WorkingDirectories: descriptor.WorkingDirectories,
 				}
 				if continuation {
 					event.FirstFamily = ""
@@ -182,6 +185,10 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					}
 				}
 				failed := codexToolOutputFailed(statusText, descriptor.Name)
+				var diagnostic *normalizedDiagnosticObservation
+				if isHeimdalReportInvocation(descriptor.CommandCandidates) {
+					diagnostic = parseHeimdalDiagnosticObservation(text)
+				}
 				reason := ""
 				context := ""
 				if failed {
@@ -208,6 +215,8 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					OperationAttributionAmbiguous: descriptor.OperationAttributionAmbiguous,
 					OperationContinues:            len(continuationReferences) > 0,
 					ConcurrentBatch:               descriptor.ConcurrentBatch,
+					Diagnostic:                    diagnostic,
+					WorkingDirectories:            descriptor.WorkingDirectories,
 				})
 				if descriptor.Family != "" {
 					for _, reference := range continuationReferences {
