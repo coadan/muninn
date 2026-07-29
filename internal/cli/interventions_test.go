@@ -39,6 +39,7 @@ func TestBuildSessionInterventionsConsolidatesDiscoveryEvidence(t *testing.T) {
 	}
 	intervention := got[0]
 	if intervention.ID != "intervention/workflow/discovery" ||
+		intervention.Focus != "discovery" ||
 		intervention.PrimarySignal != "session-loop/discovery" ||
 		intervention.FindingCount != 4 ||
 		len(intervention.SupportingSignals) != 3 ||
@@ -72,6 +73,7 @@ func TestBuildSessionInterventionsKeepsOwnedOperationsExact(t *testing.T) {
 	got := buildSessionInterventions(findings)
 	if len(got) != 4 ||
 		got[0].ID != "intervention/operation/bwb/publish" ||
+		got[0].Focus != "tooling" ||
 		got[0].PrimarySignal != "owned-operation/bwb/publish" ||
 		got[0].Action != "fix publish" ||
 		len(got[0].SupportingSignals) != 0 ||
@@ -89,6 +91,9 @@ func TestBuildSessionInterventionsDoesNotTreatRepositorySourceAsLocalTool(t *tes
 	got := buildSessionInterventions(findings)
 	if len(got) != 1 || got[0].ID != "intervention/delivery-quality/packages/runtime" {
 		t.Fatalf("repository source was grouped as a local tool: %#v", got)
+	}
+	if got[0].Focus != "quality" {
+		t.Fatalf("delivery-quality focus=%q want quality", got[0].Focus)
 	}
 }
 
@@ -187,6 +192,7 @@ func TestBuildSessionInterventionsUsesPriorityDriverAsPrimaryEvidence(t *testing
 	}
 	got := buildSessionInterventions(findings)
 	if len(got) != 1 || got[0].Priority != "high" ||
+		got[0].Focus != "loops" ||
 		got[0].PrimarySignal != "verification-loop/repeated" ||
 		got[0].Confidence != "high" || got[0].Lever != "tooling" ||
 		got[0].Action != "reuse the terminal result" {
