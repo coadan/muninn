@@ -633,6 +633,35 @@ func TestBuildSessionFindingsRoutesRecurringFailureToFixedContext(t *testing.T) 
 	}
 }
 
+func TestBuildSessionFindingsKeepsGenericUnownedFailuresInDetails(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.FailureContexts = map[string]map[string]codexOccurrenceMetrics{
+		"other non-zero exit": {
+			"other shell": {Count: 8, Sessions: 3},
+		},
+		"local CLI targeting": {
+			"file reads": {Count: 4, Sessions: 2},
+		},
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("generic unowned failures became interventions: %#v", findings)
+	}
+	if got := report.Summary.FailureContexts["other non-zero exit"]["other shell"]; got.Count != 8 {
+		t.Fatalf("generic failure detail was discarded: %#v", got)
+	}
+
+	config := defaultRepositoryConfig()
+	config.OwnedTools = []ownedToolConfig{{ID: "repo"}}
+	report.Summary.FailureContexts["other non-zero exit"] = map[string]codexOccurrenceMetrics{
+		"repo/check": {Count: 4, Sessions: 2},
+	}
+	findings := buildSessionFindings(report, config)
+	if len(findings) != 1 || findings[0].Control != "local" ||
+		findings[0].Target != "repo/check" {
+		t.Fatalf("owned generic failure lost its repair boundary: %#v", findings)
+	}
+}
+
 func TestBuildSessionFindingsSuppressesOnlyExactSignal(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.ProgressStalls["bwb/api-start"] = codexWaitMetrics{Calls: 2, Seconds: 60, Sessions: 2}
