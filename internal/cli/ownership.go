@@ -151,14 +151,45 @@ func (catalog ownershipCatalog) classifyFlags(invocations []ownedCommandInvocati
 			if !catalog.invocationOwnsFlags(toolID, invocation) {
 				continue
 			}
+			fixedLauncherFlags := catalog.fixedOperationOnlyFlags(toolID, invocation)
 			for _, argument := range invocation.Args {
 				if flag := ownedLongFlag(argument); flag != "" {
+					if fixedLauncherFlags[flag] {
+						continue
+					}
 					flags = appendUniqueString(flags, toolID+"/"+flag)
 				}
 			}
 		}
 	}
 	sort.Strings(flags)
+	return flags
+}
+
+func (catalog ownershipCatalog) fixedOperationOnlyFlags(
+	toolID string,
+	invocation ownedCommandInvocation,
+) map[string]bool {
+	flags := map[string]bool{}
+	if !catalog.operationsOnly[toolID] {
+		return flags
+	}
+	selected := map[string]bool{}
+	for _, operation := range catalog.classifyOperations([]ownedCommandInvocation{invocation}) {
+		selected[operation] = true
+	}
+	for _, rule := range catalog.operations {
+		if rule.ToolID != toolID ||
+			rule.Executable != strings.ToLower(filepath.Base(invocation.Executable)) ||
+			!selected[toolID+"/"+rule.OperationID] {
+			continue
+		}
+		for _, argument := range rule.Args {
+			if flag := ownedLongFlag(argument); flag != "" {
+				flags[flag] = true
+			}
+		}
+	}
 	return flags
 }
 

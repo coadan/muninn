@@ -1,5 +1,8 @@
 {
   "schemaVersion": 1,
+  "suppressSignals": [
+    "default-candidate/muninn/repo"
+  ],
   "ownedTools": [
     {
       "id": "muninn",

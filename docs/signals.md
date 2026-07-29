@@ -49,7 +49,10 @@ Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned tool's
 definite calls. Muninn retains only the normalized flag name, such as `json`;
 it never retains the flag value. `--help` and `--version` are excluded because
-they describe discovery rather than a workflow default.
+they describe discovery rather than a workflow default. For an
+`operationsOnly` shared launcher, fixed flags in the matched operation prefix
+belong to the launcher and are excluded; flags passed to the owned command
+remain eligible.
 
 Cross-call workflow findings require at least three matching transitions per
 affected session as well as recurrence across three sessions. A normal
