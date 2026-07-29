@@ -267,9 +267,14 @@ func addCodexToolMetricsValue(target map[string]codexToolMetrics, key string, ad
 		value.Sessions++
 	}
 	value.FailedCalls += addition.FailedCalls
+	value.AmbiguousFailedCalls += addition.AmbiguousFailedCalls
 	value.TruncatedCalls += addition.TruncatedCalls
+	value.AmbiguousTruncatedCalls += addition.AmbiguousTruncatedCalls
 	value.OutputBytes += addition.OutputBytes
+	value.AmbiguousCalls += addition.AmbiguousCalls
+	value.AmbiguousOutputBytes += addition.AmbiguousOutputBytes
 	value.EstimatedOutputTokens = estimatedTokens(value.OutputBytes)
+	value.EstimatedAmbiguousOutputTokens = estimatedTokens(value.AmbiguousOutputBytes)
 	target[key] = value
 }
 

@@ -33,10 +33,11 @@ from becoming a high-priority intervention.
 Per-category caps retain the highest-impact evidence rather than merely the
 newest evidence.
 
-Excessive-operation findings use definitely attributed invocations. Operations
-that merely co-occur in a command bundle remain drill-down evidence but do not
-establish repeated outer-roundtrip friction. Definite and ambiguous bundled
-failures, truncation, and output cost remain separate.
+Owned-tool and excessive-operation findings use definitely attributed
+invocations. Tools or operations that merely co-occur in a command bundle
+remain drill-down evidence but do not establish attributable friction.
+Definite and ambiguous bundled failures, truncation, and output cost remain
+separate.
 
 ## Intervention construction
 

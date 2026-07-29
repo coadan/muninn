@@ -229,9 +229,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				touchSessionActivity(record.Activity, "shape", event.Shape, event.OccurredAt)
 			}
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
-				addCodexToolMetrics(record.OwnedTooling, ownedTool, 1, false, false, 0)
+				addCodexOwnedToolMetrics(record.OwnedTooling, ownedTool, event.OperationAttributionAmbiguous, 1, false, false, 0)
 				if !ownedToolOperationMatched(ownedTool, eventOperations) {
-					addCodexToolMetrics(record.OwnedToolUnmatched, ownedTool, 1, false, false, 0)
+					addCodexOwnedToolMetrics(record.OwnedToolUnmatched, ownedTool, event.OperationAttributionAmbiguous, 1, false, false, 0)
 				}
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
@@ -307,9 +307,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				touchSessionActivity(record.Activity, "shape", event.Shape, event.OccurredAt)
 			}
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
-				addCodexToolMetrics(record.OwnedTooling, ownedTool, 0, event.Failed, event.Truncated, event.OutputBytes)
+				addCodexOwnedToolMetrics(record.OwnedTooling, ownedTool, event.OperationAttributionAmbiguous, 0, event.Failed, event.Truncated, event.OutputBytes)
 				if !ownedToolOperationMatched(ownedTool, eventOperations) {
-					addCodexToolMetrics(record.OwnedToolUnmatched, ownedTool, 0, event.Failed, event.Truncated, event.OutputBytes)
+					addCodexOwnedToolMetrics(record.OwnedToolUnmatched, ownedTool, event.OperationAttributionAmbiguous, 0, event.Failed, event.Truncated, event.OutputBytes)
 				}
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
@@ -530,6 +530,32 @@ func ownedOperationTask(event normalizedSessionEvent, ownership ownershipCatalog
 		return fallback
 	}
 	return "(root)"
+}
+
+func addCodexOwnedToolMetrics(
+	target map[string]codexToolMetrics,
+	key string,
+	ambiguous bool,
+	calls int,
+	failed bool,
+	truncated bool,
+	outputBytes int64,
+) {
+	addCodexToolMetrics(target, key, calls, failed, truncated, outputBytes)
+	if !ambiguous {
+		return
+	}
+	metrics := target[key]
+	metrics.AmbiguousCalls += calls
+	if failed {
+		metrics.AmbiguousFailedCalls++
+	}
+	if truncated {
+		metrics.AmbiguousTruncatedCalls++
+	}
+	metrics.AmbiguousOutputBytes += outputBytes
+	metrics.EstimatedAmbiguousOutputTokens = estimatedTokens(metrics.AmbiguousOutputBytes)
+	target[key] = metrics
 }
 
 func recordOwnedOperationTask(
