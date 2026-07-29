@@ -803,6 +803,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	if downstream.Deliveries >= 2 &&
 		(downstream.DeliveriesWithFailure >= 2 || downstream.Reverts > 0) {
 		lever := "source code"
+		control := "repository"
 		confidence := "medium"
 		title := "delivered changes repeatedly fail downstream checks"
 		why := ""
@@ -838,6 +839,9 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			if lever == "tooling" {
 				target = check
 				action = "Run " + check + " after the latest relevant edit and before delivery, then compare the downstream failure rate for this check."
+				if locallyControlledOutputContext(check, config.OwnedTools) {
+					control = "local"
+				}
 			}
 		}
 		if downstream.RedeliveryAttempts > downstream.RecoveredDeliveries {
@@ -873,7 +877,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		}
 		findings = append(findings, sessionFinding{
 			Category: "delivery-quality",
-			Control:  "repository",
+			Control:  control,
 			Title:    title,
 			Evidence: fmt.Sprintf(
 				"%s/%s deliveries failed downstream across %s sessions, with %s failure runs, %s follow-up edit cycles, %s/%s recovery redeliveries, %s reverts, and fresh tests before %s/%s failures%s%s",

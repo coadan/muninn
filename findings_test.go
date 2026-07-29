@@ -977,12 +977,15 @@ func TestBuildSessionFindingsAttributesDownstreamFailureToMissingFreshCheck(t *t
 			},
 		},
 	}
-	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	config := defaultRepositoryConfig()
+	config.OwnedTools = []ownedToolConfig{{ID: "repo"}}
+	findings := buildSessionFindings(report, config)
 	if len(findings) != 1 {
 		t.Fatalf("expected one downstream-quality finding: %#v", findings)
 	}
 	finding := findings[0]
 	if finding.Category != "delivery-quality" || finding.Lever != "tooling" ||
+		finding.Control != "local" ||
 		finding.Confidence != "high" || finding.Target != "repo/test-unit" ||
 		!strings.Contains(finding.Action, "require repo/test-unit to pass") ||
 		!strings.Contains(finding.Evidence, "top downstream check repo/test-unit: 4 failures") {

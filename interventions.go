@@ -145,7 +145,7 @@ func sessionInterventionKey(finding sessionFinding, dominantPhases map[string]bo
 		tool, _, _ := strings.Cut(finding.Target, "/")
 		return signalID("intervention", "tool", tool)
 	}
-	if finding.Category == "delivery-quality" && finding.Lever == "tooling" {
+	if finding.Control == "local" && finding.Lever == "tooling" {
 		tool, operation, found := strings.Cut(finding.Target, "/")
 		if found && strings.TrimSpace(tool) != "" && strings.TrimSpace(operation) != "" {
 			return signalID("intervention", "tool", tool)
