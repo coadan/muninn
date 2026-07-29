@@ -115,6 +115,21 @@ func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDelegationSeparatesMissingLineageFromParentOutsideScope(t *testing.T) {
+	records := []codexSessionRecord{
+		{AgentKind: "root", LineageKey: "in-scope-parent"},
+		{AgentKind: "subagent", LineageKey: "missing-parent-key"},
+		{AgentKind: "subagent", LineageKey: "outside-child", ParentLineageKey: "outside-parent"},
+		{AgentKind: "subagent", LineageKey: "linked-child", ParentLineageKey: "in-scope-parent"},
+	}
+	delegation := analyzeDelegation(records)
+	if delegation.LinkedSubagents != 1 ||
+		delegation.UnlinkedSubagents != 1 ||
+		delegation.ParentsOutsideScope != 1 {
+		t.Fatalf("delegation coverage mismatch: %#v", delegation)
+	}
+}
+
 func TestAnalyzeDelegationDoesNotTreatUnattributedResearchAsWaste(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Delegation = delegationAnalysis{

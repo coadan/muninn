@@ -68,6 +68,15 @@ func loadProviderSessionMetadata(provider string, sessionDirs []string) map[stri
 		} else if strings.Contains(strings.ToLower(source), "subagent") {
 			entry.AgentKind = "subagent"
 		}
+		if entry.AgentKind == "subagent" && entry.ParentLineageKey == "" {
+			lineageKey, parentLineageKey := readCodexRolloutLineage(rolloutPath)
+			if lineageKey != "" {
+				entry.LineageKey = lineageKey
+			}
+			if parentLineageKey != "" {
+				entry.ParentLineageKey = parentLineageKey
+			}
+		}
 		metadata[filepath.Clean(rolloutPath)] = entry
 	}
 	return metadata
@@ -127,10 +136,22 @@ func enrichNormalizedSession(session *normalizedSession, metadata map[string]nor
 	if !ok {
 		return
 	}
-	session.Model = entry.Model
-	session.ReasoningEffort = entry.ReasoningEffort
-	session.AgentKind = entry.AgentKind
-	session.LineageKey = entry.LineageKey
-	session.ParentLineageKey = entry.ParentLineageKey
-	session.SpawnStatus = entry.SpawnStatus
+	if entry.Model != "" {
+		session.Model = entry.Model
+	}
+	if entry.ReasoningEffort != "" {
+		session.ReasoningEffort = entry.ReasoningEffort
+	}
+	if entry.AgentKind != "" {
+		session.AgentKind = entry.AgentKind
+	}
+	if entry.LineageKey != "" {
+		session.LineageKey = entry.LineageKey
+	}
+	if entry.ParentLineageKey != "" {
+		session.ParentLineageKey = entry.ParentLineageKey
+	}
+	if entry.SpawnStatus != "" {
+		session.SpawnStatus = entry.SpawnStatus
+	}
 }

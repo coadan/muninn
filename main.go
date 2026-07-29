@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 45
+const codexSessionInsightsSchemaVersion = 46
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
@@ -249,13 +249,15 @@ type codexRolloutEnvelope struct {
 }
 
 type codexRolloutPayload struct {
-	Type      string `json:"type"`
-	CWD       string `json:"cwd"`
-	CallID    string `json:"call_id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-	Input     string `json:"input"`
-	Info      struct {
+	Type           string `json:"type"`
+	ID             string `json:"id"`
+	ParentThreadID string `json:"parent_thread_id"`
+	CWD            string `json:"cwd"`
+	CallID         string `json:"call_id"`
+	Name           string `json:"name"`
+	Arguments      string `json:"arguments"`
+	Input          string `json:"input"`
+	Info           struct {
 		TotalTokenUsage struct {
 			InputTokens       int64 `json:"input_tokens"`
 			CachedInputTokens int64 `json:"cached_input_tokens"`

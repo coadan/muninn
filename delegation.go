@@ -40,7 +40,8 @@ type delegationAnalysis struct {
 	DelegatingParents                   int            `json:"delegatingParents"`
 	SubagentSessions                    int            `json:"subagentSessions"`
 	LinkedSubagents                     int            `json:"linkedSubagents"`
-	OrphanSubagents                     int            `json:"orphanSubagents"`
+	UnlinkedSubagents                   int            `json:"unlinkedSubagents"`
+	ParentsOutsideScope                 int            `json:"parentsOutsideScope"`
 	CompletedSubagents                  int            `json:"completedSubagents"`
 	IncompleteSubagents                 int            `json:"incompleteSubagents"`
 	ParentFreshTokens                   int64          `json:"parentFreshTokens"`
@@ -221,9 +222,13 @@ func analyzeDelegation(records []codexSessionRecord) delegationAnalysis {
 		if child.AgentKind != "subagent" {
 			continue
 		}
+		if child.ParentLineageKey == "" {
+			analysis.UnlinkedSubagents++
+			continue
+		}
 		parent := byLineage[child.ParentLineageKey]
 		if parent == nil {
-			analysis.OrphanSubagents++
+			analysis.ParentsOutsideScope++
 			continue
 		}
 		analysis.LinkedSubagents++
@@ -363,7 +368,8 @@ func printDelegationAnalysis(analysis delegationAnalysis) {
 		return
 	}
 	fmt.Printf(
-		"Delegation: %s subagent sessions across %s parents used %.1f%% of fresh tokens; %s coordination calls (~%s fresh tokens); %s children overlapped parent edits; observed concurrency %.2fx\n",
+		"Delegation: %s/%s subagent sessions linked to %s in-scope parents used %.1f%% of fresh tokens; %s coordination calls (~%s fresh tokens); %s children overlapped parent edits; observed concurrency %.2fx\n",
+		formatCodexCount(int64(analysis.LinkedSubagents)),
 		formatCodexCount(int64(analysis.SubagentSessions)),
 		formatCodexCount(int64(analysis.DelegatingParents)),
 		100*analysis.SubagentFreshTokenShare,
@@ -372,6 +378,13 @@ func printDelegationAnalysis(analysis delegationAnalysis) {
 		formatCodexCount(int64(analysis.ChildrenWithEditOverlap)),
 		analysis.SubagentConcurrencyFactor,
 	)
+	if analysis.UnlinkedSubagents > 0 || analysis.ParentsOutsideScope > 0 {
+		fmt.Printf(
+			"Delegation coverage: %s subagents lacked provider parent lineage; %s had parents outside the selected repository or time window.\n",
+			formatCodexCount(int64(analysis.UnlinkedSubagents)),
+			formatCodexCount(int64(analysis.ParentsOutsideScope)),
+		)
+	}
 	if analysis.NoObservableContributionSubagents > 0 {
 		fmt.Printf(
 			"Delegation attribution: %s subagents (~%s fresh tokens) had no observable edit or delivery; research/review contributions are not inferable from repository metadata.\n",
