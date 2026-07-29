@@ -518,6 +518,7 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 	}
 	stallSignal := "session-loop/progress-stall/bwb/api-start"
 	if finding, ok := bySignal[stallSignal]; !ok ||
+		finding.Confidence != "medium" ||
 		!strings.Contains(finding.Evidence, "1m35s") {
 		t.Fatalf("progress-stall finding mismatch: %#v", finding)
 	}
@@ -545,6 +546,15 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 		!strings.Contains(finding.Action, "`bwb test`") ||
 		!strings.Contains(finding.Evidence, "16 yielded operations") {
 		t.Fatalf("generic abandoned continuation finding mismatch: %#v", finding)
+	}
+}
+
+func TestProgressStallConfidenceRequiresCrossSessionRecurrence(t *testing.T) {
+	if got := recurringPatternConfidence(1); got != "low" {
+		t.Fatalf("single-session pattern confidence=%q want low", got)
+	}
+	if got := recurringPatternConfidence(2); got != "medium" {
+		t.Fatalf("cross-session pattern confidence=%q want medium", got)
 	}
 }
 
