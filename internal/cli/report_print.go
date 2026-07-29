@@ -23,7 +23,7 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		)
 		printSessionInterventions(report.Interventions, limit)
 		if view == "focused" && report.AnalysisScope.Focus == "discovery" {
-			printDiscoveryFocusEvidence(buildDiscoveryFocusEvidence(summary, limit))
+			printDiscoveryFocusEvidence(buildDiscoveryFocusEvidence(summary, report.WorkspaceRoot, limit))
 		}
 		return
 	}

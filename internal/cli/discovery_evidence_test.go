@@ -1,9 +1,19 @@
 package cli
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestBuildDiscoveryFocusEvidenceRanksFiltersAndBoundsRows(t *testing.T) {
-	summary := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime()).Summary
+	root := t.TempDir()
+	for _, target := range []string{"most-loops.go", "most-reads.go", "bounded-out.go"} {
+		if err := os.WriteFile(filepath.Join(root, target), []byte("current"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", target, err)
+		}
+	}
+	summary := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime()).Summary
 	summary.ReadTargets["most-loops.go"] = codexTargetMetrics{
 		Reads: 4, SearchReadLoops: 3, Sessions: 2, RediscoverySessions: 1,
 	}
@@ -12,6 +22,9 @@ func TestBuildDiscoveryFocusEvidenceRanksFiltersAndBoundsRows(t *testing.T) {
 	}
 	summary.ReadTargets["bounded-out.go"] = codexTargetMetrics{
 		Reads: 10, SearchReadLoops: 0, Sessions: 2, RediscoverySessions: 2,
+	}
+	summary.ReadTargets["deleted.go"] = codexTargetMetrics{
+		Reads: 100, SearchReadLoops: 50, Sessions: 10, RediscoverySessions: 10,
 	}
 	summary.MixedShellShapes["search -> file reads"] = codexToolMetrics{
 		Calls: 2, Sessions: 2, OutputBytes: 80_000,
@@ -23,7 +36,7 @@ func TestBuildDiscoveryFocusEvidenceRanksFiltersAndBoundsRows(t *testing.T) {
 		Calls: 20, Sessions: 3, OutputBytes: 200_000,
 	}
 
-	evidence := buildDiscoveryFocusEvidence(summary, 2)
+	evidence := buildDiscoveryFocusEvidence(summary, root, 2)
 	if len(evidence.ReadTargets) != 2 ||
 		evidence.ReadTargets[0].Target != "most-loops.go" ||
 		evidence.ReadTargets[1].Target != "most-reads.go" {

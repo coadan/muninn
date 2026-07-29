@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -200,7 +201,13 @@ func TestFindingsViewPrintsCompactInterventionQueue(t *testing.T) {
 }
 
 func TestFocusedDiscoveryViewPrintsBoundedActionEvidence(t *testing.T) {
-	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	root := t.TempDir()
+	for _, target := range []string{"owner.go", "hidden.go"} {
+		if err := os.WriteFile(filepath.Join(root, target), []byte("current"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", target, err)
+		}
+	}
+	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
 	report.AnalysisScope.Focus = "discovery"
 	report.Summary.ReadTargets["owner.go"] = codexTargetMetrics{
 		Reads: 12, SearchReadLoops: 4, Sessions: 2, RediscoverySessions: 2,

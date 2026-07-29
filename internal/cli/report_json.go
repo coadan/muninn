@@ -116,7 +116,7 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 		Findings:      report.Findings,
 	}
 	if report.AnalysisScope.Focus == "discovery" {
-		evidence := buildDiscoveryFocusEvidence(summary, 5)
+		evidence := buildDiscoveryFocusEvidence(summary, report.WorkspaceRoot, 5)
 		compact.FocusEvidence = &evidence
 	}
 	return compact
