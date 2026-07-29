@@ -48,6 +48,33 @@ func TestBuildSessionFindingsReportsLargeRootInstructionFootprint(t *testing.T) 
 	}
 }
 
+func TestInstructionFocusExcludesUnrelatedSessionLoops(t *testing.T) {
+	findings := []sessionFinding{
+		{Category: "instruction-discovery", Title: "instruction rediscovery"},
+		{Category: "instruction-footprint", Title: "instruction footprint"},
+		{Category: "session-loop", Title: "discovery compaction"},
+	}
+	focused, err := filterSessionFindings(findings, "instructions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(focused) != 2 ||
+		focused[0].Category != "instruction-discovery" ||
+		focused[1].Category != "instruction-footprint" {
+		t.Fatalf("instruction focus leaked unrelated findings: %#v", focused)
+	}
+
+	corroborated := sessionFinding{
+		Category:   "code-structure",
+		Title:      "instruction owner",
+		Supporting: []string{"instruction-discovery/agents.md"},
+	}
+	focused, err = filterSessionFindings([]sessionFinding{corroborated}, "instructions")
+	if err != nil || len(focused) != 1 {
+		t.Fatalf("instruction focus lost corroborated owner: %#v, %v", focused, err)
+	}
+}
+
 func writeInstructionFixture(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

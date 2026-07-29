@@ -1939,7 +1939,6 @@ func filterSessionFindings(findings []sessionFinding, focus string) ([]sessionFi
 		"instructions": {
 			"instruction-discovery": true,
 			"instruction-footprint": true,
-			"session-loop":          true,
 		},
 		"interface": {
 			"agent-interface": true,
