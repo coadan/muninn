@@ -733,12 +733,30 @@ func TestSessionRecordSeparatesWorktreeCheckFromRootDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build session record: %v", err)
 	}
-	if record.DownstreamQuality.Deliveries != 1 ||
+	if record.DownstreamQuality.Deliveries != 0 ||
 		record.DownstreamQuality.DeliveriesWithFailure != 0 {
 		t.Fatalf("worktree check attached to root delivery: %#v", record.DownstreamQuality)
 	}
 	if got := record.OwnedOperationTasks["void-cli/verify"]["task-a"]; got.FailedCalls != 1 {
 		t.Fatalf("worktree verify task attribution=%#v want one failed call", got)
+	}
+}
+
+func TestDownstreamQualityIgnoresDeliveryWithoutObservedEdit(t *testing.T) {
+	tracker := downstreamQualityTracker{}
+	tracker.observe(normalizedSessionEvent{
+		Kind:   sessionEventToolOutput,
+		Family: "delivery",
+	}, nil)
+	tracker.observe(normalizedSessionEvent{
+		Kind:   sessionEventToolOutput,
+		Family: "tests",
+		Failed: true,
+	}, []string{"repo/test-unit"})
+
+	if got := tracker.metrics; got.Deliveries != 0 ||
+		got.DeliveriesWithFailure != 0 || got.FailureRuns != 0 {
+		t.Fatalf("unobserved delivery entered downstream accounting: %#v", got)
 	}
 }
 

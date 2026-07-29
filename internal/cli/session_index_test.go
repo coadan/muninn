@@ -61,6 +61,16 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 			},
 		},
 		map[string]any{
+			"timestamp": "2026-07-24T08:00:03.500Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "custom_tool_call",
+				"call_id": "edit",
+				"name":    "apply_patch",
+				"input":   "*** Begin Patch\n*** Update File: src/example.go\n@@\n-old\n+new\n*** End Patch\n",
+			},
+		},
+		map[string]any{
 			"timestamp": "2026-07-24T08:00:04Z",
 			"type":      "response_item",
 			"payload": map[string]any{
