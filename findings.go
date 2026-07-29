@@ -832,9 +832,18 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 				check,
 				formatCodexCount(int64(checkCount)),
 			)
+			if lever == "tooling" {
+				target = check
+				action = "Run " + check + " after the latest relevant edit and before delivery, then compare the downstream failure rate for this check."
+			}
 		}
 		if downstream.RedeliveryAttempts > downstream.RecoveredDeliveries {
-			action = "Fix the recurring downstream failure at its owning source or verification boundary and require the failed check to pass before redelivery."
+			if check != "" {
+				target = check
+				action = "Fix the recurring downstream failure at its owning source or verification boundary and require " + check + " to pass before redelivery."
+			} else {
+				action = "Fix the recurring downstream failure at its owning source or verification boundary and require the failed check to pass before redelivery."
+			}
 		}
 		lastSeen := sessionFindingLastSeen(report, "downstream-failure", "")
 		if lastSeen == "" {

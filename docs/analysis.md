@@ -116,6 +116,11 @@ to tooling, executed-test failures to source code, and test-selection failures
 to tests or instructions. Recurring fingerprints become findings; one-off
 failures remain available in `--details` and JSON.
 
+When deliveries fail a recurring downstream check without fresh
+pre-verification, the check—not the most common edited file cohort—is the
+intervention target. If that check belongs to a configured local tool, its
+quality evidence is consolidated into the same tool intervention.
+
 ## Compare adjacent periods
 
 Use `--compare previous` for an automatically matched, non-overlapping

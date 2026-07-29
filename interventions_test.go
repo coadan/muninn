@@ -57,12 +57,17 @@ func TestBuildSessionInterventionsGroupsOwnedOperationsUnderTool(t *testing.T) {
 			Category: "owned-operation", Signal: "owned-operation/bwb/publish", Target: "bwb/publish",
 			Title: "publish friction", Action: "fix publish", Lever: "tooling", Confidence: "high", score: 700,
 		},
+		{
+			Category: "delivery-quality", Signal: "delivery-quality/bwb/test", Target: "bwb/test",
+			Title: "delivered changes repeatedly fail downstream checks",
+			Lever: "tooling", Confidence: "high", score: 650,
+		},
 	}
 	got := buildSessionInterventions(findings)
 	if len(got) != 1 || got[0].ID != "intervention/tool/bwb" ||
 		got[0].PrimarySignal != "owned-operation/bwb/publish" ||
 		got[0].Action != "fix publish" ||
-		!reflect.DeepEqual(got[0].SupportingSignals, []string{"owned-tool/bwb"}) {
+		!reflect.DeepEqual(got[0].SupportingSignals, []string{"delivery-quality/bwb/test", "owned-tool/bwb"}) {
 		t.Fatalf("owned-tool intervention mismatch: %#v", got)
 	}
 }
