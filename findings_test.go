@@ -528,6 +528,7 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 	}
 	inputSignal := "session-loop/input-cost/expensive-task"
 	if finding, ok := bySignal[inputSignal]; !ok ||
+		finding.Title != "high input-token cost in task: expensive-task" ||
 		!strings.Contains(finding.Evidence, "800,000 uncached") ||
 		!strings.Contains(finding.Evidence, "200,000 uncached input") {
 		t.Fatalf("input-cost finding mismatch: %#v", finding)
@@ -562,6 +563,29 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 		!strings.Contains(finding.Action, "`bwb test`") ||
 		!strings.Contains(finding.Evidence, "16 yielded operations") {
 		t.Fatalf("generic abandoned continuation finding mismatch: %#v", finding)
+	}
+}
+
+func TestBuildSessionFindingsDoesNotTreatRootAsTaskCohort(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Tasks = []codexTaskInsights{{
+		Task: "(root)",
+		codexAggregateMetrics: codexAggregateMetrics{
+			Sessions: 4,
+			Tokens: normalizedTokenUsage{
+				InputTokens:         1_200_000,
+				CachedInputTokens:   400_000,
+				UncachedInputTokens: 800_000,
+			},
+			FreshTokens: 900_000,
+			Compactions: 2,
+		},
+	}}
+
+	for _, finding := range buildSessionFindings(report, defaultRepositoryConfig()) {
+		if strings.Contains(finding.Signal, "/input-cost/") {
+			t.Fatalf("root catch-all became a task cohort: %#v", finding)
+		}
 	}
 }
 

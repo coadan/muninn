@@ -562,6 +562,9 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		inputTasks = inputTasks[:3]
 	}
 	for _, task := range inputTasks {
+		if task.Task == "(root)" || strings.TrimSpace(task.Task) == "" {
+			continue
+		}
 		uncachedPerSession := perSessionTokens(task.Tokens.UncachedInputTokens, task.Sessions)
 		if task.Sessions < 2 || task.Tokens.UncachedInputTokens < 500_000 || uncachedPerSession < 50_000 {
 			continue
@@ -569,7 +572,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		findings = append(findings, sessionFinding{
 			Category: "session-loop",
 			Control:  "repository",
-			Title:    "input-token cost is concentrated in task: " + task.Task,
+			Title:    "high input-token cost in task: " + task.Task,
 			Evidence: fmt.Sprintf("%s total input tokens (%s uncached, %s cached), %s uncached input and %s fresh tokens per session across %s sessions; %s compactions",
 				formatCodexCount(task.Tokens.InputTokens),
 				formatCodexCount(task.Tokens.UncachedInputTokens),
@@ -1590,7 +1593,7 @@ func latestSearchReadActivity(report codexSessionInsightsReport) string {
 func sessionFindingSignal(finding sessionFinding) string {
 	target := strings.TrimSpace(finding.Target)
 	switch {
-	case strings.HasPrefix(finding.Title, "input-token cost is concentrated in task: "):
+	case strings.HasPrefix(finding.Title, "high input-token cost in task: "):
 		return signalID("session-loop", "input-cost", target)
 	case strings.HasPrefix(finding.Title, "progress stalls while waiting on: "):
 		return signalID("session-loop", "progress-stall", target)

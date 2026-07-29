@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 57
+const codexSessionInsightsSchemaVersion = 58
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
