@@ -43,7 +43,7 @@ type ownershipIndexOperationConfig struct {
 	Args []string `json:"args"`
 }
 
-const ownershipClassificationVersion = 2
+const ownershipClassificationVersion = 3
 
 func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 	indexConfigs := make([]ownershipIndexConfig, 0, len(configs))
@@ -160,10 +160,10 @@ func (catalog ownershipCatalog) classifyFlags(invocations []ownedCommandInvocati
 				continue
 			}
 			scope := catalog.flagScope(toolID, invocation)
-			fixedLauncherFlags := catalog.fixedOperationOnlyFlags(toolID, invocation)
+			operationDefiningFlags := catalog.operationDefiningFlags(toolID, invocation)
 			for index := range invocation.Args {
 				if flag := ownedSwitchFlag(invocation.Args, index); flag != "" {
-					if fixedLauncherFlags[flag] {
+					if operationDefiningFlags[flag] {
 						continue
 					}
 					flags = appendUniqueString(flags, scope+"/"+flag)
@@ -190,14 +190,11 @@ func ownedSwitchFlag(arguments []string, index int) string {
 	return flag
 }
 
-func (catalog ownershipCatalog) fixedOperationOnlyFlags(
+func (catalog ownershipCatalog) operationDefiningFlags(
 	toolID string,
 	invocation ownedCommandInvocation,
 ) map[string]bool {
 	flags := map[string]bool{}
-	if !catalog.operationsOnly[toolID] {
-		return flags
-	}
 	selected := map[string]bool{}
 	for _, operation := range catalog.classifyOperations([]ownedCommandInvocation{invocation}) {
 		selected[operation] = true

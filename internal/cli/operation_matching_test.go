@@ -99,6 +99,25 @@ func TestOwnedFlagClassificationExcludesValueBearingOptions(t *testing.T) {
 	}
 }
 
+func TestOwnedFlagClassificationExcludesOperationDefiningSwitches(t *testing.T) {
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "bwb",
+		Executables: []string{"bwb"},
+		Operations: []ownedOperationConfig{
+			{ID: "comments", Args: []string{"comments"}},
+			{ID: "comments-wait", Args: []string{"comments", "**", "--wait"}},
+		},
+	}})
+	invocations := []ownedCommandInvocation{{
+		Executable: "bwb",
+		Args:       []string{"comments", "--repo", "breyta", "--wait", "--details"},
+	}}
+	want := []string{"bwb/comments-wait/details"}
+	if got := catalog.classifyFlags(invocations); !reflect.DeepEqual(got, want) {
+		t.Fatalf("owned switches=%#v want %#v", got, want)
+	}
+}
+
 func TestOwnedOperationTaskUsesConfiguredBoundedArgument(t *testing.T) {
 	catalog := newOwnershipCatalog([]ownedToolConfig{{
 		ID:                "bwb",
