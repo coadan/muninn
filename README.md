@@ -15,9 +15,13 @@ Muninn helps identify:
 - repeated source discovery and navigation into owners associated with high
   task cost, review rework, or downstream failures;
 - oversized always-on instructions and recurring instruction-discovery gaps;
-- expensive verification repair loops and missing pre-delivery test evidence;
+- repeated exact verification without intervening edits, expensive repair
+  loops, and checks whose absence is associated with downstream escapes;
+- workflow phases that concentrate context compactions and their observed
+  fresh-token, output, and roundtrip cost;
 - performance changes across matched agent, model, reasoning-effort, and task
-  cohorts without ignoring observed delivery quality.
+  cohorts without ignoring observed delivery quality, plus observational
+  with/without comparisons for owned operations.
 
 These signals distinguish tool-interface, repository-structure, instruction,
 verification, and delivery problems so improvements target the system that

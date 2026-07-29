@@ -63,11 +63,21 @@ Muninn separates activity that is often conflated:
 - discovery, editing, verification, delivery, and review-driven rework;
 - actionable progress stalls, expected waits, and rapid continuation polling;
 - test outcomes after the latest edit and before delivery;
+- repeated exact configured checks without an intervening edit and
+  pre-delivery checks associated with fewer downstream escapes;
 - oversized output, truncation, repeated failures, and long inline scripts;
+- context compactions attributed to discovery, editing, verification,
+  delivery, rework, or delegation cost;
 - structured Heimdal failure fingerprints, phases, diagnostic availability,
   and post-failure cost by model and effort;
 - root-agent and delegated work, including coordination and overlap;
 - repository navigation, repeated reads, and instruction footprint.
+
+In `--details` output, Muninn also compares completed tasks that used a locally
+owned operation with tasks that did not, within the same agent, model,
+reasoning-effort, and task-family cohort. These with/without deltas are
+observational and never create findings by themselves because tool use may
+still correlate with unobserved task difficulty.
 
 Findings include a stable signal ID, likely improvement lever, confidence, and
 recent supporting activity. Counts alone do not establish causality.
