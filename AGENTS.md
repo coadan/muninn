@@ -26,6 +26,23 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
 - Use `apply_patch` for source edits.
 - Do not add a review gate unless the user requests one.
 
+## Code map
+
+- `main.go` and `cli.go`: process entry and top-level command routing.
+- `analyze_command.go` and `config.go`: analysis CLI orchestration and
+  repository policy.
+- `session_provider.go` and provider-named files: session discovery and
+  normalization only.
+- `report_model.go` and `session_analysis.go`: normalized report model and
+  cross-session aggregation.
+- `shell_commands.go`, `session_continuations.go`, and `session_events.go`:
+  privacy-safe command, continuation, output, and failure interpretation.
+- `store.go`, `session_index.go`, `session_query.go`, and `failure_store.go`:
+  SQLite lifecycle, derived indexing, analysis reads, and failure timelines.
+- `findings.go`, `interventions.go`, `outcomes.go`, and `trend.go`: evidence,
+  prioritization, outcome cohorts, and comparison.
+- `report_print.go` and `report_json.go`: human and machine rendering.
+
 ## Storage
 
 - Persist only normalized metadata needed for reports.
