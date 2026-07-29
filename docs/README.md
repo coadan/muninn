@@ -12,9 +12,7 @@ Use these pages according to what you are trying to do:
 The CLI help is the canonical command reference:
 
 ```bash
-muninn help
+muninn --help
 muninn analyze --help
 muninn failures --help
-muninn feedback --help
 ```
-

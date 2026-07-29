@@ -234,27 +234,14 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_session_time ON events(session_id, occurred_at_ns, sequence)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_time_kind ON events(occurred_at_ns, kind)`,
-		`CREATE TABLE IF NOT EXISTS feedback (
-			id INTEGER PRIMARY KEY,
-			repository_key TEXT NOT NULL,
-			source TEXT NOT NULL,
-			control TEXT NOT NULL,
-			category TEXT NOT NULL,
-			target TEXT NOT NULL,
-			signal TEXT NOT NULL,
-			occurrences INTEGER NOT NULL DEFAULT 1,
-			status TEXT NOT NULL DEFAULT 'open',
-			first_seen_ns INTEGER NOT NULL,
-			last_seen_ns INTEGER NOT NULL,
-			resolved_at_ns INTEGER NOT NULL DEFAULT 0,
-			UNIQUE(repository_key, source, control, category, target, signal)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_feedback_repository_status ON feedback(repository_key, status, last_seen_ns)`,
 	}
 	for _, statement := range statements {
 		if _, err := store.db.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("initialize Muninn SQLite store: %w", err)
 		}
+	}
+	if _, err := store.db.ExecContext(ctx, `DROP TABLE IF EXISTS feedback`); err != nil {
+		return fmt.Errorf("remove legacy Muninn feedback storage: %w", err)
 	}
 	var existing string
 	err := store.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&existing)

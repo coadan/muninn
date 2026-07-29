@@ -48,35 +48,6 @@ credit weighting is available. Treat both matched and unmatched rolling trends
 as observational: matching reduces task and model mix bias, but does not prove
 that an intervention caused the change.
 
-## Record fresh friction
-
-When friction is clear before it becomes statistically recurrent, record a
-privacy-safe signal:
-
-```bash
-muninn feedback add \
-  --category roundtrip \
-  --target repository-cli/publish \
-  --signal existing-change-create-failed \
-  --control local \
-  --source codex
-
-muninn feedback list --repo .
-
-muninn feedback resolve \
-  --category roundtrip \
-  --target repository-cli/publish \
-  --signal existing-change-create-failed
-```
-
-Feedback accepts fixed categories and bounded logical labels. It cannot store
-prose, commands, output, paths, URLs, prompts, session IDs, or secrets.
-
-Use `--control local` for tooling you can change directly, `repository` for
-repository interfaces or guidance, `third-party` for upstream dependencies,
-and `unknown` when ownership still needs triage. Resolve the signal after the
-improvement lands.
-
 ## Interpreting structure findings
 
 Repeated reads or searches can suggest that ownership is hard to discover, but

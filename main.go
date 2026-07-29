@@ -163,7 +163,6 @@ type codexSessionInsightsReport struct {
 	Instructions   repositoryInstructionFootprint `json:"instructions"`
 	Summary        codexSessionInsightsSummary    `json:"summary"`
 	Tasks          []codexTaskInsights            `json:"tasks"`
-	Feedback       []agentFeedbackAggregate       `json:"feedback,omitempty"`
 	Findings       []sessionFinding               `json:"findings"`
 	Outcomes       completionEpisodeAnalysis      `json:"outcomes"`
 	Profiles       modelEffortAnalysis            `json:"profiles"`
@@ -479,8 +478,6 @@ func cmdCodex(root string, args []string) error {
 		return cmdAnalyze(root, args[1:])
 	case "failures":
 		return cmdFailures(root, args[1:])
-	case "feedback":
-		return cmdFeedback(root, args[1:])
 	default:
 		return fmt.Errorf("unknown Muninn command: %s", args[0])
 	}
@@ -492,12 +489,10 @@ func printCodexHelp() {
 Usage:
   muninn analyze [flags]
   muninn failures --operation <tool/operation> [flags]
-  muninn feedback <add|resolve|list> [flags]
 
 Available Commands:
   analyze   Analyze agent-session cost and friction for a repository
   failures  Inspect bounded failure events for one owned operation
-  feedback  Record or inspect normalized agent-reported friction
 
 Codex is the first session provider. The provider boundary is explicit so
 Claude Code and OpenCode adapters can be added later without changing the
@@ -520,7 +515,6 @@ Examples:
   muninn analyze --repo . --details
   muninn analyze --repo . --json
   muninn failures --repo . --operation repository-cli/test --since 14d
-  muninn feedback add --category roundtrip --target repository-cli/publish --signal existing-change-create-failed
 `)
 }
 
@@ -713,13 +707,6 @@ func cmdAnalyze(root string, args []string) error {
 		Focus:           normalizeTrendFocus(*focus),
 	}
 	report.Instructions = inspectRepositoryInstructions(resolvedRepoRoot, source.Name())
-	repositoryKey := ownershipSelectorDigest("repo", resolvedRepoRoot)
-	if store != nil {
-		report.Feedback, err = store.listFeedback(context.Background(), repositoryKey, since, false)
-		if err != nil {
-			return err
-		}
-	}
 	report.Findings = buildSessionFindings(report, config)
 	report.Findings, err = filterSessionFindings(report.Findings, *focus)
 	if err != nil {

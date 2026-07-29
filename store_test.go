@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -9,6 +10,37 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSessionStoreRemovesLegacyFeedbackStorage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "muninn.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open legacy store: %v", err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE feedback (id INTEGER PRIMARY KEY)`); err != nil {
+		legacy.Close()
+		t.Fatalf("create legacy feedback table: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("close legacy store: %v", err)
+	}
+
+	store, err := openSessionStore(path)
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer store.Close()
+
+	var tables int
+	if err := store.db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'feedback'`,
+	).Scan(&tables); err != nil {
+		t.Fatalf("inspect migrated store: %v", err)
+	}
+	if tables != 0 {
+		t.Fatalf("legacy feedback table still exists")
+	}
+}
 
 func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T) {
 	sessionsDir := t.TempDir()

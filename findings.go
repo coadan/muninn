@@ -60,25 +60,6 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 
-	for _, feedback := range report.Feedback {
-		findings = append(findings, sessionFinding{
-			Category: directFeedbackFindingCategory(feedback.Category),
-			Control:  feedback.Control,
-			Title:    "direct feedback: " + feedback.Signal,
-			Evidence: fmt.Sprintf("%s explicitly reported occurrences; category %s; sources %s; last seen %s",
-				formatCodexCount(int64(feedback.Occurrences)),
-				feedback.Category,
-				strings.Join(feedback.Sources, ", "),
-				feedback.LastSeen,
-			),
-			Action:   directFeedbackAction(feedback),
-			Count:    feedback.Occurrences,
-			Target:   feedback.Target,
-			LastSeen: feedback.LastSeen,
-			score:    800 + feedback.Occurrences*10,
-		})
-	}
-
 	ownedConfigByID := map[string]ownedToolConfig{}
 	for _, owned := range config.OwnedTools {
 		ownedConfigByID[owned.ID] = owned
@@ -1511,9 +1492,6 @@ func latestSearchReadActivity(report codexSessionInsightsReport) string {
 func sessionFindingSignal(finding sessionFinding) string {
 	target := strings.TrimSpace(finding.Target)
 	switch {
-	case strings.HasPrefix(finding.Title, "direct feedback: "):
-		feedbackSignal := strings.TrimPrefix(finding.Title, "direct feedback: ")
-		return signalID(finding.Category, "direct-feedback", target, feedbackSignal)
 	case strings.HasPrefix(finding.Title, "input-token cost is concentrated in task: "):
 		return signalID("session-loop", "input-cost", target)
 	case strings.HasPrefix(finding.Title, "progress stalls while waiting on: "):
@@ -1558,23 +1536,6 @@ func signalID(parts ...string) string {
 	return signal
 }
 
-func directFeedbackFindingCategory(category string) string {
-	switch category {
-	case "failure":
-		return "recurring-failure"
-	case "structure":
-		return "code-structure"
-	case "instructions":
-		return "instruction-discovery"
-	case "loop":
-		return "session-loop"
-	case "discovery":
-		return "discovery"
-	default:
-		return "agent-interface"
-	}
-}
-
 func locallyControlledOutputContext(context string, ownedTools []ownedToolConfig) bool {
 	toolID, _, hasOperation := strings.Cut(context, "/")
 	if !hasOperation {
@@ -1611,19 +1572,6 @@ func oversizedOutputAction(context, control string) string {
 		return "Use the compact review summary first and retrieve details only for the selected finding."
 	default:
 		return "Narrow the command, lower its output limit, or add a compact repository-owned surface that returns focused follow-ups."
-	}
-}
-
-func directFeedbackAction(feedback agentFeedbackAggregate) string {
-	switch feedback.Control {
-	case "local":
-		return fmt.Sprintf("Improve the locally controlled %s surface, then resolve this feedback with `muninn feedback resolve`.", feedback.Target)
-	case "repository":
-		return fmt.Sprintf("Improve the %s repository interface or guidance, then resolve this feedback with `muninn feedback resolve`.", feedback.Target)
-	case "third-party":
-		return "Prefer a bounded local adapter or workaround and track the longer upstream path separately."
-	default:
-		return "Identify whether this belongs to local tooling, repository structure, or an upstream dependency before choosing the fix path."
 	}
 }
 
