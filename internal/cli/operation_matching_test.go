@@ -53,7 +53,7 @@ func TestOwnedOperationClassificationPrefersSpecificRule(t *testing.T) {
 	}
 }
 
-func TestOwnedFlagClassificationKeepsOnlyPrivacySafeLongNames(t *testing.T) {
+func TestOwnedFlagClassificationKeepsOnlyPrivacySafeSwitches(t *testing.T) {
 	catalog := newOwnershipCatalog([]ownedToolConfig{{
 		ID:          "muninn",
 		Executables: []string{"muninn"},
@@ -66,12 +66,36 @@ func TestOwnedFlagClassificationKeepsOnlyPrivacySafeLongNames(t *testing.T) {
 		Executable: "muninn",
 		Args:       []string{"analyze", "--json", "--repo=/private/path", "--since", "14d", "-q", "--help"},
 	}}
-	want := []string{"muninn/analyze/json", "muninn/analyze/repo", "muninn/analyze/since"}
+	want := []string{"muninn/analyze/json"}
 	if got := catalog.classifyFlags(invocations); !reflect.DeepEqual(got, want) {
 		t.Fatalf("owned flags=%#v want %#v", got, want)
 	}
 	if got := catalog.classifyFlagScopes(invocations); !reflect.DeepEqual(got, []string{"muninn/analyze"}) {
 		t.Fatalf("owned flag scopes=%#v want operation scope", got)
+	}
+}
+
+func TestOwnedFlagClassificationExcludesValueBearingOptions(t *testing.T) {
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "bwb",
+		Executables: []string{"bwb"},
+		Operations: []ownedOperationConfig{{
+			ID:   "publish",
+			Args: []string{"publish"},
+		}},
+	}})
+	invocations := []ownedCommandInvocation{{
+		Executable: "bwb",
+		Args: []string{
+			"publish",
+			"--message", "validated slice",
+			"--repo=breyta",
+			"--wait",
+		},
+	}}
+	want := []string{"bwb/publish/wait"}
+	if got := catalog.classifyFlags(invocations); !reflect.DeepEqual(got, want) {
+		t.Fatalf("owned switches=%#v want %#v", got, want)
 	}
 }
 

@@ -43,6 +43,8 @@ type ownershipIndexOperationConfig struct {
 	Args []string `json:"args"`
 }
 
+const ownershipClassificationVersion = 2
+
 func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 	indexConfigs := make([]ownershipIndexConfig, 0, len(configs))
 	for _, config := range configs {
@@ -60,7 +62,13 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 		}
 		indexConfigs = append(indexConfigs, indexConfig)
 	}
-	encoded, _ := json.Marshal(indexConfigs)
+	encoded, _ := json.Marshal(struct {
+		Version int                    `json:"version"`
+		Tools   []ownershipIndexConfig `json:"tools"`
+	}{
+		Version: ownershipClassificationVersion,
+		Tools:   indexConfigs,
+	})
 	configDigest := sha256.Sum256(encoded)
 	catalog := ownershipCatalog{
 		byDigest:         map[string][]string{},
@@ -153,8 +161,8 @@ func (catalog ownershipCatalog) classifyFlags(invocations []ownedCommandInvocati
 			}
 			scope := catalog.flagScope(toolID, invocation)
 			fixedLauncherFlags := catalog.fixedOperationOnlyFlags(toolID, invocation)
-			for _, argument := range invocation.Args {
-				if flag := ownedLongFlag(argument); flag != "" {
+			for index := range invocation.Args {
+				if flag := ownedSwitchFlag(invocation.Args, index); flag != "" {
 					if fixedLauncherFlags[flag] {
 						continue
 					}
@@ -165,6 +173,21 @@ func (catalog ownershipCatalog) classifyFlags(invocations []ownedCommandInvocati
 	}
 	sort.Strings(flags)
 	return flags
+}
+
+func ownedSwitchFlag(arguments []string, index int) string {
+	if index < 0 || index >= len(arguments) {
+		return ""
+	}
+	argument := strings.TrimSpace(arguments[index])
+	flag := ownedLongFlag(argument)
+	if flag == "" || strings.Contains(argument, "=") {
+		return ""
+	}
+	if index+1 < len(arguments) && !strings.HasPrefix(strings.TrimSpace(arguments[index+1]), "-") {
+		return ""
+	}
+	return flag
 }
 
 func (catalog ownershipCatalog) fixedOperationOnlyFlags(
