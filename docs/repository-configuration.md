@@ -68,8 +68,11 @@ successful use is demand, not friction.
 For configured executables, Muninn also counts normalized long switch names
 without retaining values. Value-bearing options such as `--message <text>` or
 `--repo=<path>` are excluded because their repeated presence does not imply a
-useful default. A switch supplied on at least 80% of definite calls across
-multiple sessions becomes a candidate-default finding.
+useful default. Switches that define the selected configured operation are also
+excluded: an operation such as `comments-wait` cannot provide evidence that its
+required `--wait` selector should be a broader default. A remaining switch
+supplied on at least 80% of definite calls across multiple sessions becomes a
+candidate-default finding.
 
 Run with `--refresh` after changing owned tools or operation patterns so cached
 source events are reclassified.
