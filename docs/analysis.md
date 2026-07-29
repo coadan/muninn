@@ -89,6 +89,11 @@ Output-heavy bundled discovery remains low confidence when observed in only
 one session; cross-session recurrence is required for medium confidence. The
 same rule prevents an isolated locally owned progress stall from becoming a
 high-priority intervention merely because its tool is locally controlled.
+Excessive-operation findings require definitely attributed invocations;
+operations that merely co-occur in command bundles remain visible as
+drill-down evidence but do not establish repeated outer-roundtrip friction.
+Recent operation evidence likewise keeps definite and ambiguous bundled
+truncation and output cost separate.
 
 Delegated sessions are classified by their strongest observable work mode:
 implementation, delivery, verification, research/review, other tool work, or

@@ -343,9 +343,16 @@ func TestBuildSessionFindingsFlagsRepeatedSuccessfulOwnedOperation(t *testing.T)
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 ||
 		!strings.Contains(findings[0].Title, "repeated excessively") ||
-		!strings.Contains(findings[0].Evidence, "112.0 calls per session") ||
+		!strings.Contains(findings[0].Evidence, "112.0 definitely attributed calls per session") ||
 		!strings.Contains(findings[0].Action, "once at the verification boundary") {
 		t.Fatalf("repeated successful operation finding mismatch: %#v", findings)
+	}
+
+	report.Summary.OwnedOperations["repo/check-worker"] = codexOwnedOperationMetrics{
+		Calls: 753, AmbiguousCalls: 713, Sessions: 35,
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("bundled operation attribution became repeated roundtrip friction: %#v", findings)
 	}
 
 	report.Summary.OwnedOperations["repo/check-worker"] = codexOwnedOperationMetrics{
@@ -366,11 +373,14 @@ func TestBuildSessionFindingsShowsRecentOwnedOperationEvidence(t *testing.T) {
 		generatedAt,
 	)
 	report.Summary.OwnedOperations["bwb/run"] = codexOwnedOperationMetrics{
-		Calls:          23,
-		Sessions:       2,
-		FailedCalls:    5,
-		TruncatedCalls: 2,
-		OutputBytes:    43_000,
+		Calls:                   30,
+		AmbiguousCalls:          7,
+		Sessions:                2,
+		FailedCalls:             5,
+		TruncatedCalls:          2,
+		AmbiguousTruncatedCalls: 1,
+		OutputBytes:             43_000,
+		AmbiguousOutputBytes:    4_000,
 	}
 	report.Summary.OwnedOperationFailureReasons["bwb/run"] = map[string]codexOccurrenceMetrics{
 		"timeout": {Count: 5, Sessions: 1},
@@ -397,6 +407,9 @@ func TestBuildSessionFindingsShowsRecentOwnedOperationEvidence(t *testing.T) {
 			OwnedOperations: map[string]codexToolMetrics{
 				"bwb/run": {Calls: 3, OutputBytes: 3_000},
 			},
+			OwnedOperationAmbiguous: map[string]codexToolMetrics{
+				"bwb/run": {Calls: 7, TruncatedCalls: 1, OutputBytes: 4_000},
+			},
 			OwnedOperationFailureReasons: map[string]map[string]int{},
 			Activity: map[string]time.Time{
 				activityKey: generatedAt.Add(-time.Hour),
@@ -409,10 +422,13 @@ func TestBuildSessionFindingsShowsRecentOwnedOperationEvidence(t *testing.T) {
 		t.Fatalf("owned-operation finding mismatch: %#v", findings)
 	}
 	for _, want := range []string{
-		"recent 24h sessions: 3 calls/1 sessions",
+		"recent 24h sessions: 10 calls/1 sessions",
+		"7 bundled calls",
 		"0 actionable failures",
 		"0 truncations",
-		"~750 output tokens",
+		"1 ambiguous bundled truncations",
+		"~750 attributed output tokens",
+		"~1,000 ambiguous bundled output tokens",
 	} {
 		if !strings.Contains(findings[0].Evidence, want) {
 			t.Fatalf("recent evidence %q missing %q", findings[0].Evidence, want)

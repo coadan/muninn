@@ -65,10 +65,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		ownedConfigByID[owned.ID] = owned
 	}
 	for operation, metrics := range summary.OwnedOperations {
+		definiteCalls := max(metrics.Calls-metrics.AmbiguousCalls, 0)
 		repeated := verificationOwnedOperation(operation) &&
 			metrics.Sessions > 0 &&
-			metrics.Calls >= 40 &&
-			metrics.Calls >= metrics.Sessions*15
+			definiteCalls >= 40 &&
+			definiteCalls >= metrics.Sessions*15
 		if metrics.Sessions < 2 && !repeated {
 			continue
 		}
@@ -106,7 +107,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			formatCodexCount(metrics.EstimatedAmbiguousOutputTokens),
 		)
 		if repeated {
-			evidence += fmt.Sprintf("; %.1f calls per session", ratio(float64(metrics.Calls), float64(metrics.Sessions)))
+			evidence += fmt.Sprintf("; %.1f definitely attributed calls per session", ratio(float64(definiteCalls), float64(metrics.Sessions)))
 		}
 		if formatted := formatOwnedOperationActionableReasons(ownership, operation, reasons); formatted != "" {
 			evidence += "; actionable reasons: " + formatted
@@ -1789,10 +1790,13 @@ func recentOwnedOperationEvidence(
 
 	cutoff := generatedAt.Add(-recentWindow)
 	calls := 0
+	ambiguousCalls := 0
 	sessions := 0
 	actionableFailures := 0
 	truncatedCalls := 0
+	ambiguousTruncatedCalls := 0
 	outputBytes := int64(0)
+	ambiguousOutputBytes := int64(0)
 	for _, record := range report.sessionRecords {
 		activity := record.Activity[sessionActivityKey("owned-operation", operation)]
 		if activity.IsZero() || activity.Before(cutoff) {
@@ -1805,9 +1809,12 @@ func recentOwnedOperationEvidence(
 			continue
 		}
 		calls += recordCalls
+		ambiguousCalls += ambiguous.Calls
 		sessions++
-		truncatedCalls += exact.TruncatedCalls + ambiguous.TruncatedCalls
-		outputBytes += exact.OutputBytes + ambiguous.OutputBytes
+		truncatedCalls += exact.TruncatedCalls
+		ambiguousTruncatedCalls += ambiguous.TruncatedCalls
+		outputBytes += exact.OutputBytes
+		ambiguousOutputBytes += ambiguous.OutputBytes
 		for reason, count := range record.OwnedOperationFailureReasons[operation] {
 			if !ownership.operationFailureExpected(operation, reason) {
 				actionableFailures += count
@@ -1818,12 +1825,15 @@ func recentOwnedOperationEvidence(
 		return "; recent 24h sessions: no calls"
 	}
 	return fmt.Sprintf(
-		"; recent 24h sessions: %s calls/%s sessions, %s actionable failures, %s truncations, ~%s output tokens",
+		"; recent 24h sessions: %s calls/%s sessions, %s bundled calls, %s actionable failures, %s truncations, %s ambiguous bundled truncations, ~%s attributed output tokens, ~%s ambiguous bundled output tokens",
 		formatCodexCount(int64(calls)),
 		formatCodexCount(int64(sessions)),
+		formatCodexCount(int64(ambiguousCalls)),
 		formatCodexCount(int64(actionableFailures)),
 		formatCodexCount(int64(truncatedCalls)),
+		formatCodexCount(int64(ambiguousTruncatedCalls)),
 		formatCodexCount(estimatedTokens(outputBytes)),
+		formatCodexCount(estimatedTokens(ambiguousOutputBytes)),
 	)
 }
 
