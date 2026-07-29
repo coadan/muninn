@@ -64,9 +64,9 @@ operation configuration cannot hide the evidence behind a tool-level finding.
 configured operation:
 
 ```bash
-muninn failures --repo . --operation repository-cli/test --since 14d
-muninn failures --repo . --operation repository-cli/test --task task-id
-muninn failures --repo . --operation repository-cli/test \
+muninn failures repository-cli/test --repo . --since 14d
+muninn failures repository-cli/test --repo . --task task-id
+muninn failures repository-cli/test --repo . \
   --reason "test harness protocol" --json
 ```
 

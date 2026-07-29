@@ -340,7 +340,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			action := config.Actions.RecurringFailure
 			if locallyControlled {
 				control = "local"
-				action = "Inspect this operation with `muninn failures --operation " + context + "`, fix the dominant owned failure boundary, and keep one focused regression check."
+				action = "Inspect this operation with `muninn failures " + context + "`, fix the dominant owned failure boundary, and keep one focused regression check."
 			}
 			findings = append(findings, sessionFinding{
 				Category: "recurring-failure",
