@@ -79,7 +79,7 @@ The summary reports total and returned counts for both classes.
 
 Events contain timestamps, fixed failure and command-family labels, output byte
 counts, and attribution quality. They never contain raw session content or
-provider identifiers. The default definite-event limit is 20 and the maximum
+provider identifiers. The default definite-event limit is five and the maximum
 is 100.
 
 ## Control the local index

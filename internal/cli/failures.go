@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+const (
+	defaultFailureEventLimit   = 5
+	maximumFailureEventLimit   = 100
+	ambiguousFailureEventLimit = 5
+)
+
 type ownedOperationFailureEvent struct {
 	OccurredAt           time.Time `json:"occurredAt"`
 	Operation            string    `json:"operation"`
@@ -62,7 +68,11 @@ func cmdFailures(root string, args []string) error {
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
 	reason := fs.String("reason", "", "only include this fixed failure-reason label")
 	task := fs.String("task", "", "only include failures attributed to this exact worktree/task ID")
-	limit := fs.Int("limit", 20, "maximum definite failure events to return (1-100); ambiguous evidence is capped at 5")
+	limit := fs.Int(
+		"limit",
+		defaultFailureEventLimit,
+		"maximum definite failure events to return (1-100); ambiguous evidence is capped at 5",
+	)
 	setFlagSetUsage(
 		fs,
 		"muninn failures <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>]",
@@ -89,7 +99,7 @@ func cmdFailures(root string, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("usage: muninn failures <tool/operation> [flags]")
 	}
-	if *limit < 1 || *limit > 100 {
+	if *limit < 1 || *limit > maximumFailureEventLimit {
 		return errors.New("--limit must be between 1 and 100")
 	}
 	lookback, err := parseCodexLookback(*sinceRaw)
@@ -148,7 +158,7 @@ func cmdFailures(root string, args []string) error {
 		strings.TrimSpace(*reason),
 		strings.TrimSpace(*task),
 		*limit,
-		min(*limit, 5),
+		min(*limit, ambiguousFailureEventLimit),
 	)
 	if err != nil {
 		return err
