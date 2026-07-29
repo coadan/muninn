@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 73
+const codexSessionInsightsSchemaVersion = 74
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`

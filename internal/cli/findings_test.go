@@ -35,6 +35,33 @@ func TestBuildSessionFindingsUsesCurrentRepoRelativeSourceState(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsExposesManagedRepositoryOwner(t *testing.T) {
+	root := t.TempDir()
+	rawTarget := ".workbench/repos/breyta/src/large_owner.clj"
+	path := filepath.Join(root, filepath.FromSlash(rawTarget))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir managed source: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", 16*1024)), 0o644); err != nil {
+		t.Fatalf("write managed source: %v", err)
+	}
+	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
+	report.Summary.ReadTargets[rawTarget] = codexTargetMetrics{
+		Reads:           12,
+		SearchReadLoops: 4,
+		Sessions:        3,
+	}
+
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 ||
+		findings[0].Repository != "breyta" ||
+		findings[0].Target != "src/large_owner.clj" ||
+		findings[0].Signal != "code-structure/breyta/src/large_owner.clj" ||
+		sessionFindingDisplayTarget(findings[0]) != " · breyta/src/large_owner.clj" {
+		t.Fatalf("managed repository owner leaked cache identity: %#v", findings)
+	}
+}
+
 func TestInstructionDiscoveryRequiresMaterialWithinSessionRediscovery(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "deps.edn")
@@ -934,9 +961,15 @@ func TestSessionFindingRepositoryScopeRecognizesWorkbenchSources(t *testing.T) {
 		".worktrees/my-task/breyta/src/runtime.clj":            "breyta",
 	}
 	for target, want := range tests {
-		if got := sessionFindingRepositoryScope(target); got != want {
+		if got := sessionFindingRepositoryScope(sessionFinding{Target: target}); got != want {
 			t.Fatalf("scope for %q=%q want %q", target, got, want)
 		}
+	}
+	if got := sessionFindingRepositoryScope(sessionFinding{
+		Repository: "breyta",
+		Target:     "src/runtime.clj",
+	}); got != "breyta" {
+		t.Fatalf("structured repository scope=%q want breyta", got)
 	}
 }
 
@@ -1433,6 +1466,11 @@ func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
 	finding.Title = "an authoritative owner is repeatedly rediscovered"
 	if got := sessionFindingDisplayTarget(finding); got != " · file reads" {
 		t.Fatalf("distinct target should remain visible: %q", got)
+	}
+	finding.Repository = "breyta"
+	finding.Target = "src/runtime.clj"
+	if got := sessionFindingDisplayTarget(finding); got != " · breyta/src/runtime.clj" {
+		t.Fatalf("structured repository target mismatch: %q", got)
 	}
 }
 

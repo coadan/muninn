@@ -36,7 +36,9 @@ workflow, or verification workflow are consolidated.
   `failures`, `loops`, `output`, or `quality` selects one concern.
 - `--focus discovery` adds repository-relative read targets and the
   highest-output bundled search/read shapes. Human rows follow `--limit`;
-  compact JSON includes the top five as `focusEvidence`.
+  compact JSON includes the top five as `focusEvidence`. Targets inside a
+  managed product repository expose `repository` and a path relative to that
+  repository; disposable cache and worktree prefixes remain internal.
 - `--operation <tool-or-operation>` drills into one configured locally
   controlled tool or operation.
 

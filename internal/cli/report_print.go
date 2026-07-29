@@ -199,9 +199,13 @@ func printDiscoveryFocusEvidence(evidence discoveryFocusEvidence) {
 	if len(evidence.ReadTargets) > 0 {
 		fmt.Println("  Ranked repository read targets:")
 		for _, target := range evidence.ReadTargets {
+			label := target.Target
+			if target.Repository != "" {
+				label = target.Repository + "/" + label
+			}
 			fmt.Printf(
 				"  - %s: %s, %s, %s, %s\n",
-				target.Target,
+				label,
 				formatCodexCountNoun(int64(target.Reads), "read"),
 				formatCodexCountNoun(int64(target.SearchReadLoops), "search/read loop"),
 				formatCodexCountNoun(int64(target.Sessions), "session"),
@@ -575,6 +579,9 @@ func printCodexReadTargets(targets map[string]codexTargetMetrics, limit int) {
 	}
 	rows := make([]row, 0, len(targets))
 	for path, metrics := range targets {
+		if repository, relative, ok := splitManagedRepositoryTarget(path); ok {
+			path = repository + "/" + relative
+		}
 		rows = append(rows, row{Path: path, Metrics: metrics})
 	}
 	sort.Slice(rows, func(i, j int) bool {

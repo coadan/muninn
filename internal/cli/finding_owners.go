@@ -25,6 +25,7 @@ func ownerRediscoveryFindings(report codexSessionInsightsReport, config reposito
 				continue
 			}
 			title, action := ownerRediscoveryPolicy(target, config)
+			repository, findingTarget, _ := splitManagedRepositoryTarget(target)
 			findings = append(findings, sessionFinding{
 				Category: "instruction-discovery",
 				Control:  "repository",
@@ -39,13 +40,16 @@ func ownerRediscoveryFindings(report codexSessionInsightsReport, config reposito
 				Action:     action,
 				Count:      metrics.Reads,
 				Sessions:   metrics.Sessions,
-				Target:     target,
+				Repository: repository,
+				Target:     findingTarget,
 				LastSeen:   sessionFindingLastSeen(report, "read", target),
+				Lever:      reworkTargetLever(target),
 				Confidence: ownerRediscoveryConfidence(metrics),
 				score:      320 + metrics.RediscoverySessions*20 + metrics.SearchReadLoops*10 + metrics.Reads,
 			})
 			continue
 		}
+		repository, findingTarget, _ := splitManagedRepositoryTarget(target)
 		findings = append(findings, sessionFinding{
 			Category: "code-structure",
 			Control:  "repository",
@@ -56,12 +60,14 @@ func ownerRediscoveryFindings(report codexSessionInsightsReport, config reposito
 				formatCodexCount(int64(metrics.Sessions)),
 				formatCodexCount(info.Size()),
 			),
-			Action:   config.Actions.CodeStructure,
-			Count:    metrics.Reads,
-			Sessions: metrics.Sessions,
-			Target:   target,
-			LastSeen: sessionFindingLastSeen(report, "read", target),
-			score:    350 + metrics.Sessions*15 + metrics.SearchReadLoops*10 + metrics.Reads,
+			Action:     config.Actions.CodeStructure,
+			Count:      metrics.Reads,
+			Sessions:   metrics.Sessions,
+			Repository: repository,
+			Target:     findingTarget,
+			LastSeen:   sessionFindingLastSeen(report, "read", target),
+			Lever:      reworkTargetLever(target),
+			score:      350 + metrics.Sessions*15 + metrics.SearchReadLoops*10 + metrics.Reads,
 		})
 	}
 	return findings
@@ -210,7 +216,7 @@ func consolidateOwnerFindings(findings []sessionFinding) []sessionFinding {
 		if !consolidatableOwnerFinding(finding) {
 			continue
 		}
-		groups[finding.Target] = append(groups[finding.Target], index)
+		groups[sessionFindingTargetIdentity(finding)] = append(groups[sessionFindingTargetIdentity(finding)], index)
 	}
 	removed := map[int]bool{}
 	for target, indices := range groups {

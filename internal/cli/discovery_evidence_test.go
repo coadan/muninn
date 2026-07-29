@@ -49,3 +49,26 @@ func TestBuildDiscoveryFocusEvidenceRanksFiltersAndBoundsRows(t *testing.T) {
 		t.Fatalf("ranked search/read shapes mismatch: %#v", evidence.SearchReadShapes)
 	}
 }
+
+func TestBuildDiscoveryFocusEvidenceExposesManagedRepository(t *testing.T) {
+	root := t.TempDir()
+	rawTarget := ".workbench/repos/breyta/src/runtime.clj"
+	path := filepath.Join(root, filepath.FromSlash(rawTarget))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir managed source: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("(ns runtime)\n"), 0o644); err != nil {
+		t.Fatalf("write managed source: %v", err)
+	}
+	summary := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime()).Summary
+	summary.ReadTargets[rawTarget] = codexTargetMetrics{
+		Reads: 8, SearchReadLoops: 2, Sessions: 3, RediscoverySessions: 2,
+	}
+
+	evidence := buildDiscoveryFocusEvidence(summary, root, 1)
+	if len(evidence.ReadTargets) != 1 ||
+		evidence.ReadTargets[0].Repository != "breyta" ||
+		evidence.ReadTargets[0].Target != "src/runtime.clj" {
+		t.Fatalf("managed discovery target leaked cache identity: %#v", evidence.ReadTargets)
+	}
+}

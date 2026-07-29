@@ -12,6 +12,7 @@ type discoveryFocusEvidence struct {
 
 type discoveryReadTargetEvidence struct {
 	Target              string `json:"target"`
+	Repository          string `json:"repository,omitempty"`
 	Reads               int    `json:"reads"`
 	SearchReadLoops     int    `json:"searchReadLoops"`
 	Sessions            int    `json:"sessions"`
@@ -34,8 +35,10 @@ func buildDiscoveryFocusEvidence(summary codexSessionInsightsSummary, repository
 		if _, _, exists := repositoryTargetSize(repositoryRoot, target); !exists {
 			continue
 		}
+		repository, evidenceTarget, _ := splitManagedRepositoryTarget(target)
 		evidence.ReadTargets = append(evidence.ReadTargets, discoveryReadTargetEvidence{
-			Target:              target,
+			Target:              evidenceTarget,
+			Repository:          repository,
 			Reads:               metrics.Reads,
 			SearchReadLoops:     metrics.SearchReadLoops,
 			Sessions:            metrics.Sessions,
@@ -52,7 +55,9 @@ func buildDiscoveryFocusEvidence(summary codexSessionInsightsSummary, repository
 		if evidence.ReadTargets[i].RediscoverySessions != evidence.ReadTargets[j].RediscoverySessions {
 			return evidence.ReadTargets[i].RediscoverySessions > evidence.ReadTargets[j].RediscoverySessions
 		}
-		return evidence.ReadTargets[i].Target < evidence.ReadTargets[j].Target
+		left := evidence.ReadTargets[i].Repository + "/" + evidence.ReadTargets[i].Target
+		right := evidence.ReadTargets[j].Repository + "/" + evidence.ReadTargets[j].Target
+		return left < right
 	})
 
 	for shape, metrics := range summary.MixedShellShapes {
