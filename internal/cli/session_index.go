@@ -75,6 +75,9 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, discove
 			if session.Events[index].OperationTask == "" {
 				session.Events[index].OperationTask = ownership.taskForInvocations(session.Events[index].CommandCandidates)
 			}
+			if session.Events[index].OperationTask == "" {
+				session.Events[index].OperationTask = repositoryTaskForWorkingDirectory(eventCWD, repositoryRoot)
+			}
 			session.Events[index].CommandCandidates = nil
 		}
 		if err := store.replaceSession(ctx, scopeKey, session, info.Size(), info.ModTime().UnixNano(), true); err != nil {

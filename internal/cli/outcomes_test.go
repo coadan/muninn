@@ -695,6 +695,53 @@ func TestAddDownstreamQualityMetricsSeparatesDeliveryAndFailureSessions(t *testi
 	}
 }
 
+func TestSessionRecordSeparatesWorktreeCheckFromRootDelivery(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, ".worktrees", "task-a")
+	startedAt := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	session := normalizedSession{
+		CWD: root,
+		Events: []normalizedSessionEvent{
+			{
+				Sequence:           1,
+				OccurredAt:         startedAt,
+				CallOccurredAt:     startedAt,
+				Kind:               sessionEventToolOutput,
+				ToolName:           "exec_command",
+				OwnedOperations:    []string{"void-cli/worktree-land"},
+				WorkingDirectories: []string{root},
+			},
+			{
+				Sequence:           2,
+				OccurredAt:         startedAt.Add(time.Minute),
+				CallOccurredAt:     startedAt.Add(time.Minute),
+				Kind:               sessionEventToolOutput,
+				ToolName:           "exec_command",
+				Failed:             true,
+				OwnedOperations:    []string{"void-cli/verify"},
+				WorkingDirectories: []string{worktree},
+			},
+		},
+	}
+	record, err := sessionRecordFromNormalized(
+		session,
+		root,
+		startedAt.Add(-time.Minute),
+		startedAt.Add(time.Hour),
+		ownershipCatalog{},
+	)
+	if err != nil {
+		t.Fatalf("build session record: %v", err)
+	}
+	if record.DownstreamQuality.Deliveries != 1 ||
+		record.DownstreamQuality.DeliveriesWithFailure != 0 {
+		t.Fatalf("worktree check attached to root delivery: %#v", record.DownstreamQuality)
+	}
+	if got := record.OwnedOperationTasks["void-cli/verify"]["task-a"]; got.FailedCalls != 1 {
+		t.Fatalf("worktree verify task attribution=%#v want one failed call", got)
+	}
+}
+
 func TestDownstreamQualitySeparatesReviewCleanupAndUnrelatedEdits(t *testing.T) {
 	tracker := downstreamQualityTracker{}
 	deliveredTarget := "src/runtime.go"

@@ -112,6 +112,14 @@ func repositoryTaskForTargetCandidates(candidates []string, cwd, repositoryRoot 
 	return task
 }
 
+func repositoryTaskForWorkingDirectory(cwd, repositoryRoot string) string {
+	task := codexTaskName(repositoryRoot, cwd)
+	if !ownedTaskLabelPattern.MatchString(task) {
+		return ""
+	}
+	return task
+}
+
 func normalizeRepositoryTargetCandidates(candidates []string, cwd, repositoryRoot string, requireCurrentFile bool) []string {
 	var targets []string
 	for _, candidate := range candidates {

@@ -84,3 +84,16 @@ func TestRepositoryTaskForTargetCandidatesPreservesWorktreeIdentity(t *testing.T
 		t.Fatalf("mixed worktree task=%q want empty", got)
 	}
 }
+
+func TestRepositoryTaskForWorkingDirectoryPreservesWorktreeIdentity(t *testing.T) {
+	root := t.TempDir()
+	if got := repositoryTaskForWorkingDirectory(filepath.Join(root, ".worktrees", "task-one"), root); got != "task-one" {
+		t.Fatalf("worktree task=%q want task-one", got)
+	}
+	if got := repositoryTaskForWorkingDirectory(filepath.Join(root, ".workbench", "worktrees", "legacy-task", "repo"), root); got != "legacy-task" {
+		t.Fatalf("legacy worktree task=%q want legacy-task", got)
+	}
+	if got := repositoryTaskForWorkingDirectory(root, root); got != "" {
+		t.Fatalf("root task=%q want empty", got)
+	}
+}
