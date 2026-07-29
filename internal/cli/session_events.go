@@ -191,7 +191,9 @@ func codexToolFailureReason(statusText string) string {
 		return "port collision"
 	case strings.Contains(preview, "connection refused") ||
 		strings.Contains(preview, "emulator unavailable") ||
-		strings.Contains(preview, "spacetimedb is not running"):
+		strings.Contains(preview, "spacetimedb is not running") ||
+		strings.Contains(preview, "no tracked void development runtime") ||
+		strings.Contains(preview, "failed to find database"):
 		return "local service unavailable"
 	case strings.Contains(preview, "http 502") ||
 		strings.Contains(preview, "http 503") ||
