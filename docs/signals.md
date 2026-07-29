@@ -56,6 +56,10 @@ affected session as well as recurrence across three sessions. A normal
 status-then-diff or search-then-read pair therefore remains evidence without
 becoming an interface intervention.
 
+Rapid-poll findings likewise require at least three short continuation polls
+per affected session and at least five polls overall. Occasional early polling
+remains in the metrics without competing with concentrated wait/resume loops.
+
 ## Intervention construction
 
 An intervention contains:

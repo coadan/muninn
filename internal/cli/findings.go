@@ -626,7 +626,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	}
 
 	for context, metrics := range summary.RapidPolls {
-		if metrics.Calls < 5 {
+		if metrics.Sessions < 1 || metrics.Calls < max(5, metrics.Sessions*3) {
 			continue
 		}
 		findings = append(findings, sessionFinding{
