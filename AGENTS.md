@@ -28,24 +28,36 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
 
 ## Code map
 
-- `main.go` and `cli.go`: process entry and top-level command routing.
-- `analyze_command.go` and `config.go`: analysis CLI orchestration and
-  repository policy.
-- `session_provider.go` and provider-named files: session discovery and
-  normalization only.
-- `ownership_config.go`, `ownership.go`, `operation_matching.go`, and
-  `command_invocations.go`: owned-tool policy, catalog construction, operation
-  matching, and privacy-safe invocation extraction.
-- `report_model.go` and `session_analysis.go`: normalized report model and
-  cross-session aggregation.
-- `shell_commands.go`, `session_continuations.go`, and `session_events.go`:
-  privacy-safe command, continuation, output, and failure interpretation.
-- `store.go`, `session_index.go`, `session_query.go`, and `failure_store.go`:
-  SQLite lifecycle, derived indexing, analysis reads, and failure timelines.
-- `findings.go`, `interventions.go`, `discovery_evidence.go`, `outcomes.go`,
-  and `trend.go`: signals, prioritization, bounded drill-down evidence, outcome
-  cohorts, and comparison.
-- `report_print.go` and `report_json.go`: human and machine rendering.
+- `cmd/muninn/main.go`: thin process entry point.
+- `internal/cli/cli.go`: top-level command routing.
+- `internal/cli/analyze_command.go` and `internal/cli/config.go`: analysis CLI
+  orchestration and repository policy.
+- `internal/cli/session_provider.go`: provider contract and declarative
+  registry.
+- `internal/cli/<provider>_discovery.go`,
+  `internal/cli/<provider>_metadata.go`, and
+  `internal/cli/<provider>_normalizer.go`: provider-owned discovery, optional
+  enrichment, wire types, and normalization; compact formats may keep these
+  together.
+- `internal/cli/ownership_config.go`, `internal/cli/ownership.go`,
+  `internal/cli/operation_matching.go`, and
+  `internal/cli/command_invocations.go`: owned-tool policy, catalog
+  construction, operation matching, and privacy-safe invocation extraction.
+- `internal/cli/report_model.go` and `internal/cli/session_analysis.go`:
+  normalized report model and cross-session aggregation.
+- `internal/cli/shell_commands.go`,
+  `internal/cli/session_continuations.go`, and
+  `internal/cli/session_events.go`: privacy-safe command, continuation, output,
+  and failure interpretation.
+- `internal/cli/store.go`, `internal/cli/session_index.go`,
+  `internal/cli/session_query.go`, and `internal/cli/failure_store.go`: SQLite
+  lifecycle, derived indexing, analysis reads, and failure timelines.
+- `internal/cli/findings.go`, `internal/cli/interventions.go`,
+  `internal/cli/discovery_evidence.go`, `internal/cli/outcomes.go`, and
+  `internal/cli/trend.go`: signals, prioritization, bounded drill-down
+  evidence, outcome cohorts, and comparison.
+- `internal/cli/report_print.go` and `internal/cli/report_json.go`: human and
+  machine rendering.
 
 ## Storage
 

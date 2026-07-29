@@ -2,7 +2,9 @@
 
 <img src="assets/muninn-logo.png" alt="Muninn logo" width="512">
 
-Muninn is a CLI for finding avoidable cost and friction in coding agent
+Agent harness session analysis for agentic improvement loops.
+
+Muninn is a CLI for finding avoidable cost and friction in coding-agent
 sessions. It turns local session metadata into actionable signals about tooling,
 instructions, code navigation, verification, and delivery rework.
 
@@ -35,6 +37,12 @@ through one declarative discovery/normalization adapter; storage, repository
 scoping, analysis, findings, and reports stay independent of the source format.
 
 ## Install
+
+```bash
+go install github.com/coadan/muninn/cmd/muninn@latest
+```
+
+To install from a source checkout:
 
 ```bash
 make install
@@ -97,5 +105,8 @@ Run `muninn --help` for the complete command surface.
 
 ```bash
 go test ./...
-go build .
+go vet ./...
+go build ./cmd/muninn
 ```
+
+Muninn is released under the [MIT License](LICENSE).

@@ -8,7 +8,7 @@ test:
 
 build:
 	mkdir -p dist
-	go build -o $(DIST) .
+	go build -o $(DIST) ./cmd/muninn
 
 install: test build
 	@target="$$(go env GOPATH)/bin/$(BINARY)"; \
