@@ -1351,8 +1351,8 @@ type fileHotspotMetrics struct {
 	CompletedTasks      int                 `json:"completedTasks"`
 	EditCalls           int                 `json:"editCalls"`
 	TaskShare           float64             `json:"taskShare"`
+	FreshTokens         outcomeDistribution `json:"freshTokens"`
 	ToolRoundtrips      outcomeDistribution `json:"toolRoundtrips"`
-	DurationSeconds     outcomeDistribution `json:"durationSeconds"`
 	PostReviewEditCalls int                 `json:"postReviewEditCalls"`
 	DownstreamFailures  int                 `json:"downstreamFailures"`
 	FollowUpEdits       int                 `json:"followUpEdits"`
@@ -1608,8 +1608,8 @@ func analyzeFileHotspots(
 	type observations struct {
 		tasks      int
 		editCalls  int
+		fresh      []int64
 		roundtrips []int64
-		durations  []int64
 		lastSeen   time.Time
 	}
 	eligibleTasks := 0
@@ -1631,8 +1631,8 @@ func analyzeFileHotspots(
 			}
 			current.tasks++
 			current.editCalls += calls
+			current.fresh = append(current.fresh, episodeFreshTokens(episode))
 			current.roundtrips = append(current.roundtrips, int64(episode.ToolCalls))
-			current.durations = append(current.durations, taskEpisodeDuration(episode))
 			if episode.EndedAt.After(current.lastSeen) {
 				current.lastSeen = episode.EndedAt
 			}
@@ -1655,8 +1655,8 @@ func analyzeFileHotspots(
 			CompletedTasks:      current.tasks,
 			EditCalls:           current.editCalls,
 			TaskShare:           ratio(float64(current.tasks), float64(eligibleTasks)),
+			FreshTokens:         summarizeOutcomeDistribution(current.fresh),
 			ToolRoundtrips:      summarizeOutcomeDistribution(current.roundtrips),
-			DurationSeconds:     summarizeOutcomeDistribution(current.durations),
 			PostReviewEditCalls: reworkByTarget[target],
 			DownstreamFailures:  failuresByTarget[target],
 			FollowUpEdits:       followUpsByTarget[target],
@@ -1729,23 +1729,23 @@ func printFileHotspots(hotspots []fileHotspotMetrics, limit int) {
 		"TASKS",
 		"SHARE",
 		"EDITS",
+		"FRESH P50/P90",
 		"RT P50/P90",
-		"TIME P50/P90",
 		"REVIEW",
 		"FAIL",
 		"CLASS",
 	)
 	for _, hotspot := range hotspots {
 		fmt.Printf(
-			"%-42s %7s %6.0f%% %7s %6s/%-6s %7s/%-7s %7s %7s %-15s\n",
+			"%-42s %7s %6.0f%% %7s %7s/%-7s %6s/%-6s %7s %7s %-15s\n",
 			truncateCodexLabel(hotspot.Target, 42),
 			formatCodexCount(int64(hotspot.CompletedTasks)),
 			100*hotspot.TaskShare,
 			formatCodexCount(int64(hotspot.EditCalls)),
+			formatCodexCount(hotspot.FreshTokens.P50),
+			formatCodexCount(hotspot.FreshTokens.P90),
 			formatCodexCount(hotspot.ToolRoundtrips.P50),
 			formatCodexCount(hotspot.ToolRoundtrips.P90),
-			formatDurationSeconds(hotspot.DurationSeconds.P50),
-			formatDurationSeconds(hotspot.DurationSeconds.P90),
 			formatCodexCount(int64(hotspot.PostReviewEditCalls)),
 			formatCodexCount(int64(hotspot.DownstreamFailures)),
 			hotspot.Classification,

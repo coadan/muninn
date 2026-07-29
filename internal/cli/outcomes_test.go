@@ -109,6 +109,7 @@ func TestAnalyzeFileHotspotsCorrelatesDemandCostAndReviewFixes(t *testing.T) {
 			StartedAt: start,
 			EndedAt:   start.Add(2 * time.Minute),
 			Completed: true,
+			Tokens:    normalizedTokenUsage{UncachedInputTokens: 1_000, OutputTokens: 200},
 			ToolCalls: 8,
 			Targets:   map[string]int{"src/runtime.ts": 2, "src/one-off.ts": 1},
 		},
@@ -116,6 +117,7 @@ func TestAnalyzeFileHotspotsCorrelatesDemandCostAndReviewFixes(t *testing.T) {
 			StartedAt: start,
 			EndedAt:   start.Add(10 * time.Minute),
 			Completed: true,
+			Tokens:    normalizedTokenUsage{UncachedInputTokens: 8_000, OutputTokens: 400},
 			ToolCalls: 40,
 			Targets:   map[string]int{"src/runtime.ts": 3},
 		},
@@ -141,8 +143,9 @@ func TestAnalyzeFileHotspotsCorrelatesDemandCostAndReviewFixes(t *testing.T) {
 	if got.Target != "src/runtime.ts" || got.CompletedTasks != 2 || got.EditCalls != 5 {
 		t.Fatalf("hotspot identity mismatch: %#v", got)
 	}
-	if got.TaskShare != 2.0/3.0 || got.ToolRoundtrips.P50 != 8 ||
-		got.ToolRoundtrips.P90 != 40 || got.DurationSeconds.P90 != 600 ||
+	if got.TaskShare != 2.0/3.0 || got.FreshTokens.P50 != 1_200 ||
+		got.FreshTokens.P90 != 8_400 || got.ToolRoundtrips.P50 != 8 ||
+		got.ToolRoundtrips.P90 != 40 ||
 		got.PostReviewEditCalls != 2 || got.DownstreamFailures != 1 ||
 		got.Classification != "review/rework" ||
 		got.LastSeen != start.Add(10*time.Minute).Format(time.RFC3339) {
