@@ -1184,13 +1184,13 @@ func TestBuildSessionFindingsTurnsActionableHotspotsIntoStableSignals(t *testing
 	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
 	report.Outcomes.FileHotspots = []fileHotspotMetrics{
 		{
-			Target:          "src/expensive.ts",
-			CompletedTasks:  6,
-			EditCalls:       12,
-			TaskShare:       0.3,
-			ToolRoundtrips:  outcomeDistribution{P50: 70, P90: 140},
-			DurationSeconds: outcomeDistribution{P50: 900, P90: 1800},
-			Classification:  "expensive-owner",
+			Target:         "src/expensive.ts",
+			CompletedTasks: 6,
+			EditCalls:      12,
+			TaskShare:      0.3,
+			FreshTokens:    outcomeDistribution{P50: 80_000, P90: 160_000},
+			ToolRoundtrips: outcomeDistribution{P50: 70, P90: 140},
+			Classification: "expensive-owner",
 		},
 		{
 			Target:              "src/rework.ts",

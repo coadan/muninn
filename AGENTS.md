@@ -64,6 +64,8 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
   `internal/cli/trend.go`: signals, prioritization, bounded drill-down
   evidence, outcome cohorts, and comparison.
 - `internal/cli/finding_focus.go`: public focus-to-signal routing policy.
+- `internal/cli/finding_owners.go`: current-owner eligibility, consolidation,
+  and corroboration policy.
 - `internal/cli/report_print.go` and `internal/cli/report_json.go`: human and
   machine rendering.
 
