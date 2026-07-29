@@ -1,21 +1,21 @@
 package main
 
 type compactSessionSummary struct {
-	FilesScanned           int             `json:"filesScanned"`
-	FilesUnreadable        int             `json:"filesUnreadable"`
-	Sessions               int             `json:"sessions"`
-	CompletedSessions      int             `json:"completedSessions"`
-	IncompleteSessions     int             `json:"incompleteSessions"`
-	DurationSeconds        int64           `json:"durationSeconds"`
-	Compactions            int             `json:"compactions"`
-	SessionsWithCompaction int             `json:"sessionsWithCompactions"`
-	Tokens                 codexTokenUsage `json:"tokens"`
-	FreshTokens            int64           `json:"freshTokens"`
-	ToolCalls              int             `json:"toolCalls"`
-	FailedToolCalls        int             `json:"failedToolCalls"`
-	TruncatedToolCalls     int             `json:"truncatedToolCalls"`
-	ToolOutputBytes        int64           `json:"toolOutputBytes"`
-	ToolOutputTokens       int64           `json:"toolOutputTokens"`
+	FilesScanned           int                  `json:"filesScanned"`
+	FilesUnreadable        int                  `json:"filesUnreadable"`
+	Sessions               int                  `json:"sessions"`
+	CompletedSessions      int                  `json:"completedSessions"`
+	IncompleteSessions     int                  `json:"incompleteSessions"`
+	DurationSeconds        int64                `json:"durationSeconds"`
+	Compactions            int                  `json:"compactions"`
+	SessionsWithCompaction int                  `json:"sessionsWithCompactions"`
+	Tokens                 normalizedTokenUsage `json:"tokens"`
+	FreshTokens            int64                `json:"freshTokens"`
+	ToolCalls              int                  `json:"toolCalls"`
+	FailedToolCalls        int                  `json:"failedToolCalls"`
+	TruncatedToolCalls     int                  `json:"truncatedToolCalls"`
+	ToolOutputBytes        int64                `json:"toolOutputBytes"`
+	ToolOutputTokens       int64                `json:"toolOutputTokens"`
 }
 
 type compactOutcomeSummary struct {

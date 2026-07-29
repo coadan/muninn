@@ -29,8 +29,72 @@ type sessionProvider interface {
 	Metadata(sessionDiscovery) map[string]normalizedSessionMetadata
 }
 
-var sessionProviders = map[string]func() sessionProvider{
-	"codex": func() sessionProvider { return codexSessionSource{} },
+// sessionProviderAdapter keeps provider registration declarative. A new
+// harness supplies discovery, cheap repository routing, and normalization;
+// metadata enrichment is optional.
+type sessionProviderAdapter struct {
+	name       string
+	discover   func(string, bool) (sessionDiscovery, error)
+	sessionCWD func(string) (string, error)
+	normalize  func(string) (normalizedSession, error)
+	metadata   func(sessionDiscovery) map[string]normalizedSessionMetadata
+}
+
+func (provider sessionProviderAdapter) Name() string {
+	return provider.name
+}
+
+func (provider sessionProviderAdapter) Discover(explicit string, includeArchived bool) (sessionDiscovery, error) {
+	if provider.discover == nil {
+		return sessionDiscovery{}, fmt.Errorf("session provider %q has no discovery adapter", provider.name)
+	}
+	return provider.discover(explicit, includeArchived)
+}
+
+func (provider sessionProviderAdapter) SessionCWD(path string) (string, error) {
+	if provider.sessionCWD == nil {
+		return "", fmt.Errorf("session provider %q has no repository-routing adapter", provider.name)
+	}
+	return provider.sessionCWD(path)
+}
+
+func (provider sessionProviderAdapter) NormalizeSession(path string) (normalizedSession, error) {
+	if provider.normalize == nil {
+		return normalizedSession{}, fmt.Errorf("session provider %q has no normalization adapter", provider.name)
+	}
+	return provider.normalize(path)
+}
+
+func (provider sessionProviderAdapter) Metadata(discovery sessionDiscovery) map[string]normalizedSessionMetadata {
+	if provider.metadata == nil {
+		return nil
+	}
+	return provider.metadata(discovery)
+}
+
+func (provider sessionProviderAdapter) validate(registryName string) error {
+	if provider.name == "" {
+		return fmt.Errorf("session provider %q has no stable name", registryName)
+	}
+	if provider.name != registryName {
+		return fmt.Errorf("session provider registry key %q does not match adapter name %q", registryName, provider.name)
+	}
+	if provider.discover == nil || provider.sessionCWD == nil || provider.normalize == nil {
+		return fmt.Errorf("session provider %q must define discovery, repository routing, and normalization adapters", registryName)
+	}
+	return nil
+}
+
+var codexSessionProvider = sessionProviderAdapter{
+	name:       "codex",
+	discover:   discoverCodexSessionSource,
+	sessionCWD: parseCodexSessionCWD,
+	normalize:  parseCodexNormalizedSession,
+	metadata:   codexSessionMetadata,
+}
+
+var sessionProviders = map[string]sessionProviderAdapter{
+	"codex": codexSessionProvider,
 }
 
 func resolveSessionSource(name string) (sessionProvider, error) {
@@ -38,9 +102,12 @@ func resolveSessionSource(name string) (sessionProvider, error) {
 	if name == "" {
 		name = defaultSessionProvider
 	}
-	factory, ok := sessionProviders[name]
+	provider, ok := sessionProviders[name]
 	if ok {
-		return factory(), nil
+		if err := provider.validate(name); err != nil {
+			return nil, err
+		}
+		return provider, nil
 	}
 	return nil, fmt.Errorf("unsupported session provider %q (available: %s)", name, strings.Join(availableSessionProviders(), ", "))
 }

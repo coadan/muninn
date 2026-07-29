@@ -379,7 +379,7 @@ func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 		Task: "expensive-task",
 		codexAggregateMetrics: codexAggregateMetrics{
 			Sessions: 4,
-			Tokens: codexTokenUsage{
+			Tokens: normalizedTokenUsage{
 				InputTokens:         1_200_000,
 				CachedInputTokens:   400_000,
 				UncachedInputTokens: 800_000,

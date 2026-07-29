@@ -714,22 +714,22 @@ func TestFormatRefreshCompletionIsBoundedAndActionable(t *testing.T) {
 	}
 }
 
-func TestCodexTokenUsageIncrementHandlesCounterReset(t *testing.T) {
-	previous := codexTokenUsage{
+func TestNormalizedTokenUsageIncrementHandlesCounterReset(t *testing.T) {
+	previous := normalizedTokenUsage{
 		InputTokens:         1_000,
 		CachedInputTokens:   800,
 		UncachedInputTokens: 200,
 		OutputTokens:        100,
 		TotalTokens:         1_100,
 	}
-	reset := codexTokenUsage{
+	reset := normalizedTokenUsage{
 		InputTokens:         80,
 		CachedInputTokens:   50,
 		UncachedInputTokens: 30,
 		OutputTokens:        10,
 		TotalTokens:         90,
 	}
-	if got := codexTokenUsageIncrement(reset, previous, true); got != reset {
+	if got := normalizedTokenUsageIncrement(reset, previous, true); got != reset {
 		t.Fatalf("counter reset should start a new token epoch: %#v", got)
 	}
 }

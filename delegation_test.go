@@ -14,7 +14,7 @@ func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
 			EndedAt:   at(end),
 			Completed: true,
 			ToolCalls: 2,
-			Tokens: codexTokenUsage{
+			Tokens: normalizedTokenUsage{
 				UncachedInputTokens: fresh,
 			},
 		}
@@ -28,7 +28,7 @@ func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
 			StartedAt:       at(0),
 			EndedAt:         at(40),
 			Completed:       true,
-			Tokens:          codexTokenUsage{UncachedInputTokens: 100, OutputTokens: 20},
+			Tokens:          normalizedTokenUsage{UncachedInputTokens: 100, OutputTokens: 20},
 			ToolCalls:       8,
 			ToolCallsByName: map[string]int{"spawn_agent": 2, "wait_agent": 2},
 			EditTargets:     map[string]int{"src/shared.go": 1},
@@ -40,7 +40,7 @@ func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
 				ToolCalls: 8,
 				Phases: map[string]taskPhaseCost{
 					"delegation": {
-						Tokens:          codexTokenUsage{UncachedInputTokens: 10, OutputTokens: 5},
+						Tokens:          normalizedTokenUsage{UncachedInputTokens: 10, OutputTokens: 5},
 						ToolCalls:       4,
 						ToolOutputBytes: 400,
 					},
@@ -57,7 +57,7 @@ func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
 			StartedAt:        at(10),
 			EndedAt:          at(30),
 			Completed:        true,
-			Tokens:           codexTokenUsage{UncachedInputTokens: 70, OutputTokens: 10},
+			Tokens:           normalizedTokenUsage{UncachedInputTokens: 70, OutputTokens: 10},
 			ToolCalls:        4,
 			EditTargets:      map[string]int{"src/shared.go": 1, "src/child.go": 1},
 			ReadTargets:      map[string]codexTargetMetrics{"src/owner.go": {Reads: 1}},
@@ -71,7 +71,7 @@ func TestAnalyzeModelEffortProfilesAndDelegation(t *testing.T) {
 			ParentLineageKey: "parent",
 			StartedAt:        at(15),
 			EndedAt:          at(25),
-			Tokens:           codexTokenUsage{UncachedInputTokens: 45, OutputTokens: 5},
+			Tokens:           normalizedTokenUsage{UncachedInputTokens: 45, OutputTokens: 5},
 			ToolCalls:        2,
 			TaskEpisodes:     []codexTaskEpisode{completedEpisode(15, 25, 50)},
 		},

@@ -25,13 +25,7 @@ type indexedCodexDescriptor struct {
 	WorkingDirectories            []string
 }
 
-type codexSessionSource struct{}
-
-func (codexSessionSource) Name() string {
-	return "codex"
-}
-
-func (codexSessionSource) Discover(explicit string, includeArchived bool) (sessionDiscovery, error) {
+func discoverCodexSessionSource(explicit string, includeArchived bool) (sessionDiscovery, error) {
 	resolved, err := resolveCodexSessionsDir(explicit)
 	if err != nil {
 		return sessionDiscovery{}, err
@@ -46,7 +40,7 @@ func (codexSessionSource) Discover(explicit string, includeArchived bool) (sessi
 	return discoverCodexSessions(dirs)
 }
 
-func (codexSessionSource) Metadata(discovery sessionDiscovery) map[string]normalizedSessionMetadata {
+func codexSessionMetadata(discovery sessionDiscovery) map[string]normalizedSessionMetadata {
 	return loadCodexSessionMetadata(discovery.Dirs)
 }
 
@@ -100,7 +94,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 			case "context_compacted":
 				appendNormalizedCompaction(&session, &sequence, &lastCompaction, timestamp)
 			case "token_count":
-				usage := codexTokenUsage{
+				usage := normalizedTokenUsage{
 					InputTokens:       payload.Info.TotalTokenUsage.InputTokens,
 					CachedInputTokens: payload.Info.TotalTokenUsage.CachedInputTokens,
 					OutputTokens:      payload.Info.TotalTokenUsage.OutputTokens,
@@ -313,11 +307,7 @@ func readCodexRolloutLineage(path string) (string, string) {
 	return "", ""
 }
 
-func (codexSessionSource) NormalizeSession(path string) (normalizedSession, error) {
-	return parseCodexNormalizedSession(path)
-}
-
-func (codexSessionSource) SessionCWD(path string) (string, error) {
+func parseCodexSessionCWD(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err

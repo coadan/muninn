@@ -28,7 +28,7 @@ func TestAnalyzeOwnedOperationEffectsMatchesComparableTasks(t *testing.T) {
 			EndedAt:         start.Add(duration),
 			Completed:       true,
 			ToolCalls:       calls,
-			Tokens:          codexTokenUsage{UncachedInputTokens: fresh},
+			Tokens:          normalizedTokenUsage{UncachedInputTokens: fresh},
 			TargetCohorts:   map[string]int{"src/app": 1},
 			OwnedOperations: operations,
 		})

@@ -142,14 +142,14 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := store.refresh(ctx, "codex", discovery, repositoryRoot, codexSessionSource{}, ownershipCatalog{}, false)
+	first, err := store.refresh(ctx, "codex", discovery, repositoryRoot, codexSessionProvider, ownershipCatalog{}, false)
 	if err != nil {
 		t.Fatalf("first refresh: %v", err)
 	}
 	if first.FilesIndexed != 1 || first.FilesReused != 0 {
 		t.Fatalf("unexpected first refresh: %#v", first)
 	}
-	second, err := store.refresh(ctx, "codex", discovery, repositoryRoot, codexSessionSource{}, ownershipCatalog{}, false)
+	second, err := store.refresh(ctx, "codex", discovery, repositoryRoot, codexSessionProvider, ownershipCatalog{}, false)
 	if err != nil {
 		t.Fatalf("second refresh: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestSessionStoreRestoresRepositoryScopeAtAnalysisBoundary(t *testing.T) {
 		CWD:        root,
 		Events: []normalizedSessionEvent{
 			{Sequence: 1, OccurredAt: now.Add(-3 * time.Minute), Kind: sessionEventToolCall, ToolName: "exec_command", WorkingDirectories: []string{filepath.Join(filepath.Dir(root), "muninn")}},
-			{Sequence: 2, OccurredAt: now.Add(-2 * time.Minute), Kind: sessionEventToken, Tokens: codexTokenUsage{TotalTokens: 500}},
+			{Sequence: 2, OccurredAt: now.Add(-2 * time.Minute), Kind: sessionEventToken, Tokens: normalizedTokenUsage{TotalTokens: 500}},
 			{Sequence: 3, OccurredAt: now.Add(-time.Minute), Kind: sessionEventToolOutput, ToolName: "exec_command", Failed: true, OutputBytes: 1000},
 		},
 	}

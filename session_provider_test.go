@@ -8,16 +8,17 @@ import (
 	"time"
 )
 
-type fakeSessionProvider struct {
-	discovery sessionDiscovery
-	sessions  map[string]normalizedSession
-}
-
 func TestSessionProviderRegistryOwnsPublicProviderList(t *testing.T) {
 	original := sessionProviders
-	sessionProviders = map[string]func() sessionProvider{
-		"zeta":  func() sessionProvider { return fakeSessionProvider{} },
-		"alpha": func() sessionProvider { return fakeSessionProvider{} },
+	sessionProviders = map[string]sessionProviderAdapter{
+		"zeta": {
+			name: "zeta", discover: emptySessionDiscovery,
+			sessionCWD: emptySessionCWD, normalize: emptyNormalizedSession,
+		},
+		"alpha": {
+			name: "alpha", discover: emptySessionDiscovery,
+			sessionCWD: emptySessionCWD, normalize: emptyNormalizedSession,
+		},
 	}
 	t.Cleanup(func() { sessionProviders = original })
 
@@ -29,24 +30,34 @@ func TestSessionProviderRegistryOwnsPublicProviderList(t *testing.T) {
 	}
 }
 
-func (provider fakeSessionProvider) Name() string {
-	return "fake-harness"
+func emptySessionDiscovery(string, bool) (sessionDiscovery, error) {
+	return sessionDiscovery{}, nil
 }
 
-func (provider fakeSessionProvider) Discover(string, bool) (sessionDiscovery, error) {
-	return provider.discovery, nil
+func emptySessionCWD(string) (string, error) {
+	return "", nil
 }
 
-func (provider fakeSessionProvider) Metadata(sessionDiscovery) map[string]normalizedSessionMetadata {
-	return nil
+func emptyNormalizedSession(string) (normalizedSession, error) {
+	return normalizedSession{}, nil
 }
 
-func (provider fakeSessionProvider) NormalizeSession(path string) (normalizedSession, error) {
-	return provider.sessions[path], nil
-}
+func TestSessionProviderRegistryRejectsIncompleteOrMismatchedAdapters(t *testing.T) {
+	original := sessionProviders
+	t.Cleanup(func() { sessionProviders = original })
 
-func (provider fakeSessionProvider) SessionCWD(path string) (string, error) {
-	return provider.sessions[path].CWD, nil
+	sessionProviders = map[string]sessionProviderAdapter{
+		"other": {name: "different"},
+	}
+	if _, err := resolveSessionSource("other"); err == nil {
+		t.Fatal("mismatched provider registration unexpectedly accepted")
+	}
+	sessionProviders = map[string]sessionProviderAdapter{
+		"other": {name: "other"},
+	}
+	if _, err := resolveSessionSource("other"); err == nil {
+		t.Fatal("incomplete provider registration unexpectedly accepted")
+	}
 }
 
 func TestSessionProviderContractSupportsAnotherFileFormat(t *testing.T) {
@@ -57,28 +68,51 @@ func TestSessionProviderContractSupportsAnotherFileFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	startedAt := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
-	provider := fakeSessionProvider{
-		discovery: sessionDiscovery{
-			Dirs:  []string{sessionDir},
-			Files: []string{sessionPath},
+	discovery := sessionDiscovery{
+		Dirs:  []string{sessionDir},
+		Files: []string{sessionPath},
+	}
+	session := normalizedSession{
+		CWD:       repositoryRoot,
+		Model:     "fake-model",
+		AgentKind: "root",
+		Events: []normalizedSessionEvent{
+			{Sequence: 1, OccurredAt: startedAt, Kind: sessionEventToolCall, ToolName: "shell", Family: "shell", ToolRound: 1},
+			{Sequence: 2, OccurredAt: startedAt.Add(time.Second), Kind: sessionEventToolOutput, ToolName: "shell", Family: "shell", ToolRound: 1, OutputBytes: 12},
+			{Sequence: 3, OccurredAt: startedAt.Add(2 * time.Second), Kind: sessionEventComplete},
 		},
-		sessions: map[string]normalizedSession{
-			sessionPath: {
-				CWD:       repositoryRoot,
-				Model:     "fake-model",
-				AgentKind: "root",
-				Events: []normalizedSessionEvent{
-					{Sequence: 1, OccurredAt: startedAt, Kind: sessionEventToolCall, ToolName: "shell", Family: "shell", ToolRound: 1},
-					{Sequence: 2, OccurredAt: startedAt.Add(time.Second), Kind: sessionEventToolOutput, ToolName: "shell", Family: "shell", ToolRound: 1, OutputBytes: 12},
-					{Sequence: 3, OccurredAt: startedAt.Add(2 * time.Second), Kind: sessionEventComplete},
-				},
-			},
+	}
+	provider := sessionProviderAdapter{
+		name: "fake-harness",
+		discover: func(string, bool) (sessionDiscovery, error) {
+			return discovery, nil
 		},
+		sessionCWD: func(path string) (string, error) {
+			if path != sessionPath {
+				t.Fatalf("unexpected session path %q", path)
+			}
+			return repositoryRoot, nil
+		},
+		normalize: func(path string) (normalizedSession, error) {
+			if path != sessionPath {
+				t.Fatalf("unexpected session path %q", path)
+			}
+			return session, nil
+		},
+	}
+	original := sessionProviders
+	sessionProviders = map[string]sessionProviderAdapter{
+		"fake-harness": provider,
+	}
+	t.Cleanup(func() { sessionProviders = original })
+	source, err := resolveSessionSource("fake-harness")
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	report, err := analyzeProviderSessions(
-		provider,
-		provider.discovery,
+		source,
+		discovery,
 		repositoryRoot,
 		startedAt.Add(-time.Hour),
 		startedAt.Add(time.Hour),
@@ -89,7 +123,7 @@ func TestSessionProviderContractSupportsAnotherFileFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Provider != provider.Name() || report.Summary.FilesScanned != 1 ||
+	if report.Provider != source.Name() || report.Summary.FilesScanned != 1 ||
 		report.Summary.FilesUnreadable != 0 || report.Summary.Sessions != 1 {
 		t.Fatalf("provider-neutral direct analysis mismatch: %#v", report.Summary)
 	}
@@ -101,10 +135,10 @@ func TestSessionProviderContractSupportsAnotherFileFormat(t *testing.T) {
 	defer store.Close()
 	stats, err := store.refresh(
 		t.Context(),
-		provider.Name(),
-		provider.discovery,
+		source.Name(),
+		discovery,
 		repositoryRoot,
-		provider,
+		source,
 		ownershipCatalog{},
 		false,
 	)

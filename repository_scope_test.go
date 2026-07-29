@@ -79,14 +79,14 @@ func TestSessionRecordExcludesWorkInAnotherRepository(t *testing.T) {
 		Events: []normalizedSessionEvent{
 			{Sequence: 1, OccurredAt: startedAt, Kind: sessionEventToolCall, ToolName: "exec_command"},
 			{Sequence: 2, OccurredAt: startedAt.Add(time.Second), CallOccurredAt: startedAt, Kind: sessionEventToolOutput, ToolName: "exec_command", OutputBytes: 10},
-			{Sequence: 3, OccurredAt: startedAt.Add(2 * time.Second), Kind: sessionEventToken, Tokens: codexTokenUsage{TotalTokens: 100}},
+			{Sequence: 3, OccurredAt: startedAt.Add(2 * time.Second), Kind: sessionEventToken, Tokens: normalizedTokenUsage{TotalTokens: 100}},
 			{Sequence: 4, OccurredAt: startedAt.Add(3 * time.Second), Kind: sessionEventToolCall, ToolName: "exec_command", WorkingDirectories: []string{outside}},
 			{Sequence: 5, OccurredAt: startedAt.Add(4 * time.Second), CallOccurredAt: startedAt.Add(3 * time.Second), Kind: sessionEventToolOutput, ToolName: "exec_command", WorkingDirectories: []string{outside}, Failed: true, OutputBytes: 1000},
-			{Sequence: 6, OccurredAt: startedAt.Add(5 * time.Second), Kind: sessionEventToken, Tokens: codexTokenUsage{TotalTokens: 500}},
+			{Sequence: 6, OccurredAt: startedAt.Add(5 * time.Second), Kind: sessionEventToken, Tokens: normalizedTokenUsage{TotalTokens: 500}},
 			{Sequence: 7, OccurredAt: startedAt.Add(6 * time.Second), Kind: sessionEventComplete},
 			{Sequence: 8, OccurredAt: startedAt.Add(7 * time.Second), Kind: sessionEventToolCall, ToolName: "exec_command"},
 			{Sequence: 9, OccurredAt: startedAt.Add(8 * time.Second), CallOccurredAt: startedAt.Add(7 * time.Second), Kind: sessionEventToolOutput, ToolName: "exec_command", OutputBytes: 20},
-			{Sequence: 10, OccurredAt: startedAt.Add(9 * time.Second), Kind: sessionEventToken, Tokens: codexTokenUsage{TotalTokens: 600}},
+			{Sequence: 10, OccurredAt: startedAt.Add(9 * time.Second), Kind: sessionEventToken, Tokens: normalizedTokenUsage{TotalTokens: 600}},
 			{Sequence: 11, OccurredAt: startedAt.Add(10 * time.Second), Kind: sessionEventComplete},
 		},
 	}
