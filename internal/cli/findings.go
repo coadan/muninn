@@ -872,16 +872,27 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		if searchRead.Sessions < 2 {
 			confidence = "low"
 		}
+		evidence := fmt.Sprintf("%s calls returned ~%s visible output tokens across at least %s",
+			formatCodexCount(int64(searchRead.Calls)),
+			formatCodexCount(searchRead.EstimatedOutputTokens),
+			formatCodexCountNoun(int64(searchRead.Sessions), "session"),
+		)
+		action := config.Actions.SourceContext
+		inspectFallback := boundedInspectFallbackMetrics(summary.CrossCallTransitions)
+		if inspectFallback.Count >= 10 && inspectFallback.Sessions >= 2 {
+			evidence += fmt.Sprintf(
+				"; bounded source inspection was followed by raw search or file reads %s times across at least %s",
+				formatCodexCount(int64(inspectFallback.Count)),
+				formatCodexCountNoun(int64(inspectFallback.Sessions), "session"),
+			)
+			action = "The bounded repository source-context surface is already used; improve its result or continuation boundary so agents do not immediately fall back to raw search or file reads."
+		}
 		findings = append(findings, sessionFinding{
-			Category: "discovery",
-			Control:  "repository",
-			Title:    "bundled search/read discovery remains output-heavy",
-			Evidence: fmt.Sprintf("%s calls returned ~%s visible output tokens across at least %s",
-				formatCodexCount(int64(searchRead.Calls)),
-				formatCodexCount(searchRead.EstimatedOutputTokens),
-				formatCodexCountNoun(int64(searchRead.Sessions), "session"),
-			),
-			Action:     config.Actions.SourceContext,
+			Category:   "discovery",
+			Control:    "repository",
+			Title:      "bundled search/read discovery remains output-heavy",
+			Evidence:   evidence,
+			Action:     action,
 			Count:      searchRead.Calls,
 			Sessions:   searchRead.Sessions,
 			LastSeen:   latestSearchReadActivity(report),
@@ -1295,6 +1306,19 @@ func latestSearchReadActivity(report codexSessionInsightsReport) string {
 		}
 	}
 	return formatSessionFindingTime(latest)
+}
+
+func boundedInspectFallbackMetrics(transitions map[string]codexTransitionMetrics) codexTransitionMetrics {
+	var result codexTransitionMetrics
+	for _, transition := range []string{
+		"bounded task inspect -> file reads",
+		"bounded task inspect -> search",
+	} {
+		metrics := transitions[transition]
+		result.Count += metrics.Count
+		result.Sessions = max(result.Sessions, metrics.Sessions)
+	}
+	return result
 }
 
 func sessionFindingSignal(finding sessionFinding) string {
