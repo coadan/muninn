@@ -6,7 +6,7 @@
       "repository": ".",
       "executables": ["muninn"],
       "operations": [
-        {"id": "analyze", "args": ["analyze"]},
+        {"id": "analyze", "args": ["analyze"], "expectedWait": true},
         {"id": "failures", "args": ["failures"]}
       ],
       "recommendation": "Improve Muninn's analysis defaults or focused query surface when agents repeatedly reconstruct the same invocation."
