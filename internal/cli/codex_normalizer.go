@@ -165,6 +165,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				continuation := false
 				if reference, ok := codexNestedContinuationReference(name, payload.Input); ok {
 					continuation = true
+					continuationToolContext := descriptor.NestedToolContext
 					if reference.Type == "session" {
 						descriptor = execSessions[reference.ID]
 					} else {
@@ -172,6 +173,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					}
 					descriptor.Name = name
 					descriptor.OccurredAt = timestamp
+					descriptor.NestedToolContext = continuationToolContext
 					descriptor.First = ""
 					descriptor.Last = ""
 				}

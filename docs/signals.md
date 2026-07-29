@@ -74,6 +74,9 @@ becoming an interface intervention.
 Rapid-poll findings likewise require at least three short continuation polls
 per affected session and at least five polls overall. Occasional early polling
 remains in the metrics without competing with concentrated wait/resume loops.
+The target is the owned operation when available; otherwise it is the
+privacy-safe continuation API, such as `write_stdin` or `wait`, rather than the
+unrelated command family being resumed.
 
 Generic compaction findings require at least two compactions per affected
 session, a pattern spanning at least five sessions and 20% of the cohort, or a

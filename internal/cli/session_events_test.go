@@ -501,6 +501,25 @@ func TestConcurrentBatchUsesSharedStageBudget(t *testing.T) {
 	}
 }
 
+func TestRapidPollContextPrefersOwnedOperationThenPollingSurface(t *testing.T) {
+	event := normalizedSessionEvent{
+		ToolName:          "exec",
+		Family:            "other shell",
+		NestedToolContext: "nested tool write_stdin",
+	}
+	if got := rapidPollContext(event, []string{"bwb/test"}); got != "bwb/test" {
+		t.Fatalf("owned rapid poll context=%q", got)
+	}
+	if got := rapidPollContext(event, nil); got != "write_stdin" {
+		t.Fatalf("nested rapid poll context=%q", got)
+	}
+	event.ToolName = "wait"
+	event.NestedToolContext = ""
+	if got := rapidPollContext(event, nil); got != "wait" {
+		t.Fatalf("direct rapid poll context=%q", got)
+	}
+}
+
 func TestCodexMixedSearchReadMetricsAggregatesOnlyRelevantShapes(t *testing.T) {
 	got := codexMixedSearchReadMetrics(map[string]codexToolMetrics{
 		"search -> file reads":          {Calls: 2, Sessions: 2, FailedCalls: 1, OutputBytes: 400},

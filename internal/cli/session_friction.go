@@ -84,7 +84,7 @@ func recordProgressWait(record codexSessionRecord, event normalizedSessionEvent,
 
 func recordRapidContinuationPoll(record codexSessionRecord, event normalizedSessionEvent, ownedOperations []string) {
 	if !event.OperationContinues ||
-		!continuationToolName(event.ToolName) ||
+		continuationPollSurface(event) == "" ||
 		event.CallOccurredAt.IsZero() ||
 		!event.OccurredAt.After(event.CallOccurredAt) {
 		return
@@ -94,7 +94,7 @@ func recordRapidContinuationPoll(record codexSessionRecord, event normalizedSess
 		event.OutputBytes > rapidContinuationPollMaximumOutputBytes {
 		return
 	}
-	context := progressWaitContext(event, ownedOperations)
+	context := rapidPollContext(event, ownedOperations)
 	metrics := record.RapidPolls[context]
 	metrics.Calls++
 	metrics.Seconds += int64(duration.Seconds())
@@ -102,24 +102,35 @@ func recordRapidContinuationPoll(record codexSessionRecord, event normalizedSess
 	touchSessionActivity(record.Activity, "rapid-poll", context, event.OccurredAt)
 }
 
-func continuationToolName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "wait", "write_stdin":
-		return true
-	default:
-		return false
+func rapidPollContext(event normalizedSessionEvent, ownedOperations []string) string {
+	if operation := mostSpecificOwnedOperation(ownedOperations); operation != "" {
+		return operation
 	}
+	if surface := continuationPollSurface(event); surface != "" {
+		return surface
+	}
+	return progressWaitContext(event, nil)
+}
+
+func continuationPollSurface(event normalizedSessionEvent) string {
+	switch strings.ToLower(strings.TrimSpace(event.ToolName)) {
+	case "wait", "write_stdin":
+		return strings.ToLower(strings.TrimSpace(event.ToolName))
+	}
+	if !strings.EqualFold(strings.TrimSpace(event.ToolName), "exec") {
+		return ""
+	}
+	for _, surface := range []string{"write_stdin", "wait"} {
+		if strings.Contains(event.NestedToolContext, surface) {
+			return surface
+		}
+	}
+	return ""
 }
 
 func progressWaitContext(event normalizedSessionEvent, ownedOperations []string) string {
-	specific := ""
-	for _, operation := range ownedOperations {
-		if len(operation) > len(specific) {
-			specific = operation
-		}
-	}
-	if specific != "" {
-		return specific
+	if operation := mostSpecificOwnedOperation(ownedOperations); operation != "" {
+		return operation
 	}
 	if event.Family != "" {
 		return event.Family
@@ -128,6 +139,16 @@ func progressWaitContext(event normalizedSessionEvent, ownedOperations []string)
 		return "tool " + event.ToolName
 	}
 	return "(unknown)"
+}
+
+func mostSpecificOwnedOperation(ownedOperations []string) string {
+	specific := ""
+	for _, operation := range ownedOperations {
+		if len(operation) > len(specific) {
+			specific = operation
+		}
+	}
+	return specific
 }
 
 func expectedProgressWait(event normalizedSessionEvent, ownedOperations []string, ownership ownershipCatalog) bool {
