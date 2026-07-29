@@ -1,8 +1,10 @@
 {
   "schemaVersion": 1,
   "suppressSignals": [
-    "default-candidate/muninn/repo",
-    "default-candidate/muninn/since"
+    "default-candidate/muninn/analyze/repo",
+    "default-candidate/muninn/analyze/since",
+    "default-candidate/muninn/failures/repo",
+    "default-candidate/muninn/failures/since"
   ],
   "ownedTools": [
     {

@@ -1680,11 +1680,11 @@ func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
 
 func TestBuildSessionFindingsSuggestsFrequentlyRepeatedFlagAsDefault(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
-	report.Summary.OwnedFlagCalls["muninn"] = codexOccurrenceMetrics{
+	report.Summary.OwnedFlagEligibleCalls["muninn/analyze"] = codexOccurrenceMetrics{
 		Count:    9,
 		Sessions: 3,
 	}
-	report.Summary.OwnedFlags["muninn/json"] = codexOccurrenceMetrics{
+	report.Summary.OwnedFlags["muninn/analyze/json"] = codexOccurrenceMetrics{
 		Count:    8,
 		Sessions: 3,
 	}
@@ -1696,13 +1696,13 @@ func TestBuildSessionFindingsSuggestsFrequentlyRepeatedFlagAsDefault(t *testing.
 		}},
 	})
 	if len(findings) != 1 ||
-		findings[0].Target != "muninn/json" ||
-		!strings.Contains(findings[0].Title, "muninn --json") ||
+		findings[0].Target != "muninn/analyze/json" ||
+		!strings.Contains(findings[0].Title, "muninn analyze --json") ||
 		!strings.Contains(findings[0].Evidence, "8 of 9") {
 		t.Fatalf("candidate-default finding mismatch: %#v", findings)
 	}
 
-	report.Summary.OwnedFlags["muninn/json"] = codexOccurrenceMetrics{
+	report.Summary.OwnedFlags["muninn/analyze/json"] = codexOccurrenceMetrics{
 		Count:    7,
 		Sessions: 3,
 	}

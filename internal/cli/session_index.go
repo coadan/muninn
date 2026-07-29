@@ -71,7 +71,7 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, discove
 			session.Events[index].TargetCandidates = nil
 			session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
 			session.Events[index].OwnedFlags = ownership.classifyFlags(session.Events[index].CommandCandidates)
-			session.Events[index].OwnedFlagTools = ownership.classifyFlagTools(session.Events[index].CommandCandidates)
+			session.Events[index].OwnedFlagScopes = ownership.classifyFlagScopes(session.Events[index].CommandCandidates)
 			if session.Events[index].OperationTask == "" {
 				session.Events[index].OperationTask = ownership.taskForInvocations(session.Events[index].CommandCandidates)
 			}
@@ -264,9 +264,9 @@ func (store *sessionStore) replaceSession(
 		if err != nil {
 			return fmt.Errorf("encode owned flags: %w", err)
 		}
-		ownedFlagTools, err := json.Marshal(event.OwnedFlagTools)
+		ownedFlagScopes, err := json.Marshal(event.OwnedFlagScopes)
 		if err != nil {
-			return fmt.Errorf("encode owned flag tools: %w", err)
+			return fmt.Errorf("encode owned flag scopes: %w", err)
 		}
 		targets, err := json.Marshal(event.Targets)
 		if err != nil {
@@ -315,7 +315,7 @@ func (store *sessionStore) replaceSession(
 			string(selectorDigests),
 			string(ownedOperations),
 			string(ownedFlags),
-			string(ownedFlagTools),
+			string(ownedFlagScopes),
 			event.OperationTask,
 			boolInt(event.OperationAttributionAmbiguous),
 			boolInt(event.OperationContinues),

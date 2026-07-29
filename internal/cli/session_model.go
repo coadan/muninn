@@ -47,7 +47,7 @@ type normalizedSessionEvent struct {
 	CommandCandidates             []ownedCommandInvocation
 	OwnedOperations               []string
 	OwnedFlags                    []string
-	OwnedFlagTools                []string
+	OwnedFlagScopes               []string
 	OperationTask                 string
 	OperationAttributionAmbiguous bool
 	OperationContinues            bool

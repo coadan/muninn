@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -347,11 +346,10 @@ func TestSessionStoreIsolatesRepositoryDerivedState(t *testing.T) {
 			len(report.Summary.OwnedOperations) != 1 {
 			t.Fatalf("scope %s report=%#v", want.root, report.Summary)
 		}
-		toolID, _, _ := strings.Cut(want.operation, "/")
-		if got := report.Summary.OwnedFlags[toolID+"/json"]; got.Count != 1 || got.Sessions != 1 {
+		if got := report.Summary.OwnedFlags[want.operation+"/json"]; got.Count != 1 || got.Sessions != 1 {
 			t.Fatalf("scope %s owned flag=%#v", want.root, got)
 		}
-		if got := report.Summary.OwnedFlagCalls[toolID]; got.Count != 1 || got.Sessions != 1 {
+		if got := report.Summary.OwnedFlagEligibleCalls[want.operation]; got.Count != 1 || got.Sessions != 1 {
 			t.Fatalf("scope %s owned flag calls=%#v", want.root, got)
 		}
 	}

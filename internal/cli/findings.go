@@ -65,11 +65,14 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		ownedConfigByID[owned.ID] = owned
 	}
 	for target, metrics := range summary.OwnedFlags {
-		toolID, flag, found := strings.Cut(target, "/")
-		if !found {
+		separator := strings.LastIndex(target, "/")
+		if separator <= 0 || separator == len(target)-1 {
 			continue
 		}
-		eligibleCalls := summary.OwnedFlagCalls[toolID]
+		scope := target[:separator]
+		flag := target[separator+1:]
+		scopeDisplay := strings.ReplaceAll(scope, "/", " ")
+		eligibleCalls := summary.OwnedFlagEligibleCalls[scope]
 		if metrics.Count < 5 || metrics.Sessions < 2 || eligibleCalls.Count < 5 {
 			continue
 		}
@@ -80,11 +83,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		findings = append(findings, sessionFinding{
 			Category: "default-candidate",
 			Control:  "local",
-			Title:    "frequently repeated CLI flag may belong in the default: " + toolID + " --" + flag,
+			Title:    "frequently repeated CLI flag may belong in the default: " + scopeDisplay + " --" + flag,
 			Evidence: fmt.Sprintf("%s of %s definitely attributed %s calls (%.0f%%) supplied --%s across %s sessions",
 				formatCodexCount(int64(metrics.Count)),
 				formatCodexCount(int64(eligibleCalls.Count)),
-				toolID,
+				scopeDisplay,
 				100*frequency,
 				flag,
 				formatCodexCount(int64(metrics.Sessions)),
