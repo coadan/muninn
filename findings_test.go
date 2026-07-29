@@ -949,10 +949,40 @@ func TestBuildSessionFindingsAttributesDownstreamFailureToMissingFreshCheck(t *t
 	}
 	finding := findings[0]
 	if finding.Category != "delivery-quality" || finding.Lever != "tooling" ||
-		finding.Confidence != "high" || finding.Target != "packages/runtime" ||
-		!strings.Contains(finding.Action, "require the failed check") ||
+		finding.Confidence != "high" || finding.Target != "repo/test-unit" ||
+		!strings.Contains(finding.Action, "require repo/test-unit to pass") ||
 		!strings.Contains(finding.Evidence, "top downstream check repo/test-unit: 4 failures") {
 		t.Fatalf("downstream finding mismatch: %#v", finding)
+	}
+}
+
+func TestBuildSessionFindingsKeepsSourceCohortWhenFreshChecksStillFail(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.DownstreamQuality = downstreamQualityMetrics{
+		Deliveries:                   8,
+		DeliveriesWithFailure:        3,
+		FailedDeliveriesWithPreTests: 2,
+		FailureRuns:                  3,
+		Sessions:                     3,
+		FailureChecks:                map[string]int{"repo/test-unit": 3},
+		Cohorts: map[string]downstreamCohortMetrics{
+			"packages/runtime": {
+				Deliveries:                   5,
+				DeliveriesWithFailure:        3,
+				FailedDeliveriesWithPreTests: 2,
+				FailureRuns:                  3,
+			},
+		},
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 {
+		t.Fatalf("expected one downstream-quality finding: %#v", findings)
+	}
+	finding := findings[0]
+	if finding.Lever != "source code" || finding.Confidence != "medium" ||
+		finding.Target != "packages/runtime" ||
+		!strings.Contains(finding.Action, "source boundary") {
+		t.Fatalf("source-backed downstream finding mismatch: %#v", finding)
 	}
 }
 
