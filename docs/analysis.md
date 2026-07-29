@@ -51,7 +51,10 @@ muninn analyze --repo . --details --json
 
 Operation associations are not physical tool-call counts: one outer call can
 match multiple operations, and `operationsOnly` tools intentionally do not
-claim every invocation of a shared executable.
+claim every invocation of a shared executable. A tool-level drill-down reports
+owned calls, matched associations, and unmatched calls separately. The
+`(unmatched)` row retains failure, truncation, and output totals so incomplete
+operation configuration cannot hide the evidence behind a tool-level finding.
 
 ## Inspect failure events
 

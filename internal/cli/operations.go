@@ -26,6 +26,8 @@ type ownedOperationsDrilldown struct {
 	Tool                  string                           `json:"tool"`
 	Operation             string                           `json:"operation,omitempty"`
 	AnalysisSessions      int                              `json:"analysisSessions"`
+	ToolMetrics           *codexToolMetrics                `json:"toolMetrics,omitempty"`
+	UnmatchedMetrics      *codexToolMetrics                `json:"unmatchedMetrics,omitempty"`
 	OperationAssociations int                              `json:"operationAssociations"`
 	Operations            []ownedOperationDrilldownRow     `json:"operations"`
 	TaskCohorts           []ownedOperationTaskDrilldownRow `json:"taskCohorts,omitempty"`
@@ -162,6 +164,13 @@ func buildOwnedOperationsDrilldown(
 	if len(taskRows) > taskCohortLimit {
 		taskRows = taskRows[:taskCohortLimit]
 	}
+	var toolMetrics, unmatchedMetrics *codexToolMetrics
+	if operationFilter == "" {
+		toolValue := report.Summary.OwnedTooling[toolID]
+		unmatchedValue := report.Summary.OwnedToolUnmatched[toolID]
+		toolMetrics = &toolValue
+		unmatchedMetrics = &unmatchedValue
+	}
 	return ownedOperationsDrilldown{
 		SchemaVersion:         codexSessionInsightsSchemaVersion,
 		Provider:              report.Provider,
@@ -169,6 +178,8 @@ func buildOwnedOperationsDrilldown(
 		Tool:                  toolID,
 		Operation:             operationFilter,
 		AnalysisSessions:      report.Summary.Sessions,
+		ToolMetrics:           toolMetrics,
+		UnmatchedMetrics:      unmatchedMetrics,
 		OperationAssociations: operationAssociations,
 		Operations:            rows,
 		TaskCohorts:           taskRows,
@@ -179,18 +190,35 @@ func buildOwnedOperationsDrilldown(
 func printOwnedOperationsDrilldown(report ownedOperationsDrilldown) {
 	fmt.Printf("Muninn locally owned operations since %s\n", report.Since)
 	fmt.Printf("Provider: %s\n", report.Provider)
-	fmt.Printf(
-		"Tool: %s · analyzed %s sessions · %s matched operation associations\n",
-		report.Tool,
-		formatCodexCount(int64(report.AnalysisSessions)),
-		formatCodexCount(int64(report.OperationAssociations)),
-	)
+	if report.Operation == "" {
+		toolMetrics := dereferenceToolMetrics(report.ToolMetrics)
+		unmatchedMetrics := dereferenceToolMetrics(report.UnmatchedMetrics)
+		fmt.Printf(
+			"Tool: %s · analyzed %s sessions · %s owned calls · %s matched operation associations · %s unmatched calls\n",
+			report.Tool,
+			formatCodexCount(int64(report.AnalysisSessions)),
+			formatCodexCount(int64(toolMetrics.Calls)),
+			formatCodexCount(int64(report.OperationAssociations)),
+			formatCodexCount(int64(unmatchedMetrics.Calls)),
+		)
+	} else {
+		fmt.Printf(
+			"Tool: %s · analyzed %s sessions · %s matched operation associations\n",
+			report.Tool,
+			formatCodexCount(int64(report.AnalysisSessions)),
+			formatCodexCount(int64(report.OperationAssociations)),
+		)
+	}
 	if report.Operation != "" {
 		fmt.Printf("Operation: %s\n", report.Operation)
 	}
 	metrics := make(map[string]codexOwnedOperationMetrics, len(report.Operations))
 	for _, row := range report.Operations {
 		metrics[row.Operation] = row.Metrics
+	}
+	unmatchedMetrics := dereferenceToolMetrics(report.UnmatchedMetrics)
+	if report.Operation == "" && unmatchedMetrics.Calls > 0 {
+		metrics[report.Tool+"/(unmatched)"] = ownedOperationMetricsFromTool(unmatchedMetrics)
 	}
 	if len(metrics) == 0 {
 		fmt.Println("\nNo configured operations were observed for this tool.")
@@ -199,8 +227,32 @@ func printOwnedOperationsDrilldown(report ownedOperationsDrilldown) {
 	}
 	printOwnedOperationFailureLabels(report.Operations)
 	printOwnedOperationTaskCohorts(report.TaskCohorts)
+	if report.Operation == "" && unmatchedMetrics.Calls > 0 {
+		fmt.Printf(
+			"\nCoverage: %s owned calls did not match a configured operation; add or correct operation matchers before attributing their failures, truncations, or output cost to a subcommand.\n",
+			formatCodexCount(int64(unmatchedMetrics.Calls)),
+		)
+	}
 	if report.Recommendation != "" {
 		fmt.Printf("\nNext: %s\n", report.Recommendation)
+	}
+}
+
+func dereferenceToolMetrics(metrics *codexToolMetrics) codexToolMetrics {
+	if metrics == nil {
+		return codexToolMetrics{}
+	}
+	return *metrics
+}
+
+func ownedOperationMetricsFromTool(metrics codexToolMetrics) codexOwnedOperationMetrics {
+	return codexOwnedOperationMetrics{
+		Calls:                 metrics.Calls,
+		Sessions:              metrics.Sessions,
+		FailedCalls:           metrics.FailedCalls,
+		TruncatedCalls:        metrics.TruncatedCalls,
+		OutputBytes:           metrics.OutputBytes,
+		EstimatedOutputTokens: metrics.EstimatedOutputTokens,
 	}
 }
 
