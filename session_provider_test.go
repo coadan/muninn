@@ -13,11 +13,11 @@ func TestSessionProviderRegistryOwnsPublicProviderList(t *testing.T) {
 	sessionProviders = map[string]sessionProviderAdapter{
 		"zeta": {
 			name: "zeta", discover: emptySessionDiscovery,
-			sessionCWD: emptySessionCWD, normalize: emptyNormalizedSession,
+			normalize: emptyNormalizedSession,
 		},
 		"alpha": {
 			name: "alpha", discover: emptySessionDiscovery,
-			sessionCWD: emptySessionCWD, normalize: emptyNormalizedSession,
+			normalize: emptyNormalizedSession,
 		},
 	}
 	t.Cleanup(func() { sessionProviders = original })
@@ -32,10 +32,6 @@ func TestSessionProviderRegistryOwnsPublicProviderList(t *testing.T) {
 
 func emptySessionDiscovery(string, bool) (sessionDiscovery, error) {
 	return sessionDiscovery{}, nil
-}
-
-func emptySessionCWD(string) (string, error) {
-	return "", nil
 }
 
 func emptyNormalizedSession(string) (normalizedSession, error) {
@@ -86,12 +82,6 @@ func TestSessionProviderContractSupportsAnotherFileFormat(t *testing.T) {
 		name: "fake-harness",
 		discover: func(string, bool) (sessionDiscovery, error) {
 			return discovery, nil
-		},
-		sessionCWD: func(path string) (string, error) {
-			if path != sessionPath {
-				t.Fatalf("unexpected session path %q", path)
-			}
-			return repositoryRoot, nil
 		},
 		normalize: func(path string) (normalizedSession, error) {
 			if path != sessionPath {

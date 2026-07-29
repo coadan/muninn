@@ -59,6 +59,7 @@ type normalizedSessionEvent struct {
 	InlineBytes                   int64
 	Diagnostic                    *normalizedDiagnosticObservation
 	WorkingDirectories            []string
+	InRepositoryScope             bool
 }
 
 func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string, since, generatedAt time.Time, ownership ownershipCatalog) (codexSessionRecord, error) {
@@ -75,8 +76,14 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		return codexSessionRecord{}, nil
 	}
 	inside, err := pathInsideRoot(workspaceRoot, record.CWD)
-	if err != nil || !inside {
+	if err != nil {
 		return codexSessionRecord{}, nil
+	}
+	if !inside && !normalizedSessionTouchesRepository(session, workspaceRoot) {
+		return codexSessionRecord{}, nil
+	}
+	if !inside {
+		record.CWD = workspaceRoot
 	}
 	record.Task = codexTaskName(workspaceRoot, record.CWD)
 
@@ -89,7 +96,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
 	var activeDiagnostic *diagnosticFailureEpisode
 	pendingContinuations := map[string]int{}
-	inRepositoryScope := true
+	inRepositoryScope := inside
 	lastEventKind := ""
 	for _, event := range session.Events {
 		event = withoutContinuationCallAttribution(event)

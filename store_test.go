@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -211,14 +212,175 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	}
 }
 
-func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
+func TestSessionStoreIsolatesRepositoryDerivedState(t *testing.T) {
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "muninn.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	root := t.TempDir()
+	repositoryA := filepath.Join(root, "a")
+	repositoryB := filepath.Join(root, "b")
+	sessionPath := filepath.Join(root, "session.fake")
+	if err := os.WriteFile(sessionPath, []byte("session"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	startedAt := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	invocationA := []ownedCommandInvocation{{Executable: "runner", Args: []string{"a"}}}
+	invocationB := []ownedCommandInvocation{{Executable: "runner", Args: []string{"b"}}}
+	session := normalizedSession{
+		CWD: repositoryA,
+		Events: []normalizedSessionEvent{
+			{
+				Sequence: 1, OccurredAt: startedAt, Kind: sessionEventToolCall,
+				ToolName: "exec_command", WorkingDirectories: []string{repositoryA},
+				CommandCandidates: invocationA,
+			},
+			{
+				Sequence: 2, OccurredAt: startedAt.Add(time.Second),
+				CallOccurredAt: startedAt, Kind: sessionEventToolOutput,
+				ToolName: "exec_command", WorkingDirectories: []string{repositoryA},
+				CommandCandidates: invocationA,
+			},
+			{
+				Sequence: 3, OccurredAt: startedAt.Add(2 * time.Second),
+				Kind: sessionEventToolCall, ToolName: "exec_command",
+				WorkingDirectories: []string{repositoryB}, CommandCandidates: invocationB,
+			},
+			{
+				Sequence: 4, OccurredAt: startedAt.Add(3 * time.Second),
+				CallOccurredAt: startedAt.Add(2 * time.Second), Kind: sessionEventToolOutput,
+				ToolName: "exec_command", WorkingDirectories: []string{repositoryB},
+				CommandCandidates: invocationB,
+			},
+		},
+	}
+	normalizer := sessionProviderAdapter{
+		name: "fake",
+		normalize: func(path string) (normalizedSession, error) {
+			if path != sessionPath {
+				t.Fatalf("normalize path=%q", path)
+			}
+			copySession := session
+			copySession.Events = append([]normalizedSessionEvent(nil), session.Events...)
+			return copySession, nil
+		},
+	}
+	discovery := sessionDiscovery{Dirs: []string{root}, Files: []string{sessionPath}}
+	ownershipA := newOwnershipCatalog([]ownedToolConfig{{
+		ID: "tool-a", Executables: []string{"runner"},
+		Operations: []ownedOperationConfig{{ID: "check", Args: []string{"a"}}},
+	}})
+	ownershipB := newOwnershipCatalog([]ownedToolConfig{{
+		ID: "tool-b", Executables: []string{"runner"},
+		Operations: []ownedOperationConfig{{ID: "check", Args: []string{"b"}}},
+	}})
+	ctx := context.Background()
+	for _, scope := range []struct {
+		root      string
+		ownership ownershipCatalog
+	}{
+		{repositoryA, ownershipA},
+		{repositoryB, ownershipB},
+	} {
+		stats, err := store.refresh(ctx, "fake", discovery, scope.root, normalizer, scope.ownership, false)
+		if err != nil {
+			t.Fatalf("refresh %s: %v", scope.root, err)
+		}
+		if stats.FilesIndexed != 1 {
+			t.Fatalf("refresh %s stats=%#v", scope.root, stats)
+		}
+	}
+	repositoryC := filepath.Join(root, "c")
+	for attempt := 0; attempt < 2; attempt++ {
+		stats, err := store.refresh(
+			ctx,
+			"fake",
+			discovery,
+			repositoryC,
+			normalizer,
+			ownershipCatalog{},
+			false,
+		)
+		if err != nil {
+			t.Fatalf("refresh unrelated scope: %v", err)
+		}
+		if attempt == 0 && (stats.FilesIndexed != 0 || stats.FilesReused != 0) {
+			t.Fatalf("initial unrelated refresh=%#v", stats)
+		}
+		if attempt == 1 && stats.FilesReused != 1 {
+			t.Fatalf("unrelated source was not negatively cached: %#v", stats)
+		}
+	}
+	ownershipAChanged := newOwnershipCatalog([]ownedToolConfig{{
+		ID: "tool-a-v2", Executables: []string{"runner"},
+		Operations: []ownedOperationConfig{{ID: "check", Args: []string{"a"}}},
+	}})
+	changedStats, err := store.refresh(
+		ctx,
+		"fake",
+		discovery,
+		repositoryA,
+		normalizer,
+		ownershipAChanged,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("refresh changed ownership config: %v", err)
+	}
+	if changedStats.FilesIndexed != 1 || changedStats.FilesReused != 0 {
+		t.Fatalf("changed ownership config reused stale state: %#v", changedStats)
+	}
+
+	var sources int
+	if err := store.db.QueryRow(
+		`SELECT COUNT(*) FROM sources WHERE provider = 'fake'`,
+	).Scan(&sources); err != nil {
+		t.Fatal(err)
+	}
+	if sources != 4 {
+		t.Fatalf("derived source views=%d want repository, negative, and config scopes", sources)
+	}
+	for _, want := range []struct {
+		root      string
+		ownership ownershipCatalog
+		operation string
+	}{
+		{repositoryA, ownershipA, "tool-a/check"},
+		{repositoryB, ownershipB, "tool-b/check"},
+		{repositoryA, ownershipAChanged, "tool-a-v2/check"},
+	} {
+		report, err := store.analyze(
+			ctx,
+			"fake",
+			[]string{root},
+			want.root,
+			startedAt.Add(-time.Minute),
+			startedAt.Add(time.Hour),
+			"",
+			want.ownership,
+			sessionRefreshStats{},
+		)
+		if err != nil {
+			t.Fatalf("analyze %s: %v", want.root, err)
+		}
+		if report.Summary.Sessions != 1 || report.Summary.ToolCalls != 1 ||
+			report.Summary.OwnedOperations[want.operation].Calls != 1 ||
+			len(report.Summary.OwnedOperations) != 1 {
+			t.Fatalf("scope %s report=%#v", want.root, report.Summary)
+		}
+	}
+}
+
+func TestSessionStoreRebuildsIncompatibleDerivedSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "muninn.db")
 	store, err := openSessionStore(path)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO sources(provider, source_path, size_bytes, mtime_ns, indexed_at_ns)
-		VALUES('codex', '/private/session.jsonl', 1, 1, 1)`); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO sources(provider, scope_key, source_path, size_bytes, mtime_ns, indexed_at_ns)
+		VALUES('codex', 'stale', '/private/session.jsonl', 1, 1, 1)`); err != nil {
 		t.Fatalf("insert stale source: %v", err)
 	}
 	if _, err := store.db.Exec(`UPDATE metadata SET value = '6' WHERE key = 'schema_version'`); err != nil {
@@ -273,6 +435,27 @@ func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
 	}
 	if concurrentBatchColumn != 1 {
 		t.Fatalf("expected concurrent batch column, got %d", concurrentBatchColumn)
+	}
+	for _, column := range []struct {
+		table string
+		name  string
+	}{
+		{"sources", "scope_key"},
+		{"events", "in_repository_scope"},
+	} {
+		var count int
+		if err := migrated.db.QueryRow(
+			fmt.Sprintf(
+				`SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?`,
+				column.table,
+			),
+			column.name,
+		).Scan(&count); err != nil {
+			t.Fatalf("inspect %s.%s: %v", column.table, column.name, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected %s.%s, got %d columns", column.table, column.name, count)
+		}
 	}
 }
 
@@ -411,7 +594,15 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		},
 	}
 	for index, session := range sessions {
-		if err := store.replaceSession(context.Background(), session, int64(index+1), int64(index+1)); err != nil {
+		markRepositoryEventScope(&session, root)
+		if err := store.replaceSession(
+			context.Background(),
+			repositoryStoreScopeKey(root, ownershipCatalog{}),
+			session,
+			int64(index+1),
+			int64(index+1),
+			true,
+		); err != nil {
 			t.Fatalf("replace session %d: %v", index, err)
 		}
 	}
@@ -420,6 +611,7 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		context.Background(),
 		"codex",
 		root,
+		ownershipCatalog{},
 		now.Add(-24*time.Hour),
 		"bwb/test-nses",
 		"",
@@ -446,6 +638,7 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		context.Background(),
 		"codex",
 		root,
+		ownershipCatalog{},
 		now.Add(-24*time.Hour),
 		"bwb/test-nses",
 		"test failure",
@@ -463,6 +656,7 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		context.Background(),
 		"codex",
 		root,
+		ownershipCatalog{},
 		now.Add(-24*time.Hour),
 		"bwb/test-nses",
 		"test failure",
@@ -496,7 +690,15 @@ func TestSessionStoreRestoresRepositoryScopeAtAnalysisBoundary(t *testing.T) {
 			{Sequence: 3, OccurredAt: now.Add(-time.Minute), Kind: sessionEventToolOutput, ToolName: "exec_command", Failed: true, OutputBytes: 1000},
 		},
 	}
-	if err := store.replaceSession(context.Background(), session, 1, 1); err != nil {
+	markRepositoryEventScope(&session, root)
+	if err := store.replaceSession(
+		context.Background(),
+		repositoryStoreScopeKey(root, ownershipCatalog{}),
+		session,
+		1,
+		1,
+		true,
+	); err != nil {
 		t.Fatalf("replace session: %v", err)
 	}
 

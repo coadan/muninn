@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"regexp"
@@ -38,6 +39,7 @@ type ownershipCatalog struct {
 	expectedFailures map[string]map[string]struct{}
 	expectedWaits    map[string]struct{}
 	taskMarkers      map[string][]string
+	cacheKey         string
 }
 
 type ownedOperationRule struct {
@@ -50,6 +52,18 @@ type ownedOperationRule struct {
 type ownedCommandInvocation struct {
 	Executable string
 	Args       []string
+}
+
+type ownershipIndexConfig struct {
+	ID                string                          `json:"id"`
+	Executables       []string                        `json:"executables,omitempty"`
+	Operations        []ownershipIndexOperationConfig `json:"operations,omitempty"`
+	TaskArgumentAfter string                          `json:"taskArgumentAfter,omitempty"`
+}
+
+type ownershipIndexOperationConfig struct {
+	ID   string   `json:"id"`
+	Args []string `json:"args"`
 }
 
 func validateOwnedToolConfig(configs []ownedToolConfig) error {
@@ -104,11 +118,29 @@ func validateOwnedToolConfig(configs []ownedToolConfig) error {
 }
 
 func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
+	indexConfigs := make([]ownershipIndexConfig, 0, len(configs))
+	for _, config := range configs {
+		indexConfig := ownershipIndexConfig{
+			ID:                config.ID,
+			Executables:       config.Executables,
+			TaskArgumentAfter: config.TaskArgumentAfter,
+		}
+		for _, operation := range config.Operations {
+			indexConfig.Operations = append(indexConfig.Operations, ownershipIndexOperationConfig{
+				ID:   operation.ID,
+				Args: operation.Args,
+			})
+		}
+		indexConfigs = append(indexConfigs, indexConfig)
+	}
+	encoded, _ := json.Marshal(indexConfigs)
+	configDigest := sha256.Sum256(encoded)
 	catalog := ownershipCatalog{
 		byDigest:         map[string][]string{},
 		expectedFailures: map[string]map[string]struct{}{},
 		expectedWaits:    map[string]struct{}{},
 		taskMarkers:      map[string][]string{},
+		cacheKey:         hex.EncodeToString(configDigest[:8]),
 	}
 	for _, config := range configs {
 		id := strings.TrimSpace(config.ID)

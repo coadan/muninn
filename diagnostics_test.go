@@ -40,7 +40,15 @@ func TestSessionStorePreservesNormalizedDiagnosticFailure(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	defer store.Close()
-	if err := store.replaceSession(context.Background(), session, 1, 1); err != nil {
+	markRepositoryEventScope(&session, repositoryRoot)
+	if err := store.replaceSession(
+		context.Background(),
+		repositoryStoreScopeKey(repositoryRoot, ownershipCatalog{}),
+		session,
+		1,
+		1,
+		true,
+	); err != nil {
 		t.Fatalf("replace session: %v", err)
 	}
 	report, err := store.analyze(

@@ -214,9 +214,13 @@ supports it.
 
 ## Local index
 
-The SQLite index lives in the user cache directory. Cold analysis prefilters
-session metadata to the requested repository before indexing attributable
-files; later reports reuse unchanged sources.
+The SQLite index lives in the user cache directory. Each repository gets an
+isolated derived view of normalized sessions, targets, and configured
+operations. A session contributes when either its initial CWD or a tool
+working directory enters that repository; work attributed to other
+repositories remains excluded. Unrelated and unchanged sources are negatively
+cached, and incompatible cache schemas rebuild this disposable derived state
+instead of carrying migration compatibility.
 
 ```bash
 muninn analyze --repo . --refresh

@@ -41,7 +41,7 @@ func cmdFailures(root string, args []string) error {
 	providerName := fs.String("provider", defaultSessionProvider, sessionProviderFlagHelp())
 	sessionsDir := fs.String("sessions-dir", "", "override the selected provider's default session directory")
 	repoRoot := root
-	fs.StringVar(&repoRoot, "repo", root, "only include sessions whose cwd is inside this repository")
+	fs.StringVar(&repoRoot, "repo", root, "only include session activity attributed to this repository")
 	configPath := fs.String("config", "", "repository config path (default: <repo>/.muninn.json when present)")
 	includeArchived := fs.Bool("include-archived", false, "also scan provider archives when supported")
 	defaultStorePath, err := defaultSessionStorePath()
@@ -128,6 +128,7 @@ func cmdFailures(root string, args []string) error {
 		context.Background(),
 		source.Name(),
 		resolvedRepoRoot,
+		ownership,
 		since,
 		selectedOperation,
 		strings.TrimSpace(*reason),

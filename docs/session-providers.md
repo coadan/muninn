@@ -11,11 +11,10 @@ one declarative `sessionProviderAdapter` entry in `session_provider.go`:
 
 ```go
 var otherSessionProvider = sessionProviderAdapter{
-	name:       "other",
-	discover:   discoverOtherSessions,
-	sessionCWD: parseOtherSessionCWD,
-	normalize:  parseOtherNormalizedSession,
-	metadata:   otherSessionMetadata, // optional
+	name:      "other",
+	discover:  discoverOtherSessions,
+	normalize: parseOtherNormalizedSession,
+	metadata:  otherSessionMetadata, // optional
 }
 ```
 
@@ -25,8 +24,6 @@ Then add `"other": otherSessionProvider` to `sessionProviders`.
   `sessionProviders` registry key.
 - `discover` resolves configured/default locations and returns the exact files
   belonging to the provider. It owns extensions, archives, and layout.
-- `sessionCWD` cheaply reads only the working directory so cold indexing can
-  reject sessions outside the selected repository before full parsing.
 - `normalize` converts one file into `normalizedSession`.
 - `metadata` optionally enriches normalized model, effort, agent kind, lineage,
   and spawn status from provider-owned local state. Omit it when unused.
@@ -34,6 +31,12 @@ Then add `"other": otherSessionProvider` to `sessionProviders`.
 Registry validation rejects mismatched names or missing required callbacks.
 No cache, analysis, finding, or report code should require a provider-specific
 branch.
+
+Repository scope is derived after normalization from the session CWD and
+per-tool working directories. The SQLite index stores separate privacy-safe
+derived views for each repository, so a session may contribute only its
+relevant events to multiple repositories without reusing another repository's
+targets or configured operation IDs.
 
 Use `TestSessionProviderContractSupportsAnotherFileFormat` as the minimal
 contract test. It deliberately uses a non-JSONL filename and verifies both

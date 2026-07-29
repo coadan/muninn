@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -15,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 20
+const sessionStoreSchemaVersion = 21
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionStore struct {
@@ -33,6 +34,7 @@ func (store *sessionStore) ownedOperationFailures(
 	ctx context.Context,
 	provider string,
 	repositoryRoot string,
+	ownership ownershipCatalog,
 	since time.Time,
 	operation string,
 	reason string,
@@ -40,7 +42,7 @@ func (store *sessionStore) ownedOperationFailures(
 	limit int,
 ) ([]ownedOperationFailureEvent, error) {
 	repositoryRoot = filepath.Clean(repositoryRoot)
-	repositoryPrefix := repositoryRoot + string(filepath.Separator)
+	scopeKey := repositoryStoreScopeKey(repositoryRoot, ownership)
 	query := `SELECT
 		events.occurred_at_ns,
 		operation.value,
@@ -55,15 +57,14 @@ func (store *sessionStore) ownedOperationFailures(
 	JOIN sources ON sources.id = sessions.source_id
 	JOIN json_each(events.owned_operations) AS operation
 	WHERE sources.provider = ?
-	  AND (sessions.cwd = ? OR substr(sessions.cwd, 1, length(?)) = ?)
+	  AND sources.scope_key = ?
+	  AND events.in_repository_scope = 1
 	  AND events.failed = 1
 	  AND events.occurred_at_ns >= ?
 	  AND operation.value = ?`
 	args := []any{
 		provider,
-		repositoryRoot,
-		repositoryPrefix,
-		repositoryPrefix,
+		scopeKey,
 		since.UnixNano(),
 		operation,
 	}
@@ -166,6 +167,43 @@ func (store *sessionStore) Close() error {
 }
 
 func (store *sessionStore) initialize(ctx context.Context) error {
+	bootstrap := []string{
+		fmt.Sprintf(`PRAGMA busy_timeout = %d`, sessionStoreBusyTimeout.Milliseconds()),
+		`PRAGMA foreign_keys = ON`,
+		`PRAGMA journal_mode = WAL`,
+		`CREATE TABLE IF NOT EXISTS metadata (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`,
+	}
+	for _, statement := range bootstrap {
+		if _, err := store.db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("initialize Muninn SQLite store: %w", err)
+		}
+	}
+	var storedVersion string
+	err := store.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&storedVersion)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read Muninn store schema version: %w", err)
+	}
+	if storedVersion != "" && storedVersion != fmt.Sprint(sessionStoreSchemaVersion) {
+		for _, statement := range []string{
+			`DROP TABLE IF EXISTS events`,
+			`DROP TABLE IF EXISTS sessions`,
+			`DROP TABLE IF EXISTS sources`,
+		} {
+			if _, err := store.db.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("rebuild Muninn session index: %w", err)
+			}
+		}
+		if _, err := store.db.ExecContext(
+			ctx,
+			`UPDATE metadata SET value = ? WHERE key = 'schema_version'`,
+			fmt.Sprint(sessionStoreSchemaVersion),
+		); err != nil {
+			return fmt.Errorf("reset Muninn store schema version: %w", err)
+		}
+	}
 	statements := []string{
 		fmt.Sprintf(`PRAGMA busy_timeout = %d`, sessionStoreBusyTimeout.Milliseconds()),
 		`PRAGMA foreign_keys = ON`,
@@ -177,11 +215,12 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS sources (
 			id INTEGER PRIMARY KEY,
 			provider TEXT NOT NULL,
+			scope_key TEXT NOT NULL,
 			source_path TEXT NOT NULL,
 			size_bytes INTEGER NOT NULL,
 			mtime_ns INTEGER NOT NULL,
 			indexed_at_ns INTEGER NOT NULL,
-			UNIQUE(provider, source_path)
+			UNIQUE(provider, scope_key, source_path)
 		)`,
 		`CREATE TABLE IF NOT EXISTS sessions (
 			id INTEGER PRIMARY KEY,
@@ -222,9 +261,10 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			concurrent_batch INTEGER NOT NULL DEFAULT 0,
 			diagnostic_json TEXT NOT NULL DEFAULT '',
 			working_directories TEXT NOT NULL DEFAULT '[]',
+			in_repository_scope INTEGER NOT NULL DEFAULT 0,
 			UNIQUE(session_id, sequence)
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_sources_provider_path ON sources(provider, source_path)`,
+		`CREATE INDEX IF NOT EXISTS idx_sources_provider_scope_path ON sources(provider, scope_key, source_path)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_session_time ON events(session_id, occurred_at_ns, sequence)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_time_kind ON events(occurred_at_ns, kind)`,
@@ -237,167 +277,10 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 	if _, err := store.db.ExecContext(ctx, `DROP TABLE IF EXISTS feedback`); err != nil {
 		return fmt.Errorf("remove legacy Muninn feedback storage: %w", err)
 	}
-	var existing string
-	err := store.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&existing)
-	reindexSources := err == nil && existing != fmt.Sprint(sessionStoreSchemaVersion)
-	if err == nil && existing != fmt.Sprint(sessionStoreSchemaVersion) {
-		switch existing {
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19":
-			var concurrentBatchColumn int
-			if err := store.db.QueryRowContext(
-				ctx,
-				`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'concurrent_batch'`,
-			).Scan(&concurrentBatchColumn); err != nil {
-				return fmt.Errorf("inspect Muninn concurrent batch state: %w", err)
-			}
-			if concurrentBatchColumn == 0 {
-				if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN concurrent_batch INTEGER NOT NULL DEFAULT 0`); err != nil {
-					return fmt.Errorf("migrate Muninn concurrent batch state: %w", err)
-				}
-			}
-			var diagnosticColumn int
-			if err := store.db.QueryRowContext(
-				ctx,
-				`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'diagnostic_json'`,
-			).Scan(&diagnosticColumn); err != nil {
-				return fmt.Errorf("inspect Muninn diagnostic state: %w", err)
-			}
-			if diagnosticColumn == 0 {
-				if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN diagnostic_json TEXT NOT NULL DEFAULT ''`); err != nil {
-					return fmt.Errorf("migrate Muninn diagnostic state: %w", err)
-				}
-			}
-			var workingDirectoriesColumn int
-			if err := store.db.QueryRowContext(
-				ctx,
-				`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'working_directories'`,
-			).Scan(&workingDirectoriesColumn); err != nil {
-				return fmt.Errorf("inspect Muninn working directory state: %w", err)
-			}
-			if workingDirectoriesColumn == 0 {
-				if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN working_directories TEXT NOT NULL DEFAULT '[]'`); err != nil {
-					return fmt.Errorf("migrate Muninn working directory state: %w", err)
-				}
-			}
-		}
-	}
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		if _, err := store.db.ExecContext(ctx, `INSERT INTO metadata(key, value) VALUES('schema_version', ?)`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("write Muninn store schema version: %w", err)
-		}
-	case err != nil:
-		return fmt.Errorf("read Muninn store schema version: %w", err)
-	case existing == "1":
-		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN targets TEXT NOT NULL DEFAULT '[]'`); err != nil {
-			return fmt.Errorf("migrate Muninn store targets: %w", err)
-		}
-		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN inline_bytes INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("migrate Muninn store inline orchestration: %w", err)
-		}
-		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN owned_operations TEXT NOT NULL DEFAULT '[]'`); err != nil {
-			return fmt.Errorf("migrate Muninn store owned operations: %w", err)
-		}
-		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("migrate Muninn store operation attribution: %w", err)
-		}
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "2":
-		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN owned_operations TEXT NOT NULL DEFAULT '[]'`); err != nil {
-			return fmt.Errorf("migrate Muninn store owned operations: %w", err)
-		}
-		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("migrate Muninn store operation attribution: %w", err)
-		}
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "3":
-		if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("migrate Muninn store operation attribution: %w", err)
-		}
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "4":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "5":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "6":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "7":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "8":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "9":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "10":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "11":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "12":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "13":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing == "14" || existing == "15" || existing == "16" || existing == "17" || existing == "18" || existing == "19":
-		if _, err := store.db.ExecContext(ctx, `UPDATE metadata SET value = ? WHERE key = 'schema_version'`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
-			return fmt.Errorf("finish Muninn store migration: %w", err)
-		}
-	case existing != fmt.Sprint(sessionStoreSchemaVersion):
-		return fmt.Errorf("unsupported Muninn store schema version %s (expected %d); remove the local cache to rebuild it", existing, sessionStoreSchemaVersion)
-	}
-	if reindexSources {
-		var continuationColumn int
-		if err := store.db.QueryRowContext(
-			ctx,
-			`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'operation_continues'`,
-		).Scan(&continuationColumn); err != nil {
-			return fmt.Errorf("inspect Muninn operation continuation state: %w", err)
-		}
-		if continuationColumn == 0 {
-			_, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_continues INTEGER NOT NULL DEFAULT 0`)
-			if err != nil {
-				return fmt.Errorf("migrate Muninn operation continuation state: %w", err)
-			}
-		}
-		var operationTaskColumn int
-		if err := store.db.QueryRowContext(
-			ctx,
-			`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'operation_task'`,
-		).Scan(&operationTaskColumn); err != nil {
-			return fmt.Errorf("inspect Muninn operation task state: %w", err)
-		}
-		if operationTaskColumn == 0 {
-			_, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN operation_task TEXT NOT NULL DEFAULT ''`)
-			if err != nil {
-				return fmt.Errorf("migrate Muninn operation task state: %w", err)
-			}
-		}
-		if _, err := store.db.ExecContext(ctx, `DELETE FROM sources`); err != nil {
-			return fmt.Errorf("invalidate Muninn sources for normalizer update: %w", err)
-		}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO metadata(key, value)
+		VALUES('schema_version', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+		return fmt.Errorf("write Muninn store schema version: %w", err)
 	}
 	return nil
 }
@@ -407,27 +290,19 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, discove
 		FilesScanned:    len(discovery.Files),
 		FilesUnreadable: discovery.FilesUnreadable,
 	}
+	scopeKey := repositoryStoreScopeKey(repositoryRoot, ownership)
 	for _, path := range discovery.Files {
 		info, err := os.Stat(path)
 		if err != nil {
 			stats.FilesUnreadable++
 			continue
 		}
-		unchanged, err := store.sourceUnchanged(ctx, provider, path, info.Size(), info.ModTime().UnixNano())
+		unchanged, err := store.sourceUnchanged(ctx, provider, scopeKey, path, info.Size(), info.ModTime().UnixNano())
 		if err != nil {
 			return stats, err
 		}
 		if unchanged && !force {
 			stats.FilesReused++
-			continue
-		}
-		cwd, err := normalizer.SessionCWD(path)
-		if err != nil {
-			stats.FilesUnreadable++
-			continue
-		}
-		inside, err := pathInsideRoot(repositoryRoot, cwd)
-		if err != nil || !inside {
 			continue
 		}
 		session, err := normalizer.NormalizeSession(path)
@@ -437,18 +312,26 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, discove
 		}
 		session.Provider = provider
 		session.SourcePath = path
+		if !normalizedSessionTouchesRepository(session, repositoryRoot) {
+			if err := store.replaceSession(ctx, scopeKey, session, info.Size(), info.ModTime().UnixNano(), false); err != nil {
+				return stats, err
+			}
+			continue
+		}
+		markRepositoryEventScope(&session, repositoryRoot)
 		for index := range session.Events {
+			eventCWD := eventRepositoryWorkingDirectory(session.Events[index], session.CWD, repositoryRoot)
 			if session.Events[index].ToolName == "apply_patch" {
 				if session.Events[index].OperationTask == "" {
 					session.Events[index].OperationTask = repositoryTaskForTargetCandidates(
 						session.Events[index].TargetCandidates,
-						session.CWD,
+						eventCWD,
 						repositoryRoot,
 					)
 				}
-				session.Events[index].Targets = normalizeRepositoryEditTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
+				session.Events[index].Targets = normalizeRepositoryEditTargets(session.Events[index].TargetCandidates, eventCWD, repositoryRoot)
 			} else {
-				session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, session.CWD, repositoryRoot)
+				session.Events[index].Targets = normalizeRepositoryTargets(session.Events[index].TargetCandidates, eventCWD, repositoryRoot)
 			}
 			session.Events[index].TargetCandidates = nil
 			session.Events[index].OwnedOperations = ownership.classifyOperations(session.Events[index].CommandCandidates)
@@ -457,7 +340,7 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, discove
 			}
 			session.Events[index].CommandCandidates = nil
 		}
-		if err := store.replaceSession(ctx, session, info.Size(), info.ModTime().UnixNano()); err != nil {
+		if err := store.replaceSession(ctx, scopeKey, session, info.Size(), info.ModTime().UnixNano(), true); err != nil {
 			return stats, err
 		}
 		stats.FilesIndexed++
@@ -465,12 +348,18 @@ func (store *sessionStore) refresh(ctx context.Context, provider string, discove
 	return stats, nil
 }
 
-func (store *sessionStore) sourceUnchanged(ctx context.Context, provider, path string, size, mtimeNS int64) (bool, error) {
+func repositoryStoreScopeKey(repositoryRoot string, ownership ownershipCatalog) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(repositoryRoot) + "\x00" + ownership.cacheKey))
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+func (store *sessionStore) sourceUnchanged(ctx context.Context, provider, scopeKey, path string, size, mtimeNS int64) (bool, error) {
 	var existingSize, existingMTime int64
 	err := store.db.QueryRowContext(
 		ctx,
-		`SELECT size_bytes, mtime_ns FROM sources WHERE provider = ? AND source_path = ?`,
+		`SELECT size_bytes, mtime_ns FROM sources WHERE provider = ? AND scope_key = ? AND source_path = ?`,
 		provider,
+		scopeKey,
 		path,
 	).Scan(&existingSize, &existingMTime)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -482,7 +371,14 @@ func (store *sessionStore) sourceUnchanged(ctx context.Context, provider, path s
 	return existingSize == size && existingMTime == mtimeNS, nil
 }
 
-func (store *sessionStore) replaceSession(ctx context.Context, session normalizedSession, size, mtimeNS int64) error {
+func (store *sessionStore) replaceSession(
+	ctx context.Context,
+	scopeKey string,
+	session normalizedSession,
+	size,
+	mtimeNS int64,
+	include bool,
+) error {
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin session index transaction: %w", err)
@@ -492,14 +388,15 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 	var sourceID int64
 	err = tx.QueryRowContext(
 		ctx,
-		`INSERT INTO sources(provider, source_path, size_bytes, mtime_ns, indexed_at_ns)
-		 VALUES(?, ?, ?, ?, ?)
-		 ON CONFLICT(provider, source_path) DO UPDATE SET
+		`INSERT INTO sources(provider, scope_key, source_path, size_bytes, mtime_ns, indexed_at_ns)
+		 VALUES(?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(provider, scope_key, source_path) DO UPDATE SET
 		   size_bytes = excluded.size_bytes,
 		   mtime_ns = excluded.mtime_ns,
 		   indexed_at_ns = excluded.indexed_at_ns
 		 RETURNING id`,
 		session.Provider,
+		scopeKey,
 		session.SourcePath,
 		size,
 		mtimeNS,
@@ -510,6 +407,12 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE source_id = ?`, sourceID); err != nil {
 		return fmt.Errorf("replace indexed session: %w", err)
+	}
+	if !include {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit excluded session index: %w", err)
+		}
+		return nil
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO sessions(source_id, cwd) VALUES(?, ?)`, sourceID, session.CWD)
 	if err != nil {
@@ -528,8 +431,8 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 		operation_task,
 		operation_attribution_ambiguous,
 		operation_continues, targets, inline_bytes, concurrent_batch,
-		diagnostic_json, working_directories
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		diagnostic_json, working_directories, in_repository_scope
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -597,6 +500,7 @@ func (store *sessionStore) replaceSession(ctx context.Context, session normalize
 			boolInt(event.ConcurrentBatch),
 			diagnosticJSON,
 			string(workingDirectories),
+			boolInt(event.InRepositoryScope),
 		); err != nil {
 			return fmt.Errorf("insert indexed session event: %w", err)
 		}
@@ -637,10 +541,12 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
 		WHERE sources.provider = ?
+		  AND sources.scope_key = ?
 		  AND events.occurred_at_ns >= ?
 		  AND events.occurred_at_ns <= ?
 		ORDER BY sessions.id, events.sequence`,
 		provider,
+		repositoryStoreScopeKey(workspaceRoot, ownership),
 		since.UnixNano(),
 		generatedAt.UnixNano(),
 	)
