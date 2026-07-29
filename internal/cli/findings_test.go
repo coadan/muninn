@@ -70,37 +70,70 @@ func TestInstructionDiscoveryRequiresMaterialWithinSessionRediscovery(t *testing
 	}
 	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
 	report.Summary.ReadTargets["deps.edn"] = codexTargetMetrics{
-		Reads:               141,
-		SearchReadLoops:     6,
-		Sessions:            128,
-		RediscoverySessions: 6,
+		Reads:                       141,
+		SearchReadLoops:             6,
+		Sessions:                    128,
+		RediscoverySessions:         6,
+		UneditedRediscoverySessions: 6,
 	}
 	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
 		t.Fatalf("near-once-per-session manifest reads became friction: %#v", findings)
 	}
 
 	report.Summary.ReadTargets["deps.edn"] = codexTargetMetrics{
-		Reads:               180,
-		SearchReadLoops:     30,
-		Sessions:            100,
-		RediscoverySessions: 30,
+		Reads:                       180,
+		SearchReadLoops:             30,
+		Sessions:                    100,
+		RediscoverySessions:         30,
+		UneditedRediscoverySessions: 30,
 	}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 || findings[0].Category != "instruction-discovery" ||
 		findings[0].Confidence != "medium" ||
-		!strings.Contains(findings[0].Evidence, "rediscovery affected 30 sessions") {
+		!strings.Contains(findings[0].Evidence, "rediscovery without edits affected 30 sessions") {
 		t.Fatalf("material rediscovery finding mismatch: %#v", findings)
 	}
 
 	report.Summary.ReadTargets["deps.edn"] = codexTargetMetrics{
-		Reads:               300,
-		SearchReadLoops:     80,
-		Sessions:            100,
-		RediscoverySessions: 80,
+		Reads:                       300,
+		SearchReadLoops:             80,
+		Sessions:                    100,
+		RediscoverySessions:         80,
+		UneditedRediscoverySessions: 80,
 	}
 	findings = buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 || findings[0].Confidence != "high" {
 		t.Fatalf("majority-session rediscovery should be high confidence: %#v", findings)
+	}
+}
+
+func TestInstructionDiscoveryExcludesSessionsThatEditTheOwner(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("current"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
+	report.Summary.ReadTargets["README.md"] = codexTargetMetrics{
+		Reads:                       20,
+		SearchReadLoops:             8,
+		Sessions:                    4,
+		RediscoverySessions:         4,
+		EditedSessions:              2,
+		UneditedRediscoverySessions: 2,
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("edit-driven rereads became rediscovery friction: %#v", findings)
+	}
+	report.Summary.ReadTargets["README.md"] = codexTargetMetrics{
+		Reads:                       20,
+		SearchReadLoops:             8,
+		Sessions:                    4,
+		RediscoverySessions:         4,
+		EditedSessions:              1,
+		UneditedRediscoverySessions: 3,
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 1 {
+		t.Fatalf("repeated unedited rediscovery was hidden: %#v", findings)
 	}
 }
 

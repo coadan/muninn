@@ -167,7 +167,7 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	addCodexOccurrenceMetrics(target.OwnedFlags, record.OwnedFlags)
 	addCodexOccurrenceMetrics(target.OwnedFlagEligibleCalls, record.OwnedFlagEligibleCalls)
 	addCodexFailureContexts(target.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
-	addCodexTargetMetrics(target.ReadTargets, record.ReadTargets)
+	addCodexTargetMetrics(target.ReadTargets, record.ReadTargets, record.EditTargets)
 	target.InlineOrchestrationCalls += record.InlineOrchestrationCalls
 	target.InlineOrchestrationBytes += record.InlineOrchestrationBytes
 	target.InlineOrchestrationMaxBytes = max(target.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
@@ -239,14 +239,24 @@ func addCodexTransitionMetrics(target map[string]codexTransitionMetrics, additio
 	}
 }
 
-func addCodexTargetMetrics(target, additions map[string]codexTargetMetrics) {
+func addCodexTargetMetrics(
+	target,
+	additions map[string]codexTargetMetrics,
+	editTargets map[string]int,
+) {
 	for path, addition := range additions {
 		metrics := target[path]
 		metrics.Reads += addition.Reads
 		metrics.SearchReadLoops += addition.SearchReadLoops
 		metrics.Sessions++
-		if addition.Reads > 1 || addition.SearchReadLoops > 0 {
+		rediscovered := addition.Reads > 1 || addition.SearchReadLoops > 0
+		if rediscovered {
 			metrics.RediscoverySessions++
+		}
+		if editTargets[path] > 0 {
+			metrics.EditedSessions++
+		} else if rediscovered {
+			metrics.UneditedRediscoverySessions++
 		}
 		target[path] = metrics
 	}

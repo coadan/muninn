@@ -124,17 +124,18 @@ func TestAddCodexTargetMetricsCountsSessionsWithRediscovery(t *testing.T) {
 	target := map[string]codexTargetMetrics{}
 	addCodexTargetMetrics(target, map[string]codexTargetMetrics{
 		"deps.edn": {Reads: 1},
-	})
+	}, nil)
 	addCodexTargetMetrics(target, map[string]codexTargetMetrics{
 		"deps.edn": {Reads: 2},
-	})
+	}, map[string]int{"deps.edn": 1})
 	addCodexTargetMetrics(target, map[string]codexTargetMetrics{
 		"deps.edn": {Reads: 1, SearchReadLoops: 1},
-	})
+	}, nil)
 	got := target["deps.edn"]
 	if got.Sessions != 3 || got.Reads != 4 || got.SearchReadLoops != 1 ||
-		got.RediscoverySessions != 2 {
-		t.Fatalf("target metrics=%#v want 3 sessions and 2 with rediscovery", got)
+		got.RediscoverySessions != 2 || got.EditedSessions != 1 ||
+		got.UneditedRediscoverySessions != 1 {
+		t.Fatalf("target metrics=%#v want edited and unedited rediscovery separated", got)
 	}
 }
 

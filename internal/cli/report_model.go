@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 90
+const codexSessionInsightsSchemaVersion = 91
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -122,10 +122,12 @@ type codexInlineMetrics struct {
 }
 
 type codexTargetMetrics struct {
-	Reads               int `json:"reads"`
-	SearchReadLoops     int `json:"searchReadLoops"`
-	Sessions            int `json:"sessions"`
-	RediscoverySessions int `json:"rediscoverySessions"`
+	Reads                       int `json:"reads"`
+	SearchReadLoops             int `json:"searchReadLoops"`
+	Sessions                    int `json:"sessions"`
+	RediscoverySessions         int `json:"rediscoverySessions"`
+	EditedSessions              int `json:"editedSessions"`
+	UneditedRediscoverySessions int `json:"uneditedRediscoverySessions"`
 }
 
 type codexSessionInsightsSummary struct {

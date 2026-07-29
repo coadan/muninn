@@ -30,11 +30,11 @@ func ownerRediscoveryFindings(report codexSessionInsightsReport, config reposito
 				Category: "instruction-discovery",
 				Control:  "repository",
 				Title:    title,
-				Evidence: fmt.Sprintf("%s reads and %s search/read loops across %s sessions; rediscovery affected %s sessions; current size %s bytes",
+				Evidence: fmt.Sprintf("%s reads and %s search/read loops across %s sessions; rediscovery without edits affected %s sessions; current size %s bytes",
 					formatCodexCount(int64(metrics.Reads)),
 					formatCodexCount(int64(metrics.SearchReadLoops)),
 					formatCodexCount(int64(metrics.Sessions)),
-					formatCodexCount(int64(metrics.RediscoverySessions)),
+					formatCodexCount(int64(metrics.UneditedRediscoverySessions)),
 					formatCodexCount(info.Size()),
 				),
 				Action:     action,
@@ -45,7 +45,7 @@ func ownerRediscoveryFindings(report codexSessionInsightsReport, config reposito
 				LastSeen:   sessionFindingLastSeen(report, "read", target),
 				Lever:      reworkTargetLever(target),
 				Confidence: ownerRediscoveryConfidence(metrics),
-				score:      320 + metrics.RediscoverySessions*20 + metrics.SearchReadLoops*10 + metrics.Reads,
+				score:      320 + metrics.UneditedRediscoverySessions*20 + metrics.SearchReadLoops*10 + metrics.Reads,
 			})
 			continue
 		}
@@ -198,13 +198,13 @@ func buildEntrypointTarget(target string) bool {
 
 func materialOwnerRediscovery(metrics codexTargetMetrics) bool {
 	return metrics.Sessions >= 2 &&
-		metrics.RediscoverySessions >= 3 &&
-		metrics.RediscoverySessions*5 >= metrics.Sessions
+		metrics.UneditedRediscoverySessions >= 3 &&
+		metrics.UneditedRediscoverySessions*5 >= metrics.Sessions
 }
 
 func ownerRediscoveryConfidence(metrics codexTargetMetrics) string {
-	if metrics.RediscoverySessions >= 5 &&
-		metrics.RediscoverySessions*2 >= metrics.Sessions {
+	if metrics.UneditedRediscoverySessions >= 5 &&
+		metrics.UneditedRediscoverySessions*2 >= metrics.Sessions {
 		return "high"
 	}
 	return "medium"

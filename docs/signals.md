@@ -23,8 +23,10 @@ Muninn keeps these activities distinct:
 
 Reading an authoritative manifest or document once per session is not
 rediscovery friction. Instruction-discovery findings require repeated reads or
-a search/read loop in at least three sessions and at least 20% of sessions that
-read the owner. High confidence requires rediscovery in at least half.
+a search/read loop without an observed edit in at least three sessions and at
+least 20% of sessions that read the owner. Sessions that edit the target remain
+visible as implementation evidence but do not count as rediscovery friction.
+High confidence requires unedited rediscovery in at least half.
 
 Output-heavy bundled discovery remains low confidence when it appears in only
 one session. The same recurrence rule prevents an isolated locally owned stall
