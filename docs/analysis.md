@@ -33,6 +33,9 @@ rather than correlated symptoms.
 - `--focus friction` explicitly selects the default broad action queue.
 - `--focus tooling`, `instructions`, `interface`, `structure`, `discovery`,
   `failures`, `loops`, `output`, or `quality` narrows the report.
+- `--focus discovery` also returns a bounded ranking of repository-relative
+  read targets and the highest-output bundled search/read shapes. Human output
+  follows `--limit`; compact JSON includes the top five as `focusEvidence`.
 - `--operation <tool-or-operation>` drills into configured locally controlled
   tooling without loading unrelated findings.
 
@@ -124,9 +127,10 @@ evidence for a configured local operation consolidate at its tool owner, so
 one locally controlled change produces one intervention. JSON retains
 both `interventions` and the constituent `findings`. Default JSON also includes
 compact scope, outcome, profile, delegation, and diagnostic summaries; it
-omits task rows and high-cardinality analytical maps. Use `--details --json`
-when those full inputs are needed. `detailLevel` is `summary` or `full`.
-Counts alone do not establish causality.
+omits task rows and high-cardinality analytical maps, except for bounded
+focus-specific evidence such as discovery targets and shapes. Use
+`--details --json` when the full analytical maps are needed. `detailLevel` is
+`summary` or `full`. Counts alone do not establish causality.
 
 Failed Heimdal reports are routed by evidence: fixture startup failures point
 to tooling, executed-test failures to source code, and test-selection failures

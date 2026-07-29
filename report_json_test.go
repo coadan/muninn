@@ -39,7 +39,7 @@ func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
 			t.Fatalf("compact JSON missing %q: %s", want, compact)
 		}
 	}
-	for _, unwanted := range []string{`"tasks"`, `"phases"`, `"toolCallsByName"`, `"privacy-safe"`} {
+	for _, unwanted := range []string{`"tasks"`, `"phases"`, `"toolCallsByName"`, `"privacy-safe"`, `"focusEvidence"`} {
 		if strings.Contains(compact, unwanted) {
 			t.Fatalf("compact JSON retained detailed field %q: %s", unwanted, compact)
 		}
@@ -54,5 +54,34 @@ func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
 		if !strings.Contains(full, want) {
 			t.Fatalf("full JSON missing %q", want)
 		}
+	}
+}
+
+func TestAnalysisJSONPayloadIncludesBoundedDiscoveryFocusEvidence(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.AnalysisScope.Focus = "discovery"
+	for index := 0; index < 7; index++ {
+		target := string(rune('a'+index)) + ".go"
+		report.Summary.ReadTargets[target] = codexTargetMetrics{
+			Reads: 10 - index, SearchReadLoops: 10 - index, Sessions: 2,
+		}
+	}
+	report.Summary.MixedShellShapes["search -> file reads"] = codexToolMetrics{
+		Calls: 3, Sessions: 2, OutputBytes: 40_000,
+	}
+
+	raw, err := json.Marshal(analysisJSONPayload(report, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded compactSessionInsightsReport
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.FocusEvidence == nil ||
+		len(decoded.FocusEvidence.ReadTargets) != 5 ||
+		decoded.FocusEvidence.ReadTargets[0].Target != "a.go" ||
+		len(decoded.FocusEvidence.SearchReadShapes) != 1 {
+		t.Fatalf("bounded discovery focus evidence mismatch: %#v", decoded.FocusEvidence)
 	}
 }
