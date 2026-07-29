@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+type ownedOperationFailureTimeline struct {
+	TotalDefinite  int
+	TotalAmbiguous int
+	Definite       []ownedOperationFailureEvent
+	Ambiguous      []ownedOperationFailureEvent
+}
+
 func (store *sessionStore) ownedOperationFailures(
 	ctx context.Context,
 	provider string,
@@ -16,8 +23,9 @@ func (store *sessionStore) ownedOperationFailures(
 	operation string,
 	reason string,
 	task string,
-	limit int,
-) ([]ownedOperationFailureEvent, error) {
+	definiteLimit int,
+	ambiguousLimit int,
+) (ownedOperationFailureTimeline, error) {
 	repositoryRoot = filepath.Clean(repositoryRoot)
 	scopeKey := repositoryStoreScopeKey(repositoryRoot, ownership)
 	query := `SELECT
@@ -50,16 +58,15 @@ func (store *sessionStore) ownedOperationFailures(
 		args = append(args, reason)
 	}
 	query += "\nORDER BY events.occurred_at_ns DESC, events.sequence DESC"
-	if task == "" {
-		query += "\nLIMIT ?"
-		args = append(args, limit)
-	}
 	rows, err := store.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query owned-operation failures: %w", err)
+		return ownedOperationFailureTimeline{}, fmt.Errorf("query owned-operation failures: %w", err)
 	}
 	defer rows.Close()
-	events := make([]ownedOperationFailureEvent, 0)
+	timeline := ownedOperationFailureTimeline{
+		Definite:  []ownedOperationFailureEvent{},
+		Ambiguous: []ownedOperationFailureEvent{},
+	}
 	for rows.Next() {
 		var occurredAtNS int64
 		var ambiguous int
@@ -76,7 +83,7 @@ func (store *sessionStore) ownedOperationFailures(
 			&operationTask,
 			&cwd,
 		); err != nil {
-			return nil, fmt.Errorf("scan owned-operation failure: %w", err)
+			return ownedOperationFailureTimeline{}, fmt.Errorf("scan owned-operation failure: %w", err)
 		}
 		event.OccurredAt = time.Unix(0, occurredAtNS).UTC()
 		event.AttributionAmbiguous = ambiguous != 0
@@ -87,13 +94,20 @@ func (store *sessionStore) ownedOperationFailures(
 		if task != "" && event.Task != task {
 			continue
 		}
-		events = append(events, event)
-		if len(events) >= limit {
-			break
+		if event.AttributionAmbiguous {
+			timeline.TotalAmbiguous++
+			if len(timeline.Ambiguous) < ambiguousLimit {
+				timeline.Ambiguous = append(timeline.Ambiguous, event)
+			}
+			continue
+		}
+		timeline.TotalDefinite++
+		if len(timeline.Definite) < definiteLimit {
+			timeline.Definite = append(timeline.Definite, event)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read owned-operation failures: %w", err)
+		return ownedOperationFailureTimeline{}, fmt.Errorf("read owned-operation failures: %w", err)
 	}
-	return events, nil
+	return timeline, nil
 }

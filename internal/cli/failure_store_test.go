@@ -100,7 +100,7 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		}
 	}
 
-	events, err := store.ownedOperationFailures(
+	timeline, err := store.ownedOperationFailures(
 		context.Background(),
 		"codex",
 		root,
@@ -110,24 +110,32 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		"",
 		"",
 		1,
+		1,
 	)
 	if err != nil {
 		t.Fatalf("query failures: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("events=%d want 1", len(events))
+	if timeline.TotalDefinite != 2 || timeline.TotalAmbiguous != 1 ||
+		len(timeline.Definite) != 1 || len(timeline.Ambiguous) != 1 {
+		t.Fatalf("timeline bounds mismatch: %#v", timeline)
 	}
-	if events[0].Reason != "test harness protocol" || events[0].OutputBytes != 480 || !events[0].AttributionAmbiguous {
-		t.Fatalf("unexpected event: %#v", events[0])
+	if timeline.Definite[0].Reason != "test failure" ||
+		timeline.Definite[0].OutputBytes != 120 ||
+		timeline.Definite[0].AttributionAmbiguous {
+		t.Fatalf("unexpected definite event: %#v", timeline.Definite[0])
 	}
-	if events[0].Operation != "bwb/test-nses" || events[0].Family != "mixed shell" {
-		t.Fatalf("missing safe event labels: %#v", events[0])
+	if timeline.Ambiguous[0].Reason != "test harness protocol" ||
+		timeline.Ambiguous[0].OutputBytes != 480 ||
+		!timeline.Ambiguous[0].AttributionAmbiguous {
+		t.Fatalf("unexpected ambiguous event: %#v", timeline.Ambiguous[0])
 	}
-	if events[0].Task != "(root)" {
-		t.Fatalf("task=%q want root attribution", events[0].Task)
+	if timeline.Definite[0].Operation != "bwb/test-nses" ||
+		timeline.Definite[0].Family != "tests" ||
+		timeline.Definite[0].Task != "(root)" {
+		t.Fatalf("missing safe event labels: %#v", timeline.Definite[0])
 	}
 
-	events, err = store.ownedOperationFailures(
+	timeline, err = store.ownedOperationFailures(
 		context.Background(),
 		"codex",
 		root,
@@ -137,15 +145,19 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		"test failure",
 		"",
 		10,
+		5,
 	)
 	if err != nil {
 		t.Fatalf("query reason-filtered failures: %v", err)
 	}
-	if len(events) != 2 || events[0].Reason != "test failure" || events[1].Task != "cost-task" {
-		t.Fatalf("reason-filtered events=%#v", events)
+	if timeline.TotalDefinite != 2 ||
+		timeline.TotalAmbiguous != 0 ||
+		len(timeline.Definite) != 2 ||
+		timeline.Definite[1].Task != "cost-task" {
+		t.Fatalf("reason-filtered timeline=%#v", timeline)
 	}
 
-	events, err = store.ownedOperationFailures(
+	timeline, err = store.ownedOperationFailures(
 		context.Background(),
 		"codex",
 		root,
@@ -155,11 +167,15 @@ func TestSessionStoreOwnedOperationFailuresAreBoundedAndRepositoryScoped(t *test
 		"test failure",
 		"cost-task",
 		10,
+		5,
 	)
 	if err != nil {
 		t.Fatalf("query task-filtered failures: %v", err)
 	}
-	if len(events) != 1 || events[0].Task != "cost-task" || events[0].OutputBytes != 240 {
-		t.Fatalf("task-filtered events=%#v", events)
+	if timeline.TotalDefinite != 1 ||
+		len(timeline.Definite) != 1 ||
+		timeline.Definite[0].Task != "cost-task" ||
+		timeline.Definite[0].OutputBytes != 240 {
+		t.Fatalf("task-filtered timeline=%#v", timeline)
 	}
 }
