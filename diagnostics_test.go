@@ -68,7 +68,7 @@ func TestSessionStorePreservesNormalizedDiagnosticFailure(t *testing.T) {
 func TestCodexIngestionAttributesCostAfterHeimdalReport(t *testing.T) {
 	sessionsDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "repo")
-	reportJSON := `{"status":"failed","finished_at":"2026-07-27T09:00:02Z","primary_failure":{"class":"error","semantic_fingerprint":"same-failure"},"metadata":{"void.diagnostics":{"snapshot":{"status":"pending"}}}}`
+	reportJSON := `{"status":"failed","finished_at":"2026-07-26T09:00:02Z","primary_failure":{"class":"error","semantic_fingerprint":"same-failure"},"metadata":{"void.diagnostics":{"snapshot":{"status":"pending"}}}}`
 	sessionPath := writeCodexSessionFixture(t, sessionsDir, "heimdal-report", []any{
 		map[string]any{
 			"timestamp": "2026-07-27T09:00:00Z",
@@ -158,8 +158,9 @@ func TestCodexIngestionAttributesCostAfterHeimdalReport(t *testing.T) {
 		t.Fatalf("diagnostic failures=%#v", record.DiagnosticFailures)
 	}
 	got := record.DiagnosticFailures[0]
-	if got.ToolCalls != 1 || got.Tokens.TotalTokens != 110 || got.EndedAt.Sub(got.FailedAt) != time.Minute {
-		t.Fatalf("post-failure attribution crossed task completion=%#v", got)
+	if got.ToolCalls != 1 || got.Tokens.TotalTokens != 110 ||
+		got.EndedAt.Sub(got.FailedAt) != 59*time.Second {
+		t.Fatalf("post-failure attribution used stale artifact time or crossed task completion=%#v", got)
 	}
 }
 
