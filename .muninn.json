@@ -11,6 +11,7 @@
       "id": "muninn",
       "repository": ".",
       "executables": ["muninn"],
+      "operationsOnly": true,
       "operations": [
         {"id": "analyze", "args": ["analyze"], "expectedWait": true},
         {"id": "failures", "args": ["failures"]}
