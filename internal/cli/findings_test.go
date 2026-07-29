@@ -121,6 +121,34 @@ func TestBundledDiscoveryRequiresCrossSessionEvidenceForMediumConfidence(t *test
 	}
 }
 
+func TestBundledDiscoveryRecognizesFallbackAfterBoundedInspect(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.MixedShellShapes["search -> file reads"] = codexToolMetrics{
+		Calls:       20,
+		Sessions:    3,
+		OutputBytes: 240_000,
+	}
+	report.Summary.CrossCallTransitions["bounded task inspect -> file reads"] = codexTransitionMetrics{
+		Count:    6,
+		Sessions: 2,
+	}
+	report.Summary.CrossCallTransitions["bounded task inspect -> search"] = codexTransitionMetrics{
+		Count:    5,
+		Sessions: 2,
+	}
+
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Category != "discovery" {
+		t.Fatalf("expected one discovery finding: %#v", findings)
+	}
+	discovery := findings[0]
+	if !strings.Contains(discovery.Evidence, "followed by raw search or file reads 11 times") ||
+		!strings.Contains(discovery.Action, "already used") ||
+		!strings.Contains(discovery.Action, "improve its result or continuation boundary") {
+		t.Fatalf("bounded-inspect fallback was not actionable: %#v", discovery)
+	}
+}
+
 func TestCodexInlineOrchestrationExcludesEdits(t *testing.T) {
 	large := strings.Repeat("x", 5000)
 	if got := codexInlineOrchestrationBytes("exec", "", large); got != int64(len(large)) {
