@@ -72,9 +72,7 @@ are reclassified.
 
 Every finding prints a stable signal ID. Add an exact ID to
 `suppressSignals` only after confirming it is a false positive. Suppression
-hides the finding from the action queue without deleting normalized metrics or
-checkpoint history.
+hides the finding from the action queue without deleting normalized metrics.
 
 Configuration never weakens Muninn's privacy boundary. Selectors are stored as
 one-way digests; reports show only configured logical IDs.
-

@@ -234,17 +234,6 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_session_time ON events(session_id, occurred_at_ns, sequence)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_time_kind ON events(occurred_at_ns, kind)`,
-		`CREATE TABLE IF NOT EXISTS checkpoints (
-			id INTEGER PRIMARY KEY,
-			name TEXT NOT NULL,
-			provider TEXT NOT NULL,
-			repository_key TEXT NOT NULL,
-			created_at_ns INTEGER NOT NULL,
-			since TEXT NOT NULL,
-			report_json TEXT NOT NULL,
-			UNIQUE(name, provider, repository_key)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_checkpoints_repository ON checkpoints(provider, repository_key, created_at_ns)`,
 		`CREATE TABLE IF NOT EXISTS feedback (
 			id INTEGER PRIMARY KEY,
 			repository_key TEXT NOT NULL,
@@ -884,54 +873,4 @@ func pathInsideAnyRoot(roots []string, path string) bool {
 		}
 	}
 	return false
-}
-
-func (store *sessionStore) saveCheckpoint(ctx context.Context, name, provider, repositoryKey string, report codexSessionInsightsReport) error {
-	if strings.TrimSpace(name) == "" {
-		return errors.New("checkpoint name cannot be empty")
-	}
-	raw, err := json.Marshal(report)
-	if err != nil {
-		return fmt.Errorf("encode checkpoint: %w", err)
-	}
-	_, err = store.db.ExecContext(ctx, `INSERT INTO checkpoints(
-		name, provider, repository_key, created_at_ns, since, report_json
-	) VALUES(?, ?, ?, ?, ?, ?)
-	ON CONFLICT(name, provider, repository_key) DO UPDATE SET
-	  created_at_ns = excluded.created_at_ns,
-	  since = excluded.since,
-	  report_json = excluded.report_json`,
-		name,
-		provider,
-		repositoryKey,
-		time.Now().UTC().UnixNano(),
-		report.Since,
-		string(raw),
-	)
-	if err != nil {
-		return fmt.Errorf("save Muninn checkpoint: %w", err)
-	}
-	return nil
-}
-
-func (store *sessionStore) loadCheckpoint(ctx context.Context, name, provider, repositoryKey string) (codexSessionInsightsReport, error) {
-	var raw string
-	err := store.db.QueryRowContext(
-		ctx,
-		`SELECT report_json FROM checkpoints WHERE name = ? AND provider = ? AND repository_key = ?`,
-		name,
-		provider,
-		repositoryKey,
-	).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return codexSessionInsightsReport{}, fmt.Errorf("Muninn checkpoint %q does not exist for this repository", name)
-	}
-	if err != nil {
-		return codexSessionInsightsReport{}, fmt.Errorf("load Muninn checkpoint: %w", err)
-	}
-	var report codexSessionInsightsReport
-	if err := json.Unmarshal([]byte(raw), &report); err != nil {
-		return codexSessionInsightsReport{}, fmt.Errorf("decode Muninn checkpoint: %w", err)
-	}
-	return report, nil
 }

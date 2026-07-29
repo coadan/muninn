@@ -42,7 +42,11 @@ type codexTokenUsage struct {
 }
 
 type codexTaskInsights struct {
-	Task                         string                                       `json:"task"`
+	Task string `json:"task"`
+	codexAggregateMetrics
+}
+
+type codexAggregateMetrics struct {
 	Sessions                     int                                          `json:"sessions"`
 	CompletedSessions            int                                          `json:"completedSessions"`
 	IncompleteSessions           int                                          `json:"incompleteSessions"`
@@ -141,47 +145,11 @@ type codexTargetMetrics struct {
 }
 
 type codexSessionInsightsSummary struct {
-	FilesScanned                 int                                          `json:"filesScanned"`
-	FilesUnreadable              int                                          `json:"filesUnreadable"`
-	Sessions                     int                                          `json:"sessions"`
-	CompletedSessions            int                                          `json:"completedSessions"`
-	IncompleteSessions           int                                          `json:"incompleteSessions"`
-	DurationSeconds              int64                                        `json:"durationSeconds"`
-	Compactions                  int                                          `json:"compactions"`
-	SessionsWithCompactions      int                                          `json:"sessionsWithCompactions"`
-	Tokens                       codexTokenUsage                              `json:"tokens"`
-	FreshTokens                  int64                                        `json:"freshTokens"`
-	ToolCalls                    int                                          `json:"toolCalls"`
-	FailedToolCalls              int                                          `json:"failedToolCalls"`
-	TruncatedToolCalls           int                                          `json:"truncatedToolCalls"`
-	ToolOutputBytes              int64                                        `json:"toolOutputBytes"`
-	ToolOutputTokens             int64                                        `json:"toolOutputTokens"`
-	ToolCallsByName              map[string]int                               `json:"toolCallsByName"`
-	ToolMetricsByName            map[string]codexToolMetrics                  `json:"toolMetricsByName"`
-	ShellCommandsByFamily        map[string]codexToolMetrics                  `json:"shellCommandsByFamily"`
-	MixedShellShapes             map[string]codexToolMetrics                  `json:"mixedShellShapes"`
-	CrossCallTransitions         map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
-	OwnedTooling                 map[string]codexToolMetrics                  `json:"ownedTooling"`
-	OwnedOperations              map[string]codexOwnedOperationMetrics        `json:"ownedOperations"`
-	OwnedOperationFailureReasons map[string]map[string]codexOccurrenceMetrics `json:"ownedOperationFailureReasons"`
-	ReadTargets                  map[string]codexTargetMetrics                `json:"readTargets"`
-	InlineOrchestrationCalls     int                                          `json:"inlineOrchestrationCalls"`
-	InlineOrchestrationBytes     int64                                        `json:"inlineOrchestrationBytes"`
-	InlineOrchestrationMaxBytes  int64                                        `json:"inlineOrchestrationMaxBytes"`
-	InlineOrchestrationSessions  int                                          `json:"inlineOrchestrationSessions"`
-	InlineOrchestrationByTool    map[string]codexInlineMetrics                `json:"inlineOrchestrationByTool"`
-	InlineOrchestrationByFamily  map[string]codexInlineMetrics                `json:"inlineOrchestrationByFamily"`
-	InlineOrchestrationByOwner   map[string]codexInlineMetrics                `json:"inlineOrchestrationByOwner"`
-	FailureReasons               map[string]int                               `json:"failureReasons"`
-	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
-	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
-	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
-	RapidPolls                   map[string]codexWaitMetrics                  `json:"rapidPolls"`
-	AbandonedContinuations       map[string]codexOccurrenceMetrics            `json:"abandonedContinuations"`
-	OversizedOutputs             map[string]codexOversizedOutputMetrics       `json:"oversizedOutputs"`
-	DeliveryRework               deliveryReworkMetrics                        `json:"deliveryRework"`
-	DownstreamQuality            downstreamQualityMetrics                     `json:"downstreamQuality"`
-	Activity                     map[string]time.Time                         `json:"-"`
+	FilesScanned      int                         `json:"filesScanned"`
+	FilesUnreadable   int                         `json:"filesUnreadable"`
+	ToolCallsByName   map[string]int              `json:"toolCallsByName"`
+	ToolMetricsByName map[string]codexToolMetrics `json:"toolMetricsByName"`
+	codexAggregateMetrics
 }
 
 type codexSessionInsightsReport struct {
@@ -321,7 +289,7 @@ func defaultRepositoryConfig() repositoryConfig {
 	config.Actions.RecurringFailure = "Reproduce the shared failure once, then fix the owned tool/default or add concise repository guidance instead of repeating per-session workarounds."
 	config.Actions.AgentInterface = "Consider one compact agent-facing command that owns bootstrap, state, bounded output, and recovery for this repeated workflow."
 	config.Actions.CodeStructure = "Inspect whether this owner mixes responsibilities; split or add a stable routed entry point when the repeated reads reflect real ownership boundaries."
-	config.Actions.SessionLoop = "Checkpoint progress, start a focused continuation, and remove repeated rediscovery or validation loops from the repository workflow."
+	config.Actions.SessionLoop = "Save progress, start a focused continuation, and remove repeated rediscovery or validation loops from the repository workflow."
 	config.Actions.InlineOrchestration = "Extract the repeated orchestration into a tested repository helper or agent-facing CLI command."
 	config.Actions.YieldedOperation = "Use the repository's bounded command for this workflow, resume every yielded process to a terminal result, and explicitly terminate work that should not continue."
 	return config
@@ -452,10 +420,7 @@ func main() {
 	}
 	args := os.Args[1:]
 	if len(args) == 0 {
-		args = []string{"sessions"}
-	}
-	if strings.EqualFold(args[0], "analyze") {
-		args[0] = "sessions"
+		args = []string{"analyze"}
 	}
 	if err := cmdCodex(root, args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -510,10 +475,8 @@ func cmdCodex(root string, args []string) error {
 		return nil
 	}
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
-	case "sessions":
-		return cmdCodexSessions(root, args[1:])
-	case "checkpoint":
-		return cmdCheckpoint(root, args[1:])
+	case "analyze":
+		return cmdAnalyze(root, args[1:])
 	case "failures":
 		return cmdFailures(root, args[1:])
 	case "feedback":
@@ -528,15 +491,11 @@ func printCodexHelp() {
 
 Usage:
   muninn analyze [flags]
-  muninn sessions [flags]
-  muninn checkpoint <name> [analysis flags]
   muninn failures --operation <tool/operation> [flags]
   muninn feedback <add|resolve|list> [flags]
 
 Available Commands:
   analyze   Analyze agent-session cost and friction for a repository
-  sessions  Compatibility alias for analyze
-  checkpoint Save a quiet named trend checkpoint
   failures  Inspect bounded failure events for one owned operation
   feedback  Record or inspect normalized agent-reported friction
 
@@ -552,15 +511,11 @@ Examples:
   muninn
   muninn analyze --repo .
   muninn analyze --repo /path/to/repository --since 24h
-  muninn analyze --repo . --since 72h --compare-previous
+  muninn analyze --repo . --since 1d --compare previous
   muninn analyze --repo . --since-commit HEAD~3
   muninn analyze --repo . --task my-worktree
   muninn analyze --repo . --since 14d --include-archived
-  muninn analyze --repo . --checkpoint before-tooling-change
-  muninn checkpoint before-tooling-change --repo .
-  muninn analyze --repo . --compare before-tooling-change
-  muninn analyze --repo . --overview
-  muninn analyze --repo . --since 24h --operations repository-cli
+  muninn analyze --repo . --since 24h --operation repository-cli
   muninn analyze --repo . --focus structure
   muninn analyze --repo . --details
   muninn analyze --repo . --json
@@ -569,50 +524,7 @@ Examples:
 `)
 }
 
-func cmdCheckpoint(root string, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: muninn checkpoint <name> [analysis flags]")
-	}
-	if isHelpToken(args[0]) {
-		fmt.Print(`Save a quiet named trend checkpoint
-
-Usage:
-  muninn checkpoint <name> [analysis flags]
-
-Examples:
-  muninn checkpoint before-tooling-change
-  muninn checkpoint after-tooling-change --repo . --since 14d
-  muninn checkpoint reclassified --repo . --refresh
-`)
-		return nil
-	}
-	analyzeArgs, err := checkpointAnalyzeArgs(args)
-	if err != nil {
-		return err
-	}
-	return cmdCodexSessions(root, analyzeArgs)
-}
-
-func checkpointAnalyzeArgs(args []string) ([]string, error) {
-	if len(args) == 0 {
-		return nil, errors.New("usage: muninn checkpoint <name> [analysis flags]")
-	}
-	name := strings.TrimSpace(args[0])
-	if name == "" || strings.HasPrefix(name, "-") {
-		return nil, errors.New("checkpoint name must be the first argument")
-	}
-	for _, arg := range args[1:] {
-		if arg == "--checkpoint" || strings.HasPrefix(arg, "--checkpoint=") ||
-			arg == "--quiet" || strings.HasPrefix(arg, "--quiet=") {
-			return nil, errors.New("muninn checkpoint manages --checkpoint and --quiet automatically")
-		}
-	}
-	analyzeArgs := append([]string(nil), args[1:]...)
-	analyzeArgs = append(analyzeArgs, "--checkpoint", name, "--quiet")
-	return analyzeArgs, nil
-}
-
-func cmdCodexSessions(root string, args []string) error {
+func cmdAnalyze(root string, args []string) error {
 	fs := flag.NewFlagSet("muninn analyze", flag.ContinueOnError)
 	fs.SetOutput(os.Stdout)
 	sinceRaw := fs.String("since", "7d", "lookback duration (for example 24h, 7d, or 2w)")
@@ -621,7 +533,6 @@ func cmdCodexSessions(root string, args []string) error {
 	sessionsDir := fs.String("sessions-dir", "", "provider session directory (Codex default: $CODEX_HOME/sessions or ~/.codex/sessions)")
 	repoRoot := root
 	fs.StringVar(&repoRoot, "repo", root, "only include sessions whose cwd is inside this repository")
-	fs.StringVar(&repoRoot, "workspace-root", root, "compatibility alias for --repo")
 	taskFilter := fs.String("task", "", "only include sessions attributed to this exact worktree/task ID")
 	configPath := fs.String("config", "", "repository config path (default: <repo>/.muninn.json when present)")
 	includeArchived := fs.Bool("include-archived", false, "also scan the sibling archived_sessions directory")
@@ -632,28 +543,24 @@ func cmdCodexSessions(root string, args []string) error {
 	storePath := fs.String("db", defaultStorePath, "local privacy-safe SQLite index path")
 	noCache := fs.Bool("no-cache", false, "scan provider files directly without the SQLite index")
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
-	checkpointName := fs.String("checkpoint", "", "save this analysis as a named trend checkpoint")
-	compareName := fs.String("compare", "", "compare this analysis with a named checkpoint")
-	comparePrevious := fs.Bool("compare-previous", false, "compare with the immediately preceding non-overlapping lookback")
-	quietOutput := fs.Bool("quiet", false, "suppress report output after saving a checkpoint")
-	overviewOutput := fs.Bool("overview", false, "show aggregate family totals only")
-	findingsOutput := fs.Bool("findings", false, "show actionable findings (default)")
-	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals; with --operations, show all operation rows")
+	compare := fs.String("compare", "", "comparison cohort: previous")
+	detailsOutput := fs.Bool("details", false, "show full rankings, transitions, failures, and signals; with --operation, show all operation rows")
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
-	operationsTool := fs.String("operations", "", "show configured operations for one locally owned tool or exact tool/operation ID")
+	operation := fs.String("operation", "", "show configured operations for one locally owned tool or exact tool/operation ID")
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
 	limit := fs.Int("limit", 10, "maximum task rows in human output (0 shows all)")
 	setFlagSetUsage(
 		fs,
-		"muninn analyze [--provider codex] [--repo <path>] [--since <duration>] [--compare-previous] [--sessions-dir <path>] [--task <task-id>] [--operations <owned-tool-or-operation>] [--include-archived] [--json] [--limit <n>]",
+		"muninn analyze [--repo <path>] [--since <duration>] [--task <task-id>] [--focus <area>] [--details] [--operation <tool-or-operation>] [--compare previous] [--json]",
 		"Summarize token usage and tool-output attribution without exposing session content or command text.",
 		[]string{
 			"muninn analyze --repo .",
 			"muninn analyze --repo . --since 24h",
-			"muninn analyze --repo . --since 72h --compare-previous",
-			"muninn analyze --repo . --since 24h --operations repository-cli",
-			"muninn analyze --repo . --since 24h --operations repository-cli/test",
-			"muninn analyze --repo . --since 24h --operations repository-cli --details",
+			"muninn analyze --repo . --since 1d --compare previous",
+			"muninn analyze --repo . --since 7d --compare previous",
+			"muninn analyze --repo . --since 24h --operation repository-cli",
+			"muninn analyze --repo . --since 24h --operation repository-cli/test",
+			"muninn analyze --repo . --since 24h --operation repository-cli --details",
 			"muninn analyze --repo . --focus structure --details",
 			"muninn analyze --repo . --task my-worktree",
 			"muninn analyze --repo . --since 14d --include-archived --limit 20",
@@ -682,43 +589,26 @@ func cmdCodexSessions(root string, args []string) error {
 	if strings.TrimSpace(*sinceCommit) != "" && sinceWasSet {
 		return errors.New("--since and --since-commit are mutually exclusive")
 	}
-	if *comparePrevious && strings.TrimSpace(*sinceCommit) != "" {
-		return errors.New("--compare-previous requires a rolling --since lookback")
+	comparison := strings.ToLower(strings.TrimSpace(*compare))
+	if comparison != "" && comparison != "previous" {
+		return errors.New("--compare must be \"previous\" when set")
 	}
-	if *comparePrevious && strings.TrimSpace(*compareName) != "" {
-		return errors.New("--compare-previous and --compare are mutually exclusive")
+	if comparison == "previous" && strings.TrimSpace(*sinceCommit) != "" {
+		return errors.New("--compare previous requires a rolling --since lookback")
 	}
-	if *comparePrevious && strings.TrimSpace(*checkpointName) != "" {
-		return errors.New("--compare-previous and --checkpoint are mutually exclusive")
+	if comparison == "previous" && strings.TrimSpace(*operation) != "" {
+		return errors.New("--compare previous cannot be combined with --operation")
 	}
-	if *comparePrevious && strings.TrimSpace(*operationsTool) != "" {
-		return errors.New("--compare-previous cannot be combined with --operations")
+	if *noCache && *forceRefresh {
+		return errors.New("--no-cache cannot be combined with --refresh")
 	}
-	if *noCache && (*forceRefresh || strings.TrimSpace(*checkpointName) != "" || strings.TrimSpace(*compareName) != "") {
-		return errors.New("--no-cache cannot be combined with --refresh, --checkpoint, or --compare")
-	}
-	if *jsonOutput && (strings.TrimSpace(*compareName) != "" || *comparePrevious) {
-		return errors.New("--compare and --compare-previous currently require human output")
-	}
-	if *quietOutput && (*jsonOutput ||
-		strings.TrimSpace(*compareName) != "" ||
-		*comparePrevious ||
-		*overviewOutput ||
-		*findingsOutput ||
-		*detailsOutput ||
-		strings.TrimSpace(*focus) != "" ||
-		strings.TrimSpace(*operationsTool) != "") {
-		return errors.New("--quiet cannot be combined with report, comparison, focus, or operations output")
-	}
-	if *quietOutput && strings.TrimSpace(*checkpointName) == "" {
-		return errors.New("--quiet requires --checkpoint")
+	if *jsonOutput && comparison == "previous" {
+		return errors.New("--compare previous currently requires human output")
 	}
 	outputSelection, err := resolveAnalyzeOutputSelection(
-		*overviewOutput,
-		*findingsOutput,
 		*detailsOutput,
 		*focus,
-		*operationsTool,
+		*operation,
 		*limit,
 		limitWasSet,
 	)
@@ -836,18 +726,7 @@ func cmdCodexSessions(root string, args []string) error {
 		return err
 	}
 	var baseline *codexSessionInsightsReport
-	baselineLabel := strings.TrimSpace(*compareName)
-	if name := strings.TrimSpace(*compareName); name != "" {
-		loaded, err := store.loadCheckpoint(context.Background(), name, source.Name(), repositoryKey)
-		if err != nil {
-			return err
-		}
-		if err := validateSessionTrendComparison(loaded, report, name); err != nil {
-			return err
-		}
-		baseline = &loaded
-	}
-	if *comparePrevious {
+	if comparison == "previous" {
 		previousSince, previousUntil, err := previousLookbackWindow(since, now, lookbackSeconds)
 		if err != nil {
 			return err
@@ -865,21 +744,8 @@ func cmdCodexSessions(root string, args []string) error {
 			return err
 		}
 		baseline = &previous
-		baselineLabel = "previous non-overlapping " + formatTrendLookback(lookbackSeconds)
 	}
-	if name := strings.TrimSpace(*checkpointName); name != "" {
-		if err := store.saveCheckpoint(context.Background(), name, source.Name(), repositoryKey, report); err != nil {
-			return err
-		}
-		if *jsonOutput {
-			fmt.Fprintf(os.Stderr, "saved Muninn checkpoint %q\n", name)
-		}
-	}
-	if *quietOutput {
-		fmt.Printf("Saved checkpoint %q.\n", strings.TrimSpace(*checkpointName))
-		return nil
-	}
-	if toolID := strings.TrimSpace(*operationsTool); toolID != "" {
+	if toolID := strings.TrimSpace(*operation); toolID != "" {
 		drilldown, err := buildOwnedOperationsDrilldown(report, config, toolID, outputSelection.OperationLimit)
 		if err != nil {
 			return err
@@ -890,9 +756,6 @@ func cmdCodexSessions(root string, args []string) error {
 			return encoder.Encode(drilldown)
 		}
 		printOwnedOperationsDrilldown(drilldown)
-		if name := strings.TrimSpace(*checkpointName); name != "" {
-			fmt.Printf("\nSaved checkpoint %q.\n", name)
-		}
 		return nil
 	}
 	if *jsonOutput {
@@ -902,10 +765,7 @@ func cmdCodexSessions(root string, args []string) error {
 	}
 	printCodexSessionInsights(report, config, *limit, outputSelection.View)
 	if baseline != nil {
-		printSessionTrend(*baseline, report, baselineLabel)
-	}
-	if name := strings.TrimSpace(*checkpointName); name != "" {
-		fmt.Printf("\nSaved checkpoint %q.\n", name)
+		printSessionTrend(*baseline, report, "previous non-overlapping "+formatTrendLookback(lookbackSeconds))
 	}
 	return nil
 }
@@ -916,30 +776,16 @@ type analyzeOutputSelection struct {
 }
 
 func resolveAnalyzeOutputSelection(
-	overview,
-	findings,
 	details bool,
 	focus,
 	operations string,
 	limit int,
 	limitWasSet bool,
 ) (analyzeOutputSelection, error) {
-	viewCount := 0
-	for _, selected := range []bool{overview, findings, details} {
-		if selected {
-			viewCount++
-		}
-	}
-	if viewCount > 1 {
-		return analyzeOutputSelection{}, errors.New("--overview, --findings, and --details are mutually exclusive")
-	}
 	focus = strings.TrimSpace(focus)
 	operations = strings.TrimSpace(operations)
-	if focus != "" && overview {
-		return analyzeOutputSelection{}, errors.New("--focus applies to findings output and cannot be combined with --overview")
-	}
-	if operations != "" && (overview || findings || focus != "") {
-		return analyzeOutputSelection{}, errors.New("--operations cannot be combined with --overview, --findings, or --focus")
+	if operations != "" && focus != "" {
+		return analyzeOutputSelection{}, errors.New("--operation cannot be combined with --focus")
 	}
 
 	selection := analyzeOutputSelection{
@@ -955,8 +801,6 @@ func resolveAnalyzeOutputSelection(
 		// Focused findings already include their full evidence. Accepting
 		// --details here avoids a help/retry roundtrip without expanding output.
 		selection.View = "focused"
-	case overview:
-		selection.View = "overview"
 	case details:
 		selection.View = "details"
 	}
@@ -1091,28 +935,34 @@ func newSessionInsightsReport(provider string, sessionDirs []string, workspaceRo
 		WorkspaceRoot: workspaceRoot,
 		SessionDirs:   append([]string(nil), sessionDirs...),
 		Summary: codexSessionInsightsSummary{
-			ToolCallsByName:              map[string]int{},
-			ToolMetricsByName:            map[string]codexToolMetrics{},
-			ShellCommandsByFamily:        map[string]codexToolMetrics{},
-			MixedShellShapes:             map[string]codexToolMetrics{},
-			CrossCallTransitions:         map[string]codexTransitionMetrics{},
-			OwnedTooling:                 map[string]codexToolMetrics{},
-			OwnedOperations:              map[string]codexOwnedOperationMetrics{},
-			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
-			ReadTargets:                  map[string]codexTargetMetrics{},
-			InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
-			InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
-			InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
-			FailureReasons:               map[string]int{},
-			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
-			ProgressStalls:               map[string]codexWaitMetrics{},
-			ExpectedWaits:                map[string]codexWaitMetrics{},
-			RapidPolls:                   map[string]codexWaitMetrics{},
-			AbandonedContinuations:       map[string]codexOccurrenceMetrics{},
-			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
-			Activity:                     map[string]time.Time{},
+			ToolCallsByName:       map[string]int{},
+			ToolMetricsByName:     map[string]codexToolMetrics{},
+			codexAggregateMetrics: newCodexAggregateMetrics(),
 		},
 		operationTasks: map[string]map[string]codexOwnedOperationMetrics{},
+	}
+}
+
+func newCodexAggregateMetrics() codexAggregateMetrics {
+	return codexAggregateMetrics{
+		ShellCommandsByFamily:        map[string]codexToolMetrics{},
+		MixedShellShapes:             map[string]codexToolMetrics{},
+		CrossCallTransitions:         map[string]codexTransitionMetrics{},
+		OwnedTooling:                 map[string]codexToolMetrics{},
+		OwnedOperations:              map[string]codexOwnedOperationMetrics{},
+		OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
+		ReadTargets:                  map[string]codexTargetMetrics{},
+		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
+		InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
+		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
+		FailureReasons:               map[string]int{},
+		FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
+		ProgressStalls:               map[string]codexWaitMetrics{},
+		ExpectedWaits:                map[string]codexWaitMetrics{},
+		RapidPolls:                   map[string]codexWaitMetrics{},
+		AbandonedContinuations:       map[string]codexOccurrenceMetrics{},
+		OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
+		Activity:                     map[string]time.Time{},
 	}
 }
 
@@ -2017,145 +1867,80 @@ func addCodexFailureContext(contexts map[string]map[string]int, reason, context 
 func addCodexSessionToReport(report *codexSessionInsightsReport, taskMap map[string]*codexTaskInsights, record codexSessionRecord) {
 	report.sessionRecords = append(report.sessionRecords, record)
 	summary := &report.Summary
-	summary.Sessions++
-	if record.Completed {
-		summary.CompletedSessions++
-	} else {
-		summary.IncompleteSessions++
-	}
-	duration := codexSessionDuration(record)
-	summary.DurationSeconds += duration
-	summary.Compactions += record.Compactions
-	if record.Compactions > 0 {
-		summary.SessionsWithCompactions++
-	}
-	addCodexTokenUsage(&summary.Tokens, record.Tokens)
-	summary.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
-	summary.ToolCalls += record.ToolCalls
-	summary.FailedToolCalls += record.FailedToolCalls
-	summary.TruncatedToolCalls += record.TruncatedToolCalls
-	summary.ToolOutputBytes += record.ToolOutputBytes
-	summary.ToolOutputTokens += estimatedTokens(record.ToolOutputBytes)
+	addCodexRecordMetrics(&summary.codexAggregateMetrics, record)
 	for name, count := range record.ToolCallsByName {
 		summary.ToolCallsByName[name] += count
 	}
 	for name, metrics := range record.ToolMetricsByName {
 		addCodexToolMetricsValue(summary.ToolMetricsByName, name, metrics)
 	}
-	for family, metrics := range record.ShellCommandsByFamily {
-		addCodexToolMetricsValue(summary.ShellCommandsByFamily, family, metrics)
-	}
-	for shape, metrics := range record.MixedShellShapes {
-		addCodexToolMetricsValue(summary.MixedShellShapes, shape, metrics)
-	}
-	addCodexTransitionMetrics(summary.CrossCallTransitions, record.CrossCallTransitions)
-	for id, metrics := range record.OwnedTooling {
-		addCodexToolMetricsValue(summary.OwnedTooling, id, metrics)
-	}
-	addCodexOwnedOperationMetrics(summary.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguous)
 	addCodexOwnedOperationTaskMetrics(report.operationTasks, record.OwnedOperationTasks)
-	addCodexFailureContexts(summary.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
-	addCodexTargetMetrics(summary.ReadTargets, record.ReadTargets)
-	summary.InlineOrchestrationCalls += record.InlineOrchestrationCalls
-	summary.InlineOrchestrationBytes += record.InlineOrchestrationBytes
-	summary.InlineOrchestrationMaxBytes = max(summary.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
-	addCodexInlineMetrics(summary.InlineOrchestrationByTool, record.InlineOrchestrationByTool)
-	addCodexInlineMetrics(summary.InlineOrchestrationByFamily, record.InlineOrchestrationByFamily)
-	addCodexInlineMetrics(summary.InlineOrchestrationByOwner, record.InlineOrchestrationByOwner)
-	if record.InlineOrchestrationCalls > 0 {
-		summary.InlineOrchestrationSessions++
-	}
-	for reason, count := range record.FailureReasons {
-		summary.FailureReasons[reason] += count
-	}
-	addCodexFailureContexts(summary.FailureContexts, record.FailureContexts)
-	addCodexWaitMetrics(summary.ProgressStalls, record.ProgressStalls)
-	addCodexWaitMetrics(summary.ExpectedWaits, record.ExpectedWaits)
-	addCodexWaitMetrics(summary.RapidPolls, record.RapidPolls)
-	addCodexOccurrenceMetrics(summary.AbandonedContinuations, record.AbandonedContinuations)
-	addCodexOversizedOutputMetrics(summary.OversizedOutputs, record.OversizedOutputs)
-	addDeliveryReworkMetrics(&summary.DeliveryRework, record.DeliveryRework)
-	addDownstreamQualityMetrics(&summary.DownstreamQuality, record.DownstreamQuality)
-	mergeSessionActivity(summary.Activity, record.Activity)
 	report.taskEpisodes = append(report.taskEpisodes, record.TaskEpisodes...)
 
 	task := taskMap[record.Task]
 	if task == nil {
 		task = &codexTaskInsights{
-			Task:                         record.Task,
-			ShellCommandsByFamily:        map[string]codexToolMetrics{},
-			MixedShellShapes:             map[string]codexToolMetrics{},
-			CrossCallTransitions:         map[string]codexTransitionMetrics{},
-			OwnedTooling:                 map[string]codexToolMetrics{},
-			OwnedOperations:              map[string]codexOwnedOperationMetrics{},
-			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
-			ReadTargets:                  map[string]codexTargetMetrics{},
-			InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
-			InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
-			InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
-			FailureReasons:               map[string]int{},
-			FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
-			ProgressStalls:               map[string]codexWaitMetrics{},
-			ExpectedWaits:                map[string]codexWaitMetrics{},
-			RapidPolls:                   map[string]codexWaitMetrics{},
-			AbandonedContinuations:       map[string]codexOccurrenceMetrics{},
-			OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
-			Activity:                     map[string]time.Time{},
+			Task:                  record.Task,
+			codexAggregateMetrics: newCodexAggregateMetrics(),
 		}
 		taskMap[record.Task] = task
 	}
-	task.Sessions++
+	addCodexRecordMetrics(&task.codexAggregateMetrics, record)
+}
+
+func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRecord) {
+	target.Sessions++
 	if record.Completed {
-		task.CompletedSessions++
+		target.CompletedSessions++
 	} else {
-		task.IncompleteSessions++
+		target.IncompleteSessions++
 	}
-	task.DurationSeconds += duration
-	task.Compactions += record.Compactions
+	target.DurationSeconds += codexSessionDuration(record)
+	target.Compactions += record.Compactions
 	if record.Compactions > 0 {
-		task.SessionsWithCompactions++
+		target.SessionsWithCompactions++
 	}
-	addCodexTokenUsage(&task.Tokens, record.Tokens)
-	task.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
-	task.ToolCalls += record.ToolCalls
-	task.FailedToolCalls += record.FailedToolCalls
-	task.TruncatedToolCalls += record.TruncatedToolCalls
-	task.ToolOutputBytes += record.ToolOutputBytes
-	task.ToolOutputTokens += estimatedTokens(record.ToolOutputBytes)
+	addCodexTokenUsage(&target.Tokens, record.Tokens)
+	target.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
+	target.ToolCalls += record.ToolCalls
+	target.FailedToolCalls += record.FailedToolCalls
+	target.TruncatedToolCalls += record.TruncatedToolCalls
+	target.ToolOutputBytes += record.ToolOutputBytes
+	target.ToolOutputTokens += estimatedTokens(record.ToolOutputBytes)
 	for family, metrics := range record.ShellCommandsByFamily {
-		addCodexToolMetricsValue(task.ShellCommandsByFamily, family, metrics)
+		addCodexToolMetricsValue(target.ShellCommandsByFamily, family, metrics)
 	}
 	for shape, metrics := range record.MixedShellShapes {
-		addCodexToolMetricsValue(task.MixedShellShapes, shape, metrics)
+		addCodexToolMetricsValue(target.MixedShellShapes, shape, metrics)
 	}
-	addCodexTransitionMetrics(task.CrossCallTransitions, record.CrossCallTransitions)
+	addCodexTransitionMetrics(target.CrossCallTransitions, record.CrossCallTransitions)
 	for id, metrics := range record.OwnedTooling {
-		addCodexToolMetricsValue(task.OwnedTooling, id, metrics)
+		addCodexToolMetricsValue(target.OwnedTooling, id, metrics)
 	}
-	addCodexOwnedOperationMetrics(task.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguous)
-	addCodexFailureContexts(task.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
-	addCodexTargetMetrics(task.ReadTargets, record.ReadTargets)
-	task.InlineOrchestrationCalls += record.InlineOrchestrationCalls
-	task.InlineOrchestrationBytes += record.InlineOrchestrationBytes
-	task.InlineOrchestrationMaxBytes = max(task.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
-	addCodexInlineMetrics(task.InlineOrchestrationByTool, record.InlineOrchestrationByTool)
-	addCodexInlineMetrics(task.InlineOrchestrationByFamily, record.InlineOrchestrationByFamily)
-	addCodexInlineMetrics(task.InlineOrchestrationByOwner, record.InlineOrchestrationByOwner)
+	addCodexOwnedOperationMetrics(target.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguous)
+	addCodexFailureContexts(target.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
+	addCodexTargetMetrics(target.ReadTargets, record.ReadTargets)
+	target.InlineOrchestrationCalls += record.InlineOrchestrationCalls
+	target.InlineOrchestrationBytes += record.InlineOrchestrationBytes
+	target.InlineOrchestrationMaxBytes = max(target.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
+	addCodexInlineMetrics(target.InlineOrchestrationByTool, record.InlineOrchestrationByTool)
+	addCodexInlineMetrics(target.InlineOrchestrationByFamily, record.InlineOrchestrationByFamily)
+	addCodexInlineMetrics(target.InlineOrchestrationByOwner, record.InlineOrchestrationByOwner)
 	if record.InlineOrchestrationCalls > 0 {
-		task.InlineOrchestrationSessions++
+		target.InlineOrchestrationSessions++
 	}
 	for reason, count := range record.FailureReasons {
-		task.FailureReasons[reason] += count
+		target.FailureReasons[reason] += count
 	}
-	addCodexFailureContexts(task.FailureContexts, record.FailureContexts)
-	addCodexWaitMetrics(task.ProgressStalls, record.ProgressStalls)
-	addCodexWaitMetrics(task.ExpectedWaits, record.ExpectedWaits)
-	addCodexWaitMetrics(task.RapidPolls, record.RapidPolls)
-	addCodexOccurrenceMetrics(task.AbandonedContinuations, record.AbandonedContinuations)
-	addCodexOversizedOutputMetrics(task.OversizedOutputs, record.OversizedOutputs)
-	addDeliveryReworkMetrics(&task.DeliveryRework, record.DeliveryRework)
-	addDownstreamQualityMetrics(&task.DownstreamQuality, record.DownstreamQuality)
-	mergeSessionActivity(task.Activity, record.Activity)
+	addCodexFailureContexts(target.FailureContexts, record.FailureContexts)
+	addCodexWaitMetrics(target.ProgressStalls, record.ProgressStalls)
+	addCodexWaitMetrics(target.ExpectedWaits, record.ExpectedWaits)
+	addCodexWaitMetrics(target.RapidPolls, record.RapidPolls)
+	addCodexOccurrenceMetrics(target.AbandonedContinuations, record.AbandonedContinuations)
+	addCodexOversizedOutputMetrics(target.OversizedOutputs, record.OversizedOutputs)
+	addDeliveryReworkMetrics(&target.DeliveryRework, record.DeliveryRework)
+	addDownstreamQualityMetrics(&target.DownstreamQuality, record.DownstreamQuality)
+	mergeSessionActivity(target.Activity, record.Activity)
 }
 
 func addCodexWaitMetrics(target, addition map[string]codexWaitMetrics) {
@@ -2388,13 +2173,6 @@ func printCodexSessionInsights(report codexSessionInsightsReport, config reposit
 		printSessionFindings(report.Findings, limit)
 		return
 	}
-	if view == "overview" {
-		printCodexToolMetrics("\nShell output by command family:", "FAMILY", summary.ShellCommandsByFamily, limit, 32)
-		printOwnedTooling(summary.OwnedTooling, config.OwnedTools)
-		fmt.Printf("\nCurrent findings: %s. Use --findings for actions or --details for full evidence.\n", formatCodexCount(int64(len(report.Findings))))
-		return
-	}
-
 	rows := report.Tasks
 	if limit > 0 && len(rows) > limit {
 		rows = rows[:limit]

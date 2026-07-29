@@ -37,112 +37,12 @@ func previousLookbackWindow(
 	return currentSince.Add(-lookback), currentSince, nil
 }
 
-func validateSessionTrendComparison(
-	baseline,
-	current codexSessionInsightsReport,
-	checkpointName string,
-) error {
-	baseScope, err := normalizedTrendScope(baseline)
-	if err != nil {
-		return fmt.Errorf("checkpoint %q has invalid analysis scope: %w", checkpointName, err)
-	}
-	currentScope, err := normalizedTrendScope(current)
-	if err != nil {
-		return fmt.Errorf("current analysis has invalid scope: %w", err)
-	}
-	if baseScope.WindowKind != currentScope.WindowKind {
-		return fmt.Errorf(
-			"checkpoint %q uses %s, but current analysis uses %s; rerun with the checkpoint's window mode or create a matched checkpoint",
-			checkpointName,
-			formatTrendWindowKind(baseScope.WindowKind),
-			formatTrendWindowKind(currentScope.WindowKind),
-		)
-	}
-	switch baseScope.WindowKind {
-	case "lookback":
-		if baseScope.LookbackSeconds != currentScope.LookbackSeconds {
-			return fmt.Errorf(
-				"checkpoint %q uses a %s lookback, but current analysis uses %s; rerun with --since %s or create a matched checkpoint",
-				checkpointName,
-				formatTrendLookback(baseScope.LookbackSeconds),
-				formatTrendLookback(currentScope.LookbackSeconds),
-				formatTrendLookback(baseScope.LookbackSeconds),
-			)
-		}
-	case "since-commit":
-		if baseline.Since != current.Since {
-			return fmt.Errorf(
-				"checkpoint %q and current analysis resolve to different --since-commit boundaries; rerun from the checkpoint's commit boundary or create a matched checkpoint",
-				checkpointName,
-			)
-		}
-	default:
-		return fmt.Errorf("unsupported window kind %q", baseScope.WindowKind)
-	}
-	if baseScope.Task != currentScope.Task {
-		return fmt.Errorf(
-			"checkpoint %q uses task scope %s, but current analysis uses %s; rerun with the same --task scope or create a matched checkpoint",
-			checkpointName,
-			formatTrendScopeValue(baseScope.Task, "all tasks"),
-			formatTrendScopeValue(currentScope.Task, "all tasks"),
-		)
-	}
-	if baseScope.IncludeArchived != currentScope.IncludeArchived {
-		return fmt.Errorf(
-			"checkpoint %q and current analysis differ on --include-archived; rerun with the same archive scope or create a matched checkpoint",
-			checkpointName,
-		)
-	}
-	if baseScope.Focus != currentScope.Focus {
-		return fmt.Errorf(
-			"checkpoint %q uses finding focus %s, but current analysis uses %s; rerun with the same --focus scope or create a matched checkpoint",
-			checkpointName,
-			formatTrendScopeValue(baseScope.Focus, "all findings"),
-			formatTrendScopeValue(currentScope.Focus, "all findings"),
-		)
-	}
-	return nil
-}
-
-func normalizedTrendScope(report codexSessionInsightsReport) (sessionAnalysisScope, error) {
-	scope := report.AnalysisScope
-	if scope.WindowKind != "" {
-		if scope.WindowKind == "lookback" && scope.LookbackSeconds <= 0 {
-			return sessionAnalysisScope{}, fmt.Errorf("lookback must be positive")
-		}
-		scope.Focus = normalizeTrendFocus(scope.Focus)
-		return scope, nil
-	}
-	generatedAt, err := time.Parse(time.RFC3339, report.GeneratedAt)
-	if err != nil {
-		return sessionAnalysisScope{}, fmt.Errorf("parse generated time: %w", err)
-	}
-	since, err := time.Parse(time.RFC3339, report.Since)
-	if err != nil {
-		return sessionAnalysisScope{}, fmt.Errorf("parse since time: %w", err)
-	}
-	if !generatedAt.After(since) {
-		return sessionAnalysisScope{}, fmt.Errorf("analysis window is not positive")
-	}
-	return sessionAnalysisScope{
-		WindowKind:      "lookback",
-		LookbackSeconds: int64(generatedAt.Sub(since) / time.Second),
-	}, nil
-}
-
 func normalizeTrendFocus(focus string) string {
 	focus = strings.ToLower(strings.TrimSpace(focus))
 	if focus == "friction" {
 		return ""
 	}
 	return focus
-}
-
-func formatTrendWindowKind(kind string) string {
-	if kind == "since-commit" {
-		return "--since-commit"
-	}
-	return "a rolling lookback"
 }
 
 func formatTrendLookback(seconds int64) string {
@@ -156,15 +56,7 @@ func formatTrendLookback(seconds int64) string {
 	return duration.String()
 }
 
-func formatTrendScopeValue(value, empty string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		value = empty
-	}
-	return fmt.Sprintf("%q", value)
-}
-
-func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointName string) {
+func printSessionTrend(baseline, current codexSessionInsightsReport, baselineLabel string) {
 	base := baseline.Summary
 	now := current.Summary
 	baseRework := base.DeliveryRework
@@ -177,60 +69,90 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			Baseline:          ratio(float64(base.CompletedSessions), float64(base.Sessions)),
 			Current:           ratio(float64(now.CompletedSessions), float64(now.Sessions)),
 			PercentageDisplay: true,
+			BaselineSample:    base.Sessions,
+			CurrentSample:     now.Sessions,
+			MinimumSample:     1,
 		},
 		{
-			Name:          "tool roundtrips / session",
-			Baseline:      ratio(float64(base.ToolCalls), float64(base.Sessions)),
-			Current:       ratio(float64(now.ToolCalls), float64(now.Sessions)),
-			LowerIsBetter: true,
+			Name:           "tool roundtrips / session",
+			Baseline:       ratio(float64(base.ToolCalls), float64(base.Sessions)),
+			Current:        ratio(float64(now.ToolCalls), float64(now.Sessions)),
+			LowerIsBetter:  true,
+			BaselineSample: base.Sessions,
+			CurrentSample:  now.Sessions,
+			MinimumSample:  1,
 		},
 		{
-			Name:          "cross-call transitions / task",
-			Baseline:      ratio(float64(totalCrossCallTransitions(base.CrossCallTransitions)), float64(baseline.Outcomes.ToolUsingCompleted)),
-			Current:       ratio(float64(totalCrossCallTransitions(now.CrossCallTransitions)), float64(current.Outcomes.ToolUsingCompleted)),
-			LowerIsBetter: true,
+			Name:           "cross-call transitions / task",
+			Baseline:       ratio(float64(totalCrossCallTransitions(base.CrossCallTransitions)), float64(baseline.Outcomes.ToolUsingCompleted)),
+			Current:        ratio(float64(totalCrossCallTransitions(now.CrossCallTransitions)), float64(current.Outcomes.ToolUsingCompleted)),
+			LowerIsBetter:  true,
+			BaselineSample: baseline.Outcomes.ToolUsingCompleted,
+			CurrentSample:  current.Outcomes.ToolUsingCompleted,
+			MinimumSample:  1,
 		},
 		{
-			Name:          "repeated transitions / task",
-			Baseline:      ratio(float64(repeatedCrossCallTransitions(base.CrossCallTransitions)), float64(baseline.Outcomes.ToolUsingCompleted)),
-			Current:       ratio(float64(repeatedCrossCallTransitions(now.CrossCallTransitions)), float64(current.Outcomes.ToolUsingCompleted)),
-			LowerIsBetter: true,
+			Name:           "repeated transitions / task",
+			Baseline:       ratio(float64(repeatedCrossCallTransitions(base.CrossCallTransitions)), float64(baseline.Outcomes.ToolUsingCompleted)),
+			Current:        ratio(float64(repeatedCrossCallTransitions(now.CrossCallTransitions)), float64(current.Outcomes.ToolUsingCompleted)),
+			LowerIsBetter:  true,
+			BaselineSample: baseline.Outcomes.ToolUsingCompleted,
+			CurrentSample:  current.Outcomes.ToolUsingCompleted,
+			MinimumSample:  1,
 		},
 		{
-			Name:          "rapid polls / task",
-			Baseline:      ratio(float64(totalWaitCalls(base.RapidPolls)), float64(baseline.Outcomes.ToolUsingCompleted)),
-			Current:       ratio(float64(totalWaitCalls(now.RapidPolls)), float64(current.Outcomes.ToolUsingCompleted)),
-			LowerIsBetter: true,
+			Name:           "rapid polls / task",
+			Baseline:       ratio(float64(totalWaitCalls(base.RapidPolls)), float64(baseline.Outcomes.ToolUsingCompleted)),
+			Current:        ratio(float64(totalWaitCalls(now.RapidPolls)), float64(current.Outcomes.ToolUsingCompleted)),
+			LowerIsBetter:  true,
+			BaselineSample: baseline.Outcomes.ToolUsingCompleted,
+			CurrentSample:  current.Outcomes.ToolUsingCompleted,
+			MinimumSample:  1,
 		},
 		{
-			Name:          "progress stalls / task",
-			Baseline:      ratio(float64(totalWaitCalls(base.ProgressStalls)), float64(baseline.Outcomes.ToolUsingCompleted)),
-			Current:       ratio(float64(totalWaitCalls(now.ProgressStalls)), float64(current.Outcomes.ToolUsingCompleted)),
-			LowerIsBetter: true,
+			Name:           "progress stalls / task",
+			Baseline:       ratio(float64(totalWaitCalls(base.ProgressStalls)), float64(baseline.Outcomes.ToolUsingCompleted)),
+			Current:        ratio(float64(totalWaitCalls(now.ProgressStalls)), float64(current.Outcomes.ToolUsingCompleted)),
+			LowerIsBetter:  true,
+			BaselineSample: baseline.Outcomes.ToolUsingCompleted,
+			CurrentSample:  current.Outcomes.ToolUsingCompleted,
+			MinimumSample:  1,
 		},
 		{
-			Name:          "visible output tokens / call",
-			Baseline:      ratio(float64(base.ToolOutputTokens), float64(base.ToolCalls)),
-			Current:       ratio(float64(now.ToolOutputTokens), float64(now.ToolCalls)),
-			LowerIsBetter: true,
+			Name:           "visible output tokens / call",
+			Baseline:       ratio(float64(base.ToolOutputTokens), float64(base.ToolCalls)),
+			Current:        ratio(float64(now.ToolOutputTokens), float64(now.ToolCalls)),
+			LowerIsBetter:  true,
+			BaselineSample: base.ToolCalls,
+			CurrentSample:  now.ToolCalls,
+			MinimumSample:  1,
 		},
 		{
-			Name:          "failures / 1k calls",
-			Baseline:      1000 * ratio(float64(base.FailedToolCalls), float64(base.ToolCalls)),
-			Current:       1000 * ratio(float64(now.FailedToolCalls), float64(now.ToolCalls)),
-			LowerIsBetter: true,
+			Name:           "failures / 1k calls",
+			Baseline:       1000 * ratio(float64(base.FailedToolCalls), float64(base.ToolCalls)),
+			Current:        1000 * ratio(float64(now.FailedToolCalls), float64(now.ToolCalls)),
+			LowerIsBetter:  true,
+			BaselineSample: base.ToolCalls,
+			CurrentSample:  now.ToolCalls,
+			MinimumSample:  1,
 		},
 		{
-			Name:          "truncations / 1k calls",
-			Baseline:      1000 * ratio(float64(base.TruncatedToolCalls), float64(base.ToolCalls)),
-			Current:       1000 * ratio(float64(now.TruncatedToolCalls), float64(now.ToolCalls)),
-			LowerIsBetter: true,
+			Name:           "truncations / 1k calls",
+			Baseline:       1000 * ratio(float64(base.TruncatedToolCalls), float64(base.ToolCalls)),
+			Current:        1000 * ratio(float64(now.TruncatedToolCalls), float64(now.ToolCalls)),
+			LowerIsBetter:  true,
+			BaselineSample: base.ToolCalls,
+			CurrentSample:  now.ToolCalls,
+			MinimumSample:  1,
 		},
 		{
-			Name:          "compactions / session",
-			Baseline:      ratio(float64(base.Compactions), float64(base.Sessions)),
-			Current:       ratio(float64(now.Compactions), float64(now.Sessions)),
-			LowerIsBetter: true,
+			Name:           "compactions / session",
+			Baseline:       ratio(float64(base.Compactions), float64(base.Sessions)),
+			Current:        ratio(float64(now.Compactions), float64(now.Sessions)),
+			LowerIsBetter:  true,
+			BaselineSample: base.Sessions,
+			CurrentSample:  now.Sessions,
+			MinimumSample:  1,
 		},
 		{
 			Name:              "pre-delivery test evidence",
@@ -307,7 +229,7 @@ func printSessionTrend(baseline, current codexSessionInsightsReport, checkpointN
 			LowerIsBetter: true,
 		})
 	}
-	fmt.Printf("\nPerformance comparison against %q:\n", checkpointName)
+	fmt.Printf("\nPerformance comparison against %q:\n", baselineLabel)
 	printCompletedTaskTrend(baseline, current)
 	matchedMetrics := printMatchedPerformanceTrend(baseline, current)
 	matchedQuality := printMatchedQualityTrend(baseline, current)
@@ -859,7 +781,7 @@ func printCompletedTaskTrend(baseline, current codexSessionInsightsReport) {
 		unchanged,
 	)
 	if baseline.SchemaVersion < 30 && current.SchemaVersion >= 30 {
-		fmt.Printf("Create a new checkpoint with this Muninn version to compare cached input, uncached input, and model output separately.\n")
+		fmt.Printf("The older comparison schema cannot separate cached input, uncached input, and model output.\n")
 	}
 }
 

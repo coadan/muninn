@@ -28,9 +28,8 @@ This runs the test suite and installs `muninn` into `$(go env GOPATH)/bin`.
 ```bash
 muninn analyze --repo .
 muninn analyze --repo . --since 24h
-muninn analyze --repo . --since 72h --compare-previous
-muninn checkpoint before-change --repo .
-muninn analyze --repo . --compare before-change
+muninn analyze --repo . --since 1d --compare previous
+muninn analyze --repo . --since 7d --compare previous
 ```
 
 The default report leads with current findings. Narrow it when investigating a
@@ -43,11 +42,12 @@ muninn analyze --repo . --focus quality
 muninn analyze --repo . --details
 ```
 
-`--compare-previous` compares the current rolling lookback with the immediately
-preceding window of the same size. The cohorts do not overlap, and the
-comparison leads with completed-task duration and outer tool roundtrips. When
-enough shared evidence exists, it also compares matched agent, model, reasoning
-effort, and task-family cohorts and gives a quality-adjusted verdict.
+`--compare previous` compares the current rolling lookback with the immediately
+preceding window of the same size. Choose `--since 1d` after a day of work or
+`--since 7d` after a week. The cohorts do not overlap, and the comparison leads
+with completed-task duration and outer tool roundtrips. When enough shared
+evidence exists, it also compares matched agent, model, reasoning effort, and
+task-family cohorts and gives a quality-adjusted verdict.
 
 Muninn does not report prompts, messages, raw commands, raw tool output,
 absolute paths, secrets, or provider session identifiers.
