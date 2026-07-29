@@ -52,7 +52,7 @@ func newCodexAggregateMetrics() codexAggregateMetrics {
 		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexOwnedOperationMetrics{},
 		OwnedFlags:                   map[string]codexOccurrenceMetrics{},
-		OwnedFlagCalls:               map[string]codexOccurrenceMetrics{},
+		OwnedFlagEligibleCalls:       map[string]codexOccurrenceMetrics{},
 		OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
 		ReadTargets:                  map[string]codexTargetMetrics{},
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
@@ -165,7 +165,7 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	}
 	addCodexOwnedOperationMetrics(target.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguous)
 	addCodexOccurrenceMetrics(target.OwnedFlags, record.OwnedFlags)
-	addCodexOccurrenceMetrics(target.OwnedFlagCalls, record.OwnedFlagCalls)
+	addCodexOccurrenceMetrics(target.OwnedFlagEligibleCalls, record.OwnedFlagEligibleCalls)
 	addCodexFailureContexts(target.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
 	addCodexTargetMetrics(target.ReadTargets, record.ReadTargets)
 	target.InlineOrchestrationCalls += record.InlineOrchestrationCalls

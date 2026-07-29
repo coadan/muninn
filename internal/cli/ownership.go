@@ -151,13 +151,14 @@ func (catalog ownershipCatalog) classifyFlags(invocations []ownedCommandInvocati
 			if !catalog.invocationOwnsFlags(toolID, invocation) {
 				continue
 			}
+			scope := catalog.flagScope(toolID, invocation)
 			fixedLauncherFlags := catalog.fixedOperationOnlyFlags(toolID, invocation)
 			for _, argument := range invocation.Args {
 				if flag := ownedLongFlag(argument); flag != "" {
 					if fixedLauncherFlags[flag] {
 						continue
 					}
-					flags = appendUniqueString(flags, toolID+"/"+flag)
+					flags = appendUniqueString(flags, scope+"/"+flag)
 				}
 			}
 		}
@@ -193,19 +194,33 @@ func (catalog ownershipCatalog) fixedOperationOnlyFlags(
 	return flags
 }
 
-func (catalog ownershipCatalog) classifyFlagTools(invocations []ownedCommandInvocation) []string {
-	var tools []string
+func (catalog ownershipCatalog) classifyFlagScopes(invocations []ownedCommandInvocation) []string {
+	var scopes []string
 	for _, invocation := range invocations {
 		executable := strings.ToLower(filepath.Base(invocation.Executable))
 		for _, toolID := range catalog.byExecutable[executable] {
 			if !catalog.invocationOwnsFlags(toolID, invocation) {
 				continue
 			}
-			tools = appendUniqueString(tools, toolID)
+			scopes = appendUniqueString(scopes, catalog.flagScope(toolID, invocation))
 		}
 	}
-	sort.Strings(tools)
-	return tools
+	sort.Strings(scopes)
+	return scopes
+}
+
+func (catalog ownershipCatalog) flagScope(toolID string, invocation ownedCommandInvocation) string {
+	var matched []string
+	prefix := toolID + "/"
+	for _, operation := range catalog.classifyOperations([]ownedCommandInvocation{invocation}) {
+		if strings.HasPrefix(operation, prefix) {
+			matched = append(matched, operation)
+		}
+	}
+	if len(matched) == 1 {
+		return matched[0]
+	}
+	return toolID
 }
 
 func (catalog ownershipCatalog) invocationOwnsFlags(toolID string, invocation ownedCommandInvocation) bool {

@@ -64,7 +64,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			selectorDigests               string
 			ownedOperations               string
 			ownedFlags                    string
-			ownedFlagTools                string
+			ownedFlagScopes               string
 			operationTask                 string
 			operationAttributionAmbiguous int
 			operationContinues            int
@@ -103,7 +103,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&selectorDigests,
 			&ownedOperations,
 			&ownedFlags,
-			&ownedFlagTools,
+			&ownedFlagScopes,
 			&operationTask,
 			&operationAttributionAmbiguous,
 			&operationContinues,
@@ -148,7 +148,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		_ = json.Unmarshal([]byte(selectorDigests), &event.SelectorDigests)
 		_ = json.Unmarshal([]byte(ownedOperations), &event.OwnedOperations)
 		_ = json.Unmarshal([]byte(ownedFlags), &event.OwnedFlags)
-		_ = json.Unmarshal([]byte(ownedFlagTools), &event.OwnedFlagTools)
+		_ = json.Unmarshal([]byte(ownedFlagScopes), &event.OwnedFlagScopes)
 		event.OperationTask = operationTask
 		_ = json.Unmarshal([]byte(targets), &event.Targets)
 		_ = json.Unmarshal([]byte(workingDirectories), &event.WorkingDirectories)
