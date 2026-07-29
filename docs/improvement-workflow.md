@@ -40,7 +40,10 @@ single reporting unit.
 
 Automatic comparisons use the same repository, lookback, task filter, archive
 selection, and focus for both adjacent windows, removing manual cohort-matching
-failure modes.
+failure modes. Intervention trends use stable IDs; supporting evidence may
+change without turning one persistent improvement opportunity into artificial
+resolved-and-new findings. Use `--details` to inspect those constituent
+finding transitions.
 
 Trend output leads with completed tool-task cost and tail outcomes. Cached
 input, uncached input, and model output remain separate when no reliable
