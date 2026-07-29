@@ -372,7 +372,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		workflows[workflow] = evidence
 	}
 	for workflow, metrics := range workflows {
-		if metrics.Sessions < 3 || metrics.Count < 5 {
+		if metrics.Sessions < 3 || metrics.Count < max(5, metrics.Sessions*3) {
 			continue
 		}
 		evidence := fmt.Sprintf("%s transitions across at least %s sessions",

@@ -51,6 +51,11 @@ definite calls. Muninn retains only the normalized flag name, such as `json`;
 it never retains the flag value. `--help` and `--version` are excluded because
 they describe discovery rather than a workflow default.
 
+Cross-call workflow findings require at least three matching transitions per
+affected session as well as recurrence across three sessions. A normal
+status-then-diff or search-then-read pair therefore remains evidence without
+becoming an interface intervention.
+
 ## Intervention construction
 
 An intervention contains:

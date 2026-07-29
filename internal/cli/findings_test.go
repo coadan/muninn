@@ -348,6 +348,26 @@ func TestBuildSessionFindingsShowsDominantWorkflowTransitions(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsRequiresMaterialWorkflowRepetition(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.CrossCallTransitions["git inspect -> git inspect"] = codexTransitionMetrics{
+		Count:    866,
+		Sessions: 344,
+	}
+	if findings := buildSessionFindings(report, defaultRepositoryConfig()); len(findings) != 0 {
+		t.Fatalf("ordinary change inspection produced workflow finding: %#v", findings)
+	}
+
+	report.Summary.CrossCallTransitions["git inspect -> git inspect"] = codexTransitionMetrics{
+		Count:    1_032,
+		Sessions: 344,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Title != "repeated cross-call workflow: change inspection" {
+		t.Fatalf("material change inspection workflow missing: %#v", findings)
+	}
+}
+
 func TestBuildSessionFindingsShowsBoundedOwnedOperationFailureReasons(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	latestCall := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
