@@ -557,6 +557,7 @@ func TestConcurrentBatchOversizedOutputFindingPreservesBatching(t *testing.T) {
 	}
 	finding := outputFindings[0]
 	if finding.Title != "concurrent tool batches exceed the shared output budget" ||
+		finding.Confidence != "low" ||
 		!strings.Contains(finding.Action, "Keep independent calls concurrent") ||
 		!strings.Contains(finding.Action, "inspect every partial result") {
 		t.Fatalf("concurrent batch guidance mismatch: %#v", finding)
@@ -588,9 +589,30 @@ func TestOversizedOutputFindingRequiresRecurrenceOrSevereCall(t *testing.T) {
 	)
 	if err != nil || len(findings) != 1 ||
 		findings[0].Signal != "output-cost/isolated-severe" ||
+		findings[0].Confidence != "low" ||
 		!strings.Contains(findings[0].Evidence, "1 call") ||
 		!strings.Contains(findings[0].Evidence, "1 session") {
 		t.Fatalf("isolated severe output finding mismatch: findings=%#v err=%v", findings, err)
+	}
+
+	report.Summary.OversizedOutputs["cross-session recurring"] = codexOversizedOutputMetrics{
+		Calls: 2, OutputBytes: 70_000, MaxOutputBytes: 35_000, Sessions: 2,
+	}
+	findings, err = filterSessionFindings(
+		buildSessionFindings(report, defaultRepositoryConfig()),
+		"output",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crossSession sessionFinding
+	for _, finding := range findings {
+		if finding.Signal == "output-cost/cross-session-recurring" {
+			crossSession = finding
+		}
+	}
+	if crossSession.Confidence != "medium" {
+		t.Fatalf("cross-session output confidence mismatch: %#v", crossSession)
 	}
 }
 
