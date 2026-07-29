@@ -175,40 +175,6 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	}
 }
 
-func TestSessionStoreSavesPrivacySafeCheckpoint(t *testing.T) {
-	store, err := openSessionStore(filepath.Join(t.TempDir(), "muninn.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
-	ctx := context.Background()
-	report := newSessionInsightsReport(
-		"codex",
-		[]string{"/private/provider/sessions"},
-		"/private/repository",
-		time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC),
-	)
-	report.Summary.Sessions = 2
-	if err := store.saveCheckpoint(ctx, "before", "codex", "repository-digest", report); err != nil {
-		t.Fatalf("save checkpoint: %v", err)
-	}
-	loaded, err := store.loadCheckpoint(ctx, "before", "codex", "repository-digest")
-	if err != nil {
-		t.Fatalf("load checkpoint: %v", err)
-	}
-	if loaded.Summary.Sessions != 2 {
-		t.Fatalf("checkpoint summary missing: %#v", loaded.Summary)
-	}
-	raw, err := json.Marshal(loaded)
-	if err != nil {
-		t.Fatalf("marshal loaded checkpoint: %v", err)
-	}
-	if string(raw) == "" || containsAny(string(raw), "/private/repository", "/private/provider/sessions") {
-		t.Fatalf("checkpoint exposed local paths: %s", raw)
-	}
-}
-
 func TestSessionStoreMigrationReindexesNormalizerChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "muninn.db")
 	store, err := openSessionStore(path)

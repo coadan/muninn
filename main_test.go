@@ -31,40 +31,8 @@ func writeCodexSessionFixture(t *testing.T, dir, name string, events []any) stri
 	return path
 }
 
-func TestCheckpointAnalyzeArgsUsesQuietSharedAnalysisPath(t *testing.T) {
-	got, err := checkpointAnalyzeArgs([]string{
-		"before-tooling-change",
-		"--repo", ".",
-		"--since", "14d",
-	})
-	if err != nil {
-		t.Fatalf("checkpointAnalyzeArgs returned error: %v", err)
-	}
-	want := []string{
-		"--repo", ".",
-		"--since", "14d",
-		"--checkpoint", "before-tooling-change",
-		"--quiet",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("checkpoint analyze args=%q, want %q", got, want)
-	}
-}
-
-func TestCheckpointAnalyzeArgsRejectsManagedFlags(t *testing.T) {
-	for _, args := range [][]string{
-		{"name", "--checkpoint", "other"},
-		{"name", "--quiet"},
-		{"--repo", "."},
-	} {
-		if _, err := checkpointAnalyzeArgs(args); err == nil {
-			t.Fatalf("checkpointAnalyzeArgs(%q) unexpectedly succeeded", args)
-		}
-	}
-}
-
 func TestResolveAnalyzeOutputSelectionComposesDetailsWithOperations(t *testing.T) {
-	selection, err := resolveAnalyzeOutputSelection(false, false, true, "", "bwb", 10, false)
+	selection, err := resolveAnalyzeOutputSelection(true, "", "bwb", 10, false)
 	if err != nil {
 		t.Fatalf("resolve operations details output: %v", err)
 	}
@@ -72,7 +40,7 @@ func TestResolveAnalyzeOutputSelectionComposesDetailsWithOperations(t *testing.T
 		t.Fatalf("operations details limit=%d, want all rows", selection.OperationLimit)
 	}
 
-	selection, err = resolveAnalyzeOutputSelection(false, false, true, "", "bwb", 4, true)
+	selection, err = resolveAnalyzeOutputSelection(true, "", "bwb", 4, true)
 	if err != nil {
 		t.Fatalf("resolve explicitly bounded operations details output: %v", err)
 	}
@@ -82,7 +50,7 @@ func TestResolveAnalyzeOutputSelectionComposesDetailsWithOperations(t *testing.T
 }
 
 func TestResolveAnalyzeOutputSelectionComposesDetailsWithFocus(t *testing.T) {
-	selection, err := resolveAnalyzeOutputSelection(false, false, true, "structure", "", 10, false)
+	selection, err := resolveAnalyzeOutputSelection(true, "structure", "", 10, false)
 	if err != nil {
 		t.Fatalf("resolve focused details output: %v", err)
 	}
@@ -91,33 +59,9 @@ func TestResolveAnalyzeOutputSelectionComposesDetailsWithFocus(t *testing.T) {
 	}
 }
 
-func TestResolveAnalyzeOutputSelectionRetainsIncompatibleModeErrors(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		overview   bool
-		findings   bool
-		details    bool
-		focus      string
-		operations string
-	}{
-		{name: "multiple views", overview: true, details: true},
-		{name: "overview focus", overview: true, focus: "structure"},
-		{name: "operations focus", operations: "bwb", focus: "structure"},
-		{name: "operations findings", operations: "bwb", findings: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if _, err := resolveAnalyzeOutputSelection(
-				test.overview,
-				test.findings,
-				test.details,
-				test.focus,
-				test.operations,
-				10,
-				false,
-			); err == nil {
-				t.Fatal("expected incompatible output modes to fail")
-			}
-		})
+func TestResolveAnalyzeOutputSelectionRejectsOperationWithFocus(t *testing.T) {
+	if _, err := resolveAnalyzeOutputSelection(false, "structure", "bwb", 10, false); err == nil {
+		t.Fatal("expected --operation with --focus to fail")
 	}
 }
 

@@ -153,14 +153,16 @@ func TestBuildSessionFindingsFlagsOneVeryLongCLIInput(t *testing.T) {
 		MaxBytes: 2300,
 	}
 	report.Tasks = []codexTaskInsights{{
-		Task:                        "pressure-proof",
-		InlineOrchestrationCalls:    1,
-		InlineOrchestrationBytes:    2300,
-		InlineOrchestrationMaxBytes: 2300,
-		InlineOrchestrationSessions: 1,
-		InlineOrchestrationByTool:   map[string]codexInlineMetrics{},
-		InlineOrchestrationByFamily: map[string]codexInlineMetrics{},
-		InlineOrchestrationByOwner:  map[string]codexInlineMetrics{},
+		Task: "pressure-proof",
+		codexAggregateMetrics: codexAggregateMetrics{
+			InlineOrchestrationCalls:    1,
+			InlineOrchestrationBytes:    2300,
+			InlineOrchestrationMaxBytes: 2300,
+			InlineOrchestrationSessions: 1,
+			InlineOrchestrationByTool:   map[string]codexInlineMetrics{},
+			InlineOrchestrationByFamily: map[string]codexInlineMetrics{},
+			InlineOrchestrationByOwner:  map[string]codexInlineMetrics{},
+		},
 	}}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 ||
@@ -374,15 +376,17 @@ func TestBuildSessionFindingsFlagsMaterialOwnedOperationOutput(t *testing.T) {
 func TestBuildSessionFindingsReportsInputCostAndProgressStalls(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Tasks = []codexTaskInsights{{
-		Task:     "expensive-task",
-		Sessions: 4,
-		Tokens: codexTokenUsage{
-			InputTokens:         1_200_000,
-			CachedInputTokens:   400_000,
-			UncachedInputTokens: 800_000,
+		Task: "expensive-task",
+		codexAggregateMetrics: codexAggregateMetrics{
+			Sessions: 4,
+			Tokens: codexTokenUsage{
+				InputTokens:         1_200_000,
+				CachedInputTokens:   400_000,
+				UncachedInputTokens: 800_000,
+			},
+			FreshTokens: 900_000,
+			Compactions: 2,
 		},
-		FreshTokens: 900_000,
-		Compactions: 2,
 	}}
 	report.Summary.ProgressStalls["bwb/api-start"] = codexWaitMetrics{
 		Calls:    3,

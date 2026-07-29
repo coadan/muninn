@@ -8,7 +8,8 @@ and reports patterns that may increase cost per completed task.
 ```bash
 muninn analyze --repo .
 muninn analyze --repo . --since 24h
-muninn analyze --repo . --since 72h --compare-previous
+muninn analyze --repo . --since 1d --compare previous
+muninn analyze --repo . --since 7d --compare previous
 muninn analyze --repo . --since-commit HEAD~3
 muninn analyze --repo . --task task-id
 muninn analyze --repo . --since 14d --include-archived
@@ -22,22 +23,20 @@ events. This keeps long-lived active work in the selected cohort.
 
 The default human report is a findings-first action queue.
 
-- `--overview` shows compact family totals.
 - `--details` adds bounded command, transition, source-target, failure, and
   output rankings.
 - `--focus friction` explicitly selects the default broad action queue.
 - `--focus tooling`, `instructions`, `interface`, `structure`, `discovery`,
   `failures`, `loops`, `output`, or `quality` narrows the report.
-- `--operations <tool-or-operation>` drills into configured locally controlled
+- `--operation <tool-or-operation>` drills into configured locally controlled
   tooling without loading unrelated findings.
 
 Examples:
 
 ```bash
-muninn analyze --repo . --overview
 muninn analyze --repo . --focus output
-muninn analyze --repo . --operations repository-cli
-muninn analyze --repo . --operations repository-cli/test --details
+muninn analyze --repo . --operation repository-cli
+muninn analyze --repo . --operation repository-cli/test --details
 ```
 
 ## Failure timelines
@@ -81,14 +80,15 @@ failures remain available in `--details` and JSON.
 
 ## Compare adjacent periods
 
-Use `--compare-previous` for a non-overlapping performance comparison without
-creating a checkpoint first:
+Use `--compare previous` for an automatically matched, non-overlapping
+performance comparison:
 
 ```bash
-muninn analyze --repo . --since 72h --compare-previous
+muninn analyze --repo . --since 1d --compare previous
+muninn analyze --repo . --since 7d --compare previous
 ```
 
-This compares the preceding 72 hours with the latest 72 hours. It reports
+This compares the preceding horizon with the latest horizon. It reports
 completed-task duration and outer tool roundtrips at p50 and p90, plus
 cross-call transitions, repeated same-family transitions, rapid polls, and
 progress stalls normalized by completed tool tasks. Quality comparison includes
@@ -125,7 +125,7 @@ an expensive owner, review/rework, or downstream risk. Edit frequency alone is
 demand, not friction; do not restructure a healthy frequently edited owner
 solely because it is popular.
 
-Actionable hotspot classes also feed `--findings`. Expensive owners require at
+Actionable hotspot classes also feed the default findings report. Expensive owners require at
 least three completed tasks and a median of at least 50 roundtrips. Rework and
 downstream-risk findings require at least two attributed observations. Healthy
 demand never creates a finding. Each finding has a stable target-specific
@@ -151,5 +151,3 @@ muninn analyze --repo . --refresh
 muninn analyze --repo . --db /path/to/index.sqlite
 muninn analyze --repo . --no-cache
 ```
-
-`muninn sessions` remains a compatibility alias for `muninn analyze`.

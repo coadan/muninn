@@ -12,18 +12,20 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 		Provider:      "codex",
 		Since:         "2026-07-24T00:00:00Z",
 		Summary: codexSessionInsightsSummary{
-			Sessions: 3,
-			OwnedTooling: map[string]codexToolMetrics{
-				"bwb": {Calls: 12},
-			},
-			OwnedOperations: map[string]codexOwnedOperationMetrics{
-				"bwb/status":  {Calls: 8, OutputBytes: 800},
-				"bwb/test":    {Calls: 2, FailedCalls: 1, OutputBytes: 200},
-				"bwb/inspect": {Calls: 2, TruncatedCalls: 1, OutputBytes: 500},
-				"heimdal/run": {Calls: 7, FailedCalls: 2, OutputBytes: 900},
-			},
-			OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{
-				"bwb/test": {"test harness protocol": {Count: 1, Sessions: 1}},
+			codexAggregateMetrics: codexAggregateMetrics{
+				Sessions: 3,
+				OwnedTooling: map[string]codexToolMetrics{
+					"bwb": {Calls: 12},
+				},
+				OwnedOperations: map[string]codexOwnedOperationMetrics{
+					"bwb/status":  {Calls: 8, OutputBytes: 800},
+					"bwb/test":    {Calls: 2, FailedCalls: 1, OutputBytes: 200},
+					"bwb/inspect": {Calls: 2, TruncatedCalls: 1, OutputBytes: 500},
+					"heimdal/run": {Calls: 7, FailedCalls: 2, OutputBytes: 900},
+				},
+				OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{
+					"bwb/test": {"test harness protocol": {Count: 1, Sessions: 1}},
+				},
 			},
 		},
 		operationTasks: map[string]map[string]codexOwnedOperationMetrics{
@@ -103,7 +105,7 @@ func TestBuildOwnedOperationsDrilldownRejectsUnknownOperation(t *testing.T) {
 		"bwb/missing",
 		10,
 	)
-	if err == nil || !strings.Contains(err.Error(), `unknown --operations operation "bwb/missing"`) {
+	if err == nil || !strings.Contains(err.Error(), `unknown --operation "bwb/missing"`) {
 		t.Fatalf("expected bounded unknown-operation error, got %v", err)
 	}
 }

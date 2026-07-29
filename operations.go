@@ -40,7 +40,7 @@ func buildOwnedOperationsDrilldown(
 ) (ownedOperationsDrilldown, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
-		return ownedOperationsDrilldown{}, errors.New("--operations requires a locally owned tool ID")
+		return ownedOperationsDrilldown{}, errors.New("--operation requires a locally owned tool ID")
 	}
 	toolID := selector
 	operationFilter := ""
@@ -48,7 +48,7 @@ func buildOwnedOperationsDrilldown(
 		toolID = candidateTool
 		operationFilter = selector
 		if strings.TrimSpace(candidateOperation) == "" {
-			return ownedOperationsDrilldown{}, fmt.Errorf("invalid --operations selector %q", selector)
+			return ownedOperationsDrilldown{}, fmt.Errorf("invalid --operation selector %q", selector)
 		}
 	}
 	var selected *ownedToolConfig
@@ -68,7 +68,7 @@ func buildOwnedOperationsDrilldown(
 			return ownedOperationsDrilldown{}, errors.New("repository config has no locally owned tools")
 		}
 		return ownedOperationsDrilldown{}, fmt.Errorf(
-			"unknown --operations tool %q (available: %s)",
+			"unknown --operation tool %q (available: %s)",
 			toolID,
 			strings.Join(available, ", "),
 		)
@@ -83,7 +83,7 @@ func buildOwnedOperationsDrilldown(
 		}
 		if !found {
 			return ownedOperationsDrilldown{}, fmt.Errorf(
-				"unknown --operations operation %q for tool %q",
+				"unknown --operation %q for tool %q",
 				operationFilter,
 				toolID,
 			)

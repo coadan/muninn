@@ -5,23 +5,17 @@ loop.
 
 ## Compare an intervention
 
-1. Save the current cohort.
+1. Select a horizon that matches the intervention: one day for concentrated
+   work or one week for slower accumulation.
 2. Select one recent cross-session finding.
 3. Improve the smallest likely owner: tooling, instructions, an agent-facing
    interface, verification, or source structure.
-4. Analyze the same cohort and compare it with the checkpoint.
+4. Compare the current horizon with the automatically matched preceding one.
 5. Suppress only findings confirmed to be false positives.
 
 ```bash
-muninn checkpoint before-change --repo . --since 14d
-muninn analyze --repo . --since 14d --compare before-change
-```
-
-For a quick directional check without a saved baseline, compare adjacent,
-non-overlapping windows:
-
-```bash
-muninn analyze --repo . --since 72h --compare-previous
+muninn analyze --repo . --since 1d --compare previous
+muninn analyze --repo . --since 7d --compare previous
 ```
 
 Treat a faster period as an improvement only when delivery quality is stable or
@@ -44,9 +38,9 @@ signals show whether the recommendation is backed by navigation, task cost,
 delivery quality, or several of these at once; the primary finding remains the
 single reporting unit.
 
-Comparisons require the same lookback or resolved `--since-commit` boundary,
-task filter, archive selection, and focus. Muninn rejects mismatched cohorts
-instead of presenting them as improvement or regression.
+Automatic comparisons use the same repository, lookback, task filter, archive
+selection, and focus for both adjacent windows, removing manual cohort-matching
+failure modes.
 
 Trend output leads with completed tool-task cost and tail outcomes. Cached
 input, uncached input, and model output remain separate when no reliable
