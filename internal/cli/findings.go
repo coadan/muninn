@@ -19,6 +19,7 @@ type sessionFinding struct {
 	Action     string   `json:"action"`
 	Count      int      `json:"count,omitempty"`
 	Sessions   int      `json:"sessions,omitempty"`
+	Repository string   `json:"repository,omitempty"`
 	Target     string   `json:"target,omitempty"`
 	LastSeen   string   `json:"lastSeen,omitempty"`
 	Lever      string   `json:"lever"`
@@ -1322,7 +1323,7 @@ func boundedInspectFallbackMetrics(transitions map[string]codexTransitionMetrics
 }
 
 func sessionFindingSignal(finding sessionFinding) string {
-	target := strings.TrimSpace(finding.Target)
+	target := sessionFindingTargetIdentity(finding)
 	switch {
 	case strings.HasPrefix(finding.Title, "high input-token cost in task: "):
 		return signalID("session-loop", "input-cost", target)
@@ -1784,7 +1785,7 @@ func selectRepositoryScopedCodeStructureFindings(findings []sessionFinding, limi
 		if finding.Category != "code-structure" {
 			continue
 		}
-		scope := sessionFindingRepositoryScope(finding.Target)
+		scope := sessionFindingRepositoryScope(finding)
 		best, exists := bestByScope[scope]
 		if !exists || sessionFindingHigherImpact(finding, findings[best]) {
 			bestByScope[scope] = index
@@ -1837,8 +1838,11 @@ func sessionFindingHigherImpact(left, right sessionFinding) bool {
 	return left.LastSeen > right.LastSeen
 }
 
-func sessionFindingRepositoryScope(target string) string {
-	target = strings.TrimPrefix(filepath.ToSlash(filepath.Clean(target)), "./")
+func sessionFindingRepositoryScope(finding sessionFinding) string {
+	if repository := strings.TrimSpace(finding.Repository); repository != "" {
+		return repository
+	}
+	target := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(finding.Target)), "./")
 	parts := strings.Split(target, "/")
 	if len(parts) >= 3 && parts[0] == ".workbench" && parts[1] == "repos" {
 		return parts[2]
@@ -1882,10 +1886,31 @@ func printSessionFindings(findings []sessionFinding, limit int) {
 }
 
 func sessionFindingDisplayTarget(finding sessionFinding) string {
-	if finding.Target == "" || strings.Contains(finding.Title, finding.Target) {
+	target := sessionFindingTargetIdentity(finding)
+	if target == "" || strings.Contains(finding.Title, target) {
 		return ""
 	}
-	return " · " + finding.Target
+	return " · " + target
+}
+
+func sessionFindingTargetIdentity(finding sessionFinding) string {
+	target := strings.TrimSpace(finding.Target)
+	repository := strings.TrimSpace(finding.Repository)
+	if repository == "" {
+		return target
+	}
+	if target == "" {
+		return repository
+	}
+	return repository + "/" + target
+}
+
+func splitManagedRepositoryTarget(target string) (repository, relative string, ok bool) {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(target)), "/")
+	if len(parts) < 4 || parts[0] != ".workbench" || parts[1] != "repos" {
+		return "", target, false
+	}
+	return parts[2], strings.Join(parts[3:], "/"), true
 }
 
 func formatSessionFindingAge(lastSeen string, now time.Time) string {
