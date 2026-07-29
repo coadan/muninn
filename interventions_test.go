@@ -120,6 +120,30 @@ func TestBuildSessionInterventionsRanksActionabilityBeforeRawCategoryScore(t *te
 	}
 }
 
+func TestBuildSessionInterventionsRanksRecurringDiscoveryAboveOneSessionCompaction(t *testing.T) {
+	findings := []sessionFinding{
+		{
+			Category: "session-loop", Signal: "session-loop/context-compactions-indicate-long-or-looping-sessions",
+			Title:   "context compactions indicate long or looping sessions",
+			Control: "instructions", Lever: "instructions/docs", Confidence: "low", score: 10_000,
+		},
+		{
+			Category: "discovery", Signal: "discovery/bundled-search",
+			Title:   "bundled search/read discovery remains output-heavy",
+			Control: "repository", Lever: "tooling", Confidence: "medium", score: 500,
+		},
+	}
+
+	got := buildSessionInterventions(findings)
+	if len(got) != 2 ||
+		got[0].ID != "intervention/workflow/discovery" ||
+		got[0].Priority != "medium" ||
+		got[1].ID != "intervention/session/compaction" ||
+		got[1].Priority != "low" {
+		t.Fatalf("recurrence did not drive intervention order: %#v", got)
+	}
+}
+
 func TestBuildSessionInterventionsUsesPriorityDriverAsPrimaryEvidence(t *testing.T) {
 	findings := []sessionFinding{
 		{

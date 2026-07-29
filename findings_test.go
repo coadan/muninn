@@ -589,6 +589,25 @@ func TestBuildSessionFindingsDoesNotTreatRootAsTaskCohort(t *testing.T) {
 	}
 }
 
+func TestBuildSessionFindingsCompactionConfidenceRequiresRecurrence(t *testing.T) {
+	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	report.Summary.Compactions = 3
+	report.Summary.SessionsWithCompactions = 1
+	report.Summary.Tokens.InputTokens = 1_000
+	report.Summary.Tokens.CachedInputTokens = 900
+
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Confidence != "low" {
+		t.Fatalf("single-session compaction confidence mismatch: %#v", findings)
+	}
+
+	report.Summary.SessionsWithCompactions = 2
+	findings = buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 1 || findings[0].Confidence != "medium" {
+		t.Fatalf("recurring compaction confidence mismatch: %#v", findings)
+	}
+}
+
 func TestProgressStallConfidenceRequiresCrossSessionRecurrence(t *testing.T) {
 	if got := recurringPatternConfidence(1); got != "low" {
 		t.Fatalf("single-session pattern confidence=%q want low", got)
