@@ -162,15 +162,16 @@ func TestCompletedTaskTrendSupportsLegacyFreshTokenSchema(t *testing.T) {
 
 func TestRoundtripTrendHelpersCountTransitionsAndWaits(t *testing.T) {
 	transitions := map[string]codexTransitionMetrics{
-		"file reads -> file reads": {Count: 4},
-		"file reads -> search":     {Count: 3},
-		"search -> search":         {Count: 2},
+		"file reads -> file reads":               {Count: 4},
+		"file reads -> search":                   {Count: 3},
+		"search -> search":                       {Count: 2},
+		"git inspect/status -> git inspect/diff": {Count: 5},
 	}
-	if got := totalCrossCallTransitions(transitions); got != 9 {
-		t.Fatalf("total transitions=%d want 9", got)
+	if got := totalCrossCallTransitions(transitions); got != 14 {
+		t.Fatalf("total transitions=%d want 14", got)
 	}
-	if got := repeatedCrossCallTransitions(transitions); got != 6 {
-		t.Fatalf("repeated transitions=%d want 6", got)
+	if got := repeatedCrossCallTransitions(transitions); got != 11 {
+		t.Fatalf("repeated transitions=%d want 11", got)
 	}
 	if got := totalWaitCalls(map[string]codexWaitMetrics{
 		"tests": {Calls: 5},

@@ -1748,7 +1748,7 @@ func agentInterfaceWorkflow(transition string) string {
 		return "source discovery and navigation"
 	case from == "browser QA" && to == "browser QA":
 		return "browser QA control and recovery"
-	case from == "git inspect" && to == "git inspect":
+	case gitInspectionTransitionContext(from) && gitInspectionTransitionContext(to):
 		return "change inspection"
 	case (from == "tests" || from == "build, lint, or install") &&
 		(to == "tests" || to == "build, lint, or install"):
@@ -1756,6 +1756,10 @@ func agentInterfaceWorkflow(transition string) string {
 	default:
 		return ""
 	}
+}
+
+func gitInspectionTransitionContext(value string) bool {
+	return value == "git inspect" || strings.HasPrefix(value, "git inspect/")
 }
 
 func formatAgentInterfaceTransitions(transitions []workflowTransitionEvidence, limit int) string {

@@ -707,7 +707,8 @@ func repeatedCrossCallTransitions(transitions map[string]codexTransitionMetrics)
 	total := 0
 	for transition, metrics := range transitions {
 		from, to, ok := strings.Cut(transition, " -> ")
-		if ok && from == to {
+		if ok && (from == to ||
+			gitInspectionTransitionContext(from) && gitInspectionTransitionContext(to)) {
 			total += metrics.Count
 		}
 	}

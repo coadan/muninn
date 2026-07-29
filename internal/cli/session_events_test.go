@@ -258,6 +258,21 @@ func TestCodexShellCommandAnalysisUsesPrivacySafeMixedShapes(t *testing.T) {
 	if family != "git inspect" || shape != "" {
 		t.Fatalf("single-family chain should not produce a mixed shape: (%q, %q)", family, shape)
 	}
+	family, shape, first, last := codexShellCommandDetails(
+		"exec_command",
+		`{"cmd":"git status --short && git diff --stat"}`,
+		"",
+	)
+	if family != "git inspect" || shape != "" ||
+		first != "git inspect/status" || last != "git inspect/diff" {
+		t.Fatalf(
+			"git transition details=(%q, %q, %q, %q)",
+			family,
+			shape,
+			first,
+			last,
+		)
+	}
 }
 
 func TestCodexShellCommandClassifiesPushAsDelivery(t *testing.T) {
