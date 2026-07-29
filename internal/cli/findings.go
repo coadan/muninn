@@ -102,10 +102,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	}
 	for operation, metrics := range summary.OwnedOperations {
 		definiteCalls := max(metrics.Calls-metrics.AmbiguousCalls, 0)
+		definiteSuccessfulCalls := max(definiteCalls-metrics.FailedCalls, 0)
 		repeated := verificationOwnedOperation(operation) &&
 			metrics.Sessions > 0 &&
-			definiteCalls >= 40 &&
-			definiteCalls >= metrics.Sessions*15
+			definiteSuccessfulCalls >= 40 &&
+			definiteSuccessfulCalls >= metrics.Sessions*15
 		reasons := summary.OwnedOperationFailureReasons[operation]
 		actionableFailures, expectedFailures := ownedOperationFailureCounts(ownership, operation, reasons)
 		failureSessions, truncationSessions := ownedOperationFrictionSessions(report, ownership, operation)
@@ -152,7 +153,10 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			formatCodexCount(metrics.EstimatedAmbiguousOutputTokens),
 		)
 		if repeated {
-			evidence += fmt.Sprintf("; %.1f definitely attributed calls per session", ratio(float64(definiteCalls), float64(metrics.Sessions)))
+			evidence += fmt.Sprintf(
+				"; %.1f definitely attributed successful calls per session",
+				ratio(float64(definiteSuccessfulCalls), float64(metrics.Sessions)),
+			)
 		}
 		if formatted := formatOwnedOperationActionableReasons(ownership, operation, reasons); formatted != "" {
 			evidence += "; actionable reasons: " + formatted
