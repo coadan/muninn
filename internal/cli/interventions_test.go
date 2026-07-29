@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -48,7 +47,7 @@ func TestBuildSessionInterventionsConsolidatesDiscoveryEvidence(t *testing.T) {
 	}
 }
 
-func TestBuildSessionInterventionsGroupsOwnedOperationsUnderTool(t *testing.T) {
+func TestBuildSessionInterventionsKeepsOwnedOperationsExact(t *testing.T) {
 	findings := []sessionFinding{
 		{
 			Category: "owned-tool", Signal: "owned-tool/bwb", Target: "bwb",
@@ -71,15 +70,13 @@ func TestBuildSessionInterventionsGroupsOwnedOperationsUnderTool(t *testing.T) {
 		},
 	}
 	got := buildSessionInterventions(findings)
-	if len(got) != 1 || got[0].ID != "intervention/tool/bwb" ||
+	if len(got) != 4 ||
+		got[0].ID != "intervention/operation/bwb/publish" ||
 		got[0].PrimarySignal != "owned-operation/bwb/publish" ||
 		got[0].Action != "fix publish" ||
-		!reflect.DeepEqual(got[0].SupportingSignals, []string{
-			"delivery-quality/bwb/test",
-			"owned-tool/bwb",
-			"session-loop/progress-stall/bwb/api",
-		}) {
-		t.Fatalf("owned-tool intervention mismatch: %#v", got)
+		len(got[0].SupportingSignals) != 0 ||
+		got[1].ID != "intervention/tool/bwb" {
+		t.Fatalf("exact owned-operation interventions mismatch: %#v", got)
 	}
 }
 
@@ -114,10 +111,37 @@ func TestBuildSessionInterventionsRanksActionabilityBeforeRawCategoryScore(t *te
 	if len(got) != 3 {
 		t.Fatalf("interventions=%#v", got)
 	}
-	if got[0].ID != "intervention/tool/cli" || got[0].Priority != "highest" ||
+	if got[0].ID != "intervention/operation/cli/check" || got[0].Priority != "highest" ||
 		got[1].ID != "intervention/diagnostic-failure/repeated" || got[1].Priority != "high" ||
 		got[2].ID != "intervention/session-loop/large" || got[2].Priority != "medium" {
 		t.Fatalf("actionability ordering mismatch: %#v", got)
+	}
+}
+
+func TestBuildSessionInterventionsDefersAdditionalOwnerHotspots(t *testing.T) {
+	findings := []sessionFinding{
+		{
+			Category: "code-structure", Signal: "owner/src/first.go",
+			Title: "first owner", Target: "src/first.go",
+			Lever: "source code", Confidence: "medium", score: 900,
+		},
+		{
+			Category: "code-structure", Signal: "owner/src/second.go",
+			Title: "second owner", Target: "src/second.go",
+			Lever: "source code", Confidence: "medium", score: 800,
+		},
+		{
+			Category: "output-cost", Signal: "output-cost/tool-exec",
+			Title: "oversized output", Lever: "tooling", Confidence: "medium", score: 700,
+		},
+	}
+
+	got := buildSessionInterventions(findings)
+	if len(got) != 3 ||
+		got[0].ID != "intervention/owner/src/first.go" ||
+		got[1].ID != "intervention/output-cost/tool-exec" ||
+		got[2].ID != "intervention/owner/src/second.go" {
+		t.Fatalf("owner diversity mismatch: %#v", got)
 	}
 }
 
