@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 	"time"
 )
@@ -50,6 +52,33 @@ func TestFormatRefreshCompletionIsBoundedAndActionable(t *testing.T) {
 	want := "Refresh complete: 600 scanned, 24 indexed, 576 reused, 3 pruned, 1 unreadable."
 	if got != want {
 		t.Fatalf("unexpected refresh completion: %q", got)
+	}
+}
+
+func TestAnalyzeHeartbeatWaitsAndStopsCleanly(t *testing.T) {
+	var output bytes.Buffer
+	stop := startAnalyzeHeartbeat(&output, 5*time.Millisecond, 5*time.Millisecond)
+	time.Sleep(12 * time.Millisecond)
+	stop()
+
+	got := output.String()
+	if !strings.Contains(got, "still analyzing sessions") {
+		t.Fatalf("heartbeat output=%q, want progress", got)
+	}
+	before := output.Len()
+	time.Sleep(10 * time.Millisecond)
+	if output.Len() != before {
+		t.Fatalf("heartbeat continued after stop: before=%d after=%d", before, output.Len())
+	}
+	stop()
+}
+
+func TestAnalyzeHeartbeatStaysSilentForFastRuns(t *testing.T) {
+	var output bytes.Buffer
+	stop := startAnalyzeHeartbeat(&output, time.Hour, time.Hour)
+	stop()
+	if output.Len() != 0 {
+		t.Fatalf("fast analysis emitted progress: %q", output.String())
 	}
 }
 

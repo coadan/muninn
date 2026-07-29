@@ -6,10 +6,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -144,6 +146,8 @@ func cmdAnalyze(root string, args []string) error {
 		return err
 	}
 	ownership := newOwnershipCatalog(config.OwnedTools)
+	stopHeartbeat := startAnalyzeHeartbeat(os.Stderr, 10*time.Second, 30*time.Second)
+	defer stopHeartbeat()
 	var store *sessionStore
 	var analyzeWindow func(time.Time, time.Time) (codexSessionInsightsReport, error)
 	if *noCache {
@@ -230,6 +234,7 @@ func cmdAnalyze(root string, args []string) error {
 		previous.Interventions = buildSessionInterventions(previous.Findings)
 		baseline = &previous
 	}
+	stopHeartbeat()
 	if toolID := strings.TrimSpace(*operation); toolID != "" {
 		drilldown, err := buildOwnedOperationsDrilldown(report, config, toolID, outputSelection.OperationLimit)
 		if err != nil {
@@ -258,6 +263,41 @@ func cmdAnalyze(root string, args []string) error {
 		)
 	}
 	return nil
+}
+
+func startAnalyzeHeartbeat(output io.Writer, initialDelay, interval time.Duration) func() {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		timer := time.NewTimer(initialDelay)
+		defer timer.Stop()
+		select {
+		case <-done:
+			return
+		case <-timer.C:
+		}
+
+		fmt.Fprintln(output, "Muninn is still analyzing sessions; waiting for bounded results...")
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				fmt.Fprintln(output, "Muninn is still analyzing sessions; waiting for bounded results...")
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(done)
+			<-stopped
+		})
+	}
 }
 
 type analyzeOutputSelection struct {
