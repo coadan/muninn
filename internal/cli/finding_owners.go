@@ -1,11 +1,165 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+func ownerRediscoveryFindings(report codexSessionInsightsReport, config repositoryConfig) []sessionFinding {
+	var findings []sessionFinding
+	for target, metrics := range report.Summary.ReadTargets {
+		if metrics.Sessions < 2 || metrics.Reads < 4 {
+			continue
+		}
+		path := filepath.Join(report.WorkspaceRoot, filepath.FromSlash(target))
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		const boundedOwnerBytes = 12 * 1024
+		if info.Size() <= boundedOwnerBytes || strings.EqualFold(filepath.Base(target), "AGENTS.md") || repositoryManifestTarget(target) {
+			if !materialOwnerRediscovery(metrics) {
+				continue
+			}
+			title, action := ownerRediscoveryPolicy(target, config)
+			findings = append(findings, sessionFinding{
+				Category: "instruction-discovery",
+				Control:  "repository",
+				Title:    title,
+				Evidence: fmt.Sprintf("%s reads and %s search/read loops across %s sessions; rediscovery affected %s sessions; current size %s bytes",
+					formatCodexCount(int64(metrics.Reads)),
+					formatCodexCount(int64(metrics.SearchReadLoops)),
+					formatCodexCount(int64(metrics.Sessions)),
+					formatCodexCount(int64(metrics.RediscoverySessions)),
+					formatCodexCount(info.Size()),
+				),
+				Action:     action,
+				Count:      metrics.Reads,
+				Sessions:   metrics.Sessions,
+				Target:     target,
+				LastSeen:   sessionFindingLastSeen(report, "read", target),
+				Confidence: ownerRediscoveryConfidence(metrics),
+				score:      320 + metrics.RediscoverySessions*20 + metrics.SearchReadLoops*10 + metrics.Reads,
+			})
+			continue
+		}
+		findings = append(findings, sessionFinding{
+			Category: "code-structure",
+			Control:  "repository",
+			Title:    "repeated navigation into a current source owner",
+			Evidence: fmt.Sprintf("%s reads and %s search/read loops across %s sessions; current size %s bytes",
+				formatCodexCount(int64(metrics.Reads)),
+				formatCodexCount(int64(metrics.SearchReadLoops)),
+				formatCodexCount(int64(metrics.Sessions)),
+				formatCodexCount(info.Size()),
+			),
+			Action:   config.Actions.CodeStructure,
+			Count:    metrics.Reads,
+			Sessions: metrics.Sessions,
+			Target:   target,
+			LastSeen: sessionFindingLastSeen(report, "read", target),
+			score:    350 + metrics.Sessions*15 + metrics.SearchReadLoops*10 + metrics.Reads,
+		})
+	}
+	return findings
+}
+
+func fileHotspotFindings(report codexSessionInsightsReport) []sessionFinding {
+	var findings []sessionFinding
+	for _, hotspot := range report.Outcomes.FileHotspots {
+		if _, _, exists := repositoryTargetSize(report.WorkspaceRoot, hotspot.Target); !exists {
+			continue
+		}
+		switch hotspot.Classification {
+		case "expensive-owner":
+			if hotspot.CompletedTasks < 3 || hotspot.ToolRoundtrips.P50 < 50 {
+				continue
+			}
+			findings = append(findings, sessionFinding{
+				Category: "code-structure",
+				Control:  "repository",
+				Title:    "repeated edits correlate with high task cost",
+				Evidence: fmt.Sprintf(
+					"%s completed tasks (%.1f%% of tool-using tasks) edited this target %s times; fresh tokens p50/p90 %s/%s and task roundtrips p50/p90 %s/%s",
+					formatCodexCount(int64(hotspot.CompletedTasks)),
+					100*hotspot.TaskShare,
+					formatCodexCount(int64(hotspot.EditCalls)),
+					formatCodexCount(hotspot.FreshTokens.P50),
+					formatCodexCount(hotspot.FreshTokens.P90),
+					formatCodexCount(hotspot.ToolRoundtrips.P50),
+					formatCodexCount(hotspot.ToolRoundtrips.P90),
+				),
+				Action:     "Trace one representative change through this owner and its smallest verification. Improve navigation, inspection, or the focused test interface if the owner is cohesive; split only when the trace shows independent ownership seams.",
+				Count:      hotspot.CompletedTasks,
+				Target:     hotspot.Target,
+				LastSeen:   hotspot.LastSeen,
+				Lever:      reworkTargetLever(hotspot.Target),
+				Confidence: "medium",
+				Why:        "Repeated work on this owner consumes materially more fresh tokens and tool roundtrips than an ordinary edit target.",
+				score: 520 + hotspot.CompletedTasks*5 +
+					int(hotspot.ToolRoundtrips.P50) +
+					int(hotspot.FreshTokens.P50/5_000),
+			})
+		case "review/rework":
+			cycles := hotspot.PostReviewEditCalls + hotspot.FollowUpEdits
+			if cycles < 2 {
+				continue
+			}
+			findings = append(findings, sessionFinding{
+				Category: "delivery-quality",
+				Control:  "repository",
+				Title:    "frequently edited target requires repeated rework",
+				Evidence: fmt.Sprintf(
+					"%s completed tasks edited this target %s times, with %s review-driven edits, %s downstream follow-up edits, %s failures, and %s reverts",
+					formatCodexCount(int64(hotspot.CompletedTasks)),
+					formatCodexCount(int64(hotspot.EditCalls)),
+					formatCodexCount(int64(hotspot.PostReviewEditCalls)),
+					formatCodexCount(int64(hotspot.FollowUpEdits)),
+					formatCodexCount(int64(hotspot.DownstreamFailures)),
+					formatCodexCount(int64(hotspot.Reverts)),
+				),
+				Action:     "Inspect the repeated corrections at this exact target, strengthen the owning invariant and focused pre-delivery check, then compare its rework rate in the next matched period.",
+				Count:      cycles,
+				Target:     hotspot.Target,
+				LastSeen:   hotspot.LastSeen,
+				Lever:      reworkTargetLever(hotspot.Target),
+				Confidence: hotspotFindingConfidence(cycles),
+				Why:        "Repeated corrections at the same owner indicate that implementation cost is surviving into review or downstream repair.",
+				score:      650 + cycles*30,
+			})
+		case "downstream-risk":
+			failures := hotspot.DownstreamFailures + hotspot.Reverts
+			if failures < 2 {
+				continue
+			}
+			findings = append(findings, sessionFinding{
+				Category: "delivery-quality",
+				Control:  "repository",
+				Title:    "frequently edited target is associated with downstream failures",
+				Evidence: fmt.Sprintf(
+					"%s completed tasks edited this target %s times, with %s attributed downstream failures, %s follow-up edits, and %s reverts",
+					formatCodexCount(int64(hotspot.CompletedTasks)),
+					formatCodexCount(int64(hotspot.EditCalls)),
+					formatCodexCount(int64(hotspot.DownstreamFailures)),
+					formatCodexCount(int64(hotspot.FollowUpEdits)),
+					formatCodexCount(int64(hotspot.Reverts)),
+				),
+				Action:     "Reproduce the attributed downstream failure at this exact target, add or strengthen the focused pre-delivery check, and compare the target's failure rate in the next matched period.",
+				Count:      failures,
+				Target:     hotspot.Target,
+				LastSeen:   hotspot.LastSeen,
+				Lever:      reworkTargetLever(hotspot.Target),
+				Confidence: hotspotFindingConfidence(failures),
+				Why:        "Failures attributed after delivery expose quality risk at an owner agents change repeatedly.",
+				score:      680 + failures*35,
+			})
+		}
+	}
+	return findings
+}
 
 func ownerRediscoveryPolicy(target string, config repositoryConfig) (title, action string) {
 	base := strings.ToLower(filepath.Base(target))
