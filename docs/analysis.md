@@ -21,10 +21,13 @@ events. This keeps long-lived active work in the selected cohort.
 
 ## Choose a report
 
-The default human report is a findings-first action queue.
+The default human report is a ranked intervention queue. Related findings that
+point to the same locally controlled tool, discovery workflow, or verification
+workflow are consolidated so the first screen represents distinct changes
+rather than correlated symptoms.
 
-- `--details` adds bounded command, transition, source-target, failure, and
-  output rankings.
+- `--details` adds command, transition, source-target, failure, and output
+  rankings plus the constituent raw findings. Pass `--limit` to bound it.
 - `--focus friction` explicitly selects the default broad action queue.
 - `--focus tooling`, `instructions`, `interface`, `structure`, `discovery`,
   `failures`, `loops`, `output`, or `quality` narrows the report.
@@ -79,8 +82,10 @@ reasoning-effort, and task-family cohort. These with/without deltas are
 observational and never create findings by themselves because tool use may
 still correlate with unobserved task difficulty.
 
-Findings include a stable signal ID, likely improvement lever, confidence, and
-recent supporting activity. Counts alone do not establish causality.
+Interventions include a stable ID, primary signal, supporting signals, likely
+improvement lever, confidence, and recent supporting activity. JSON retains
+both `interventions` and the constituent `findings`. Counts alone do not
+establish causality.
 
 Failed Heimdal reports are routed by evidence: fixture startup failures point
 to tooling, executed-test failures to source code, and test-selection failures

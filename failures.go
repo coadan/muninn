@@ -86,13 +86,9 @@ func cmdFailures(root string, args []string) error {
 	if err != nil {
 		return err
 	}
-	sessionDirs, err := source.SessionDirs(*sessionsDir, *includeArchived)
+	discovery, err := source.Discover(*sessionsDir, *includeArchived)
 	if err != nil {
 		return err
-	}
-	normalizer, ok := source.(sessionNormalizer)
-	if !ok {
-		return fmt.Errorf("session provider %q does not support indexed failure drilldown", source.Name())
 	}
 	resolvedRepoRoot, err := filepath.Abs(strings.TrimSpace(repoRoot))
 	if err != nil {
@@ -118,9 +114,9 @@ func cmdFailures(root string, args []string) error {
 	if _, err := store.refresh(
 		context.Background(),
 		source.Name(),
-		sessionDirs,
+		discovery,
 		resolvedRepoRoot,
-		normalizer,
+		source,
 		ownership,
 		*forceRefresh,
 	); err != nil {
