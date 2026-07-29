@@ -42,7 +42,8 @@ func TestFailuresUsesPositionalOperation(t *testing.T) {
 	}
 	if report.SchemaVersion != codexSessionInsightsSchemaVersion ||
 		report.Operation != "runner/check" ||
-		report.Events == nil {
+		report.DefiniteEvents == nil ||
+		report.AmbiguousEvents == nil {
 		t.Fatalf("failure report mismatch: %#v", report)
 	}
 }

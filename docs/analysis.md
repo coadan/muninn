@@ -71,10 +71,16 @@ muninn failures repository-cli/test --repo . \
   --reason "test harness protocol"
 ```
 
-The JSON timeline contains its schema version, timestamps, fixed failure and
-command-family labels, output byte counts, and attribution quality. It never
-contains raw session content or provider identifiers. The default limit is 20
-events and the maximum is 100.
+The JSON report separates `definiteEvents` from `ambiguousEvents`, so failures
+elsewhere in a mixed command cannot be mistaken for failures of the selected
+operation. Each class is bounded independently; ambiguous evidence is capped
+at five and cannot crowd authoritative events out of the requested `--limit`.
+The summary reports total and returned counts for both classes.
+
+Events contain timestamps, fixed failure and command-family labels, output byte
+counts, and attribution quality. They never contain raw session content or
+provider identifiers. The default definite-event limit is 20 and the maximum
+is 100.
 
 ## Control the local index
 

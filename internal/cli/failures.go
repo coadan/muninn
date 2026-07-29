@@ -23,16 +23,25 @@ type ownedOperationFailureEvent struct {
 	AttributionAmbiguous bool      `json:"attributionAmbiguous"`
 }
 
+type ownedOperationFailureSummary struct {
+	TotalDefinite     int `json:"totalDefinite"`
+	TotalAmbiguous    int `json:"totalAmbiguous"`
+	ReturnedDefinite  int `json:"returnedDefinite"`
+	ReturnedAmbiguous int `json:"returnedAmbiguous"`
+}
+
 type ownedOperationFailureReport struct {
-	SchemaVersion int                          `json:"schemaVersion"`
-	Provider      string                       `json:"provider"`
-	Repository    string                       `json:"repository"`
-	Since         time.Time                    `json:"since"`
-	Generated     time.Time                    `json:"generatedAt"`
-	Operation     string                       `json:"operation"`
-	Reason        string                       `json:"reason,omitempty"`
-	Task          string                       `json:"task,omitempty"`
-	Events        []ownedOperationFailureEvent `json:"events"`
+	SchemaVersion   int                          `json:"schemaVersion"`
+	Provider        string                       `json:"provider"`
+	Repository      string                       `json:"repository"`
+	Since           time.Time                    `json:"since"`
+	Generated       time.Time                    `json:"generatedAt"`
+	Operation       string                       `json:"operation"`
+	Reason          string                       `json:"reason,omitempty"`
+	Task            string                       `json:"task,omitempty"`
+	Summary         ownedOperationFailureSummary `json:"summary"`
+	DefiniteEvents  []ownedOperationFailureEvent `json:"definiteEvents"`
+	AmbiguousEvents []ownedOperationFailureEvent `json:"ambiguousEvents"`
 }
 
 func cmdFailures(root string, args []string) error {
@@ -53,7 +62,7 @@ func cmdFailures(root string, args []string) error {
 	forceRefresh := fs.Bool("refresh", false, "re-index all discovered session files")
 	reason := fs.String("reason", "", "only include this fixed failure-reason label")
 	task := fs.String("task", "", "only include failures attributed to this exact worktree/task ID")
-	limit := fs.Int("limit", 20, "maximum failure events to return (1-100)")
+	limit := fs.Int("limit", 20, "maximum definite failure events to return (1-100); ambiguous evidence is capped at 5")
 	setFlagSetUsage(
 		fs,
 		"muninn failures <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>]",
@@ -129,7 +138,7 @@ func cmdFailures(root string, args []string) error {
 	}
 	now := time.Now().UTC()
 	since := now.Add(-lookback)
-	events, err := store.ownedOperationFailures(
+	timeline, err := store.ownedOperationFailures(
 		context.Background(),
 		source.Name(),
 		resolvedRepoRoot,
@@ -139,12 +148,10 @@ func cmdFailures(root string, args []string) error {
 		strings.TrimSpace(*reason),
 		strings.TrimSpace(*task),
 		*limit,
+		min(*limit, 5),
 	)
 	if err != nil {
 		return err
-	}
-	if events == nil {
-		events = []ownedOperationFailureEvent{}
 	}
 	report := ownedOperationFailureReport{
 		SchemaVersion: codexSessionInsightsSchemaVersion,
@@ -155,7 +162,14 @@ func cmdFailures(root string, args []string) error {
 		Operation:     selectedOperation,
 		Reason:        strings.TrimSpace(*reason),
 		Task:          strings.TrimSpace(*task),
-		Events:        events,
+		Summary: ownedOperationFailureSummary{
+			TotalDefinite:     timeline.TotalDefinite,
+			TotalAmbiguous:    timeline.TotalAmbiguous,
+			ReturnedDefinite:  len(timeline.Definite),
+			ReturnedAmbiguous: len(timeline.Ambiguous),
+		},
+		DefiniteEvents:  timeline.Definite,
+		AmbiguousEvents: timeline.Ambiguous,
 	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
