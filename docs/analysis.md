@@ -14,6 +14,7 @@ muninn analyze --repo . --since-commit HEAD~3
 muninn analyze --repo . --task task-id
 muninn analyze --repo . --since 14d --include-archived
 muninn analyze --repo . --json
+muninn analyze --repo . --details --json
 ```
 
 Sessions that began before the lookback boundary still contribute recent tool
@@ -27,7 +28,8 @@ workflow are consolidated so the first screen represents distinct changes
 rather than correlated symptoms.
 
 - `--details` adds command, transition, source-target, failure, and output
-  rankings plus the constituent raw findings. Pass `--limit` to bound it.
+  rankings plus the constituent raw findings. Pass `--limit` to bound human
+  output. With `--json`, it selects the full analytical report.
 - `--focus friction` explicitly selects the default broad action queue.
 - `--focus tooling`, `instructions`, `interface`, `structure`, `discovery`,
   `failures`, `loops`, `output`, or `quality` narrows the report.
@@ -91,8 +93,11 @@ still correlate with unobserved task difficulty.
 
 Interventions include a stable ID, primary signal, supporting signals, likely
 improvement lever, confidence, and recent supporting activity. JSON retains
-both `interventions` and the constituent `findings`. Counts alone do not
-establish causality.
+both `interventions` and the constituent `findings`. Default JSON also includes
+compact scope, outcome, profile, delegation, and diagnostic summaries; it
+omits task rows and high-cardinality analytical maps. Use `--details --json`
+when those full inputs are needed. `detailLevel` is `summary` or `full`.
+Counts alone do not establish causality.
 
 Failed Heimdal reports are routed by evidence: fixture startup failures point
 to tooling, executed-test failures to source code, and test-selection failures
