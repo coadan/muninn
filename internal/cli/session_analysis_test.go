@@ -564,6 +564,12 @@ func TestAnalyzeCodexSessionsAttributesConfiguredOwnedToolsAndCompactions(t *tes
 	if got := report.Tasks[0].OwnedTooling["bwb"]; got.Calls != 1 || got.FailedCalls != 1 {
 		t.Fatalf("task-owned tool attribution missing: %#v", report.Tasks[0].OwnedTooling)
 	}
+	if got := report.Summary.OwnedToolUnmatched["bwb"]; got.Calls != 1 || got.FailedCalls != 1 {
+		t.Fatalf("unmatched owned-tool attribution missing: %#v", report.Summary.OwnedToolUnmatched)
+	}
+	if got := report.Tasks[0].OwnedToolUnmatched["bwb"]; got.Calls != 1 || got.FailedCalls != 1 {
+		t.Fatalf("task unmatched owned-tool attribution missing: %#v", report.Tasks[0].OwnedToolUnmatched)
+	}
 }
 
 func TestAnalyzeCodexSessionsRanksFailureContextByCrossSessionRecurrence(t *testing.T) {

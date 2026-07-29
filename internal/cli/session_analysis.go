@@ -49,6 +49,7 @@ func newCodexAggregateMetrics() codexAggregateMetrics {
 		MixedShellShapes:             map[string]codexToolMetrics{},
 		CrossCallTransitions:         map[string]codexTransitionMetrics{},
 		OwnedTooling:                 map[string]codexToolMetrics{},
+		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexOwnedOperationMetrics{},
 		OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
 		ReadTargets:                  map[string]codexTargetMetrics{},
@@ -156,6 +157,9 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	addCodexTransitionMetrics(target.CrossCallTransitions, record.CrossCallTransitions)
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(target.OwnedTooling, id, metrics)
+	}
+	for id, metrics := range record.OwnedToolUnmatched {
+		addCodexToolMetricsValue(target.OwnedToolUnmatched, id, metrics)
 	}
 	addCodexOwnedOperationMetrics(target.OwnedOperations, record.OwnedOperations, record.OwnedOperationAmbiguous)
 	addCodexFailureContexts(target.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)

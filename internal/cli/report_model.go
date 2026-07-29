@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 70
+const codexSessionInsightsSchemaVersion = 71
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -36,6 +36,7 @@ type codexAggregateMetrics struct {
 	MixedShellShapes             map[string]codexToolMetrics                  `json:"mixedShellShapes"`
 	CrossCallTransitions         map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
 	OwnedTooling                 map[string]codexToolMetrics                  `json:"ownedTooling"`
+	OwnedToolUnmatched           map[string]codexToolMetrics                  `json:"ownedToolUnmatched,omitempty"`
 	OwnedOperations              map[string]codexOwnedOperationMetrics        `json:"ownedOperations"`
 	OwnedOperationFailureReasons map[string]map[string]codexOccurrenceMetrics `json:"ownedOperationFailureReasons"`
 	ReadTargets                  map[string]codexTargetMetrics                `json:"readTargets"`
@@ -182,6 +183,7 @@ type codexSessionRecord struct {
 	MixedShellShapes             map[string]codexToolMetrics
 	CrossCallTransitions         map[string]int
 	OwnedTooling                 map[string]codexToolMetrics
+	OwnedToolUnmatched           map[string]codexToolMetrics
 	OwnedOperations              map[string]codexToolMetrics
 	OwnedOperationAmbiguous      map[string]codexToolMetrics
 	OwnedOperationTasks          map[string]map[string]codexOwnedOperationMetrics

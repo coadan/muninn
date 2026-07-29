@@ -18,6 +18,9 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 				OwnedTooling: map[string]codexToolMetrics{
 					"bwb": {Calls: 99},
 				},
+				OwnedToolUnmatched: map[string]codexToolMetrics{
+					"bwb": {Calls: 87, Sessions: 3, TruncatedCalls: 4, OutputBytes: 8_700, EstimatedOutputTokens: 2_175},
+				},
 				OwnedOperations: map[string]codexOwnedOperationMetrics{
 					"bwb/status":  {Calls: 8, OutputBytes: 800},
 					"bwb/test":    {Calls: 2, FailedCalls: 1, OutputBytes: 200},
@@ -65,8 +68,10 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 			t.Fatalf("drilldown JSON %s missing %s", encoded, want)
 		}
 	}
-	if strings.Contains(string(encoded), `"toolCalls"`) {
-		t.Fatalf("operation drilldown retained unrelated broad-tool calls: %s", encoded)
+	for _, want := range []string{`"toolMetrics":{"calls":99`, `"unmatchedMetrics":{"calls":87`} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("drilldown JSON %s missing %s", encoded, want)
+		}
 	}
 	out, err := captureStdout(t, func() error {
 		printOwnedOperationsDrilldown(drilldown)
@@ -75,8 +80,9 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("print drilldown: %v", err)
 	}
-	if !strings.Contains(out, "Tool: bwb · analyzed 3 sessions · 12 matched operation associations") ||
-		strings.Contains(out, "tool calls") {
+	if !strings.Contains(out, "Tool: bwb · analyzed 3 sessions · 99 owned calls · 12 matched operation associations · 87 unmatched calls") ||
+		!strings.Contains(out, "bwb/(unmatched)") ||
+		!strings.Contains(out, "Coverage: 87 owned calls did not match a configured operation") {
 		t.Fatalf("unexpected drilldown scope output:\n%s", out)
 	}
 	if len(drilldown.Operations) != 2 {
@@ -101,6 +107,7 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 	}
 	if exact.Tool != "bwb" || exact.Operation != "bwb/status" ||
 		exact.OperationAssociations != 8 ||
+		exact.ToolMetrics != nil || exact.UnmatchedMetrics != nil ||
 		len(exact.Operations) != 1 || exact.Operations[0].Operation != "bwb/status" {
 		t.Fatalf("unexpected exact operation drilldown: %#v", exact)
 	}

@@ -230,6 +230,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 1, false, false, 0)
+				if !ownedToolOperationMatched(ownedTool, eventOperations) {
+					addCodexToolMetrics(record.OwnedToolUnmatched, ownedTool, 1, false, false, 0)
+				}
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
 			ownedOperations := eventOperations
@@ -305,6 +308,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			for _, ownedTool := range ownership.match(event.SelectorDigests) {
 				addCodexToolMetrics(record.OwnedTooling, ownedTool, 0, event.Failed, event.Truncated, event.OutputBytes)
+				if !ownedToolOperationMatched(ownedTool, eventOperations) {
+					addCodexToolMetrics(record.OwnedToolUnmatched, ownedTool, 0, event.Failed, event.Truncated, event.OutputBytes)
+				}
 				touchSessionActivity(record.Activity, "owned-tool", ownedTool, event.OccurredAt)
 			}
 			ownedOperations := eventOperations
@@ -423,6 +429,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		MixedShellShapes:             map[string]codexToolMetrics{},
 		CrossCallTransitions:         map[string]int{},
 		OwnedTooling:                 map[string]codexToolMetrics{},
+		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexToolMetrics{},
 		OwnedOperationAmbiguous:      map[string]codexToolMetrics{},
 		OwnedOperationTasks:          map[string]map[string]codexOwnedOperationMetrics{},
@@ -441,6 +448,16 @@ func newCodexSessionRecord() codexSessionRecord {
 		OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 		Activity:                     map[string]time.Time{},
 	}
+}
+
+func ownedToolOperationMatched(tool string, operations []string) bool {
+	prefix := tool + "/"
+	for _, operation := range operations {
+		if strings.HasPrefix(operation, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func recordInlineMetric(target map[string]codexInlineMetrics, key string, bytes int64) {
