@@ -94,6 +94,8 @@ absolute paths, secrets, or provider session identifiers.
 
 - [Documentation index](docs/README.md)
 - [Analysis and reports](docs/analysis.md)
+- [Signal interpretation](docs/signals.md)
+- [Comparing periods](docs/comparison.md)
 - [Repository configuration](docs/repository-configuration.md)
 - [Improvement workflow](docs/improvement-workflow.md)
 - [Privacy and data model](docs/privacy.md)
