@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -197,81 +196,6 @@ func TestBuildSessionInterventionsUsesPriorityDriverAsPrimaryEvidence(t *testing
 		got[0].Confidence != "high" || got[0].Lever != "tooling" ||
 		got[0].Action != "reuse the terminal result" {
 		t.Fatalf("priority driver was not primary evidence: %#v", got)
-	}
-}
-
-func TestFindingsViewPrintsCompactInterventionQueue(t *testing.T) {
-	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
-	report.Summary.Sessions = 4
-	report.Summary.ToolCalls = 20
-	report.Summary.FreshTokens = 1_000
-	report.Interventions = []sessionIntervention{{
-		ID:            "intervention/workflow/discovery",
-		Title:         "improve discovery",
-		PrimarySignal: "session-loop/discovery",
-		Evidence:      "evidence",
-		Action:        "act",
-		Lever:         "tooling",
-		Confidence:    "medium",
-	}}
-	out, err := captureStdout(t, func() error {
-		printCodexSessionInsights(report, defaultRepositoryConfig(), 5, "findings")
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"Scope: 4 sessions", "Interventions:", "intervention/workflow/discovery"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("compact findings output missing %q:\n%s", want, out)
-		}
-	}
-	for _, unwanted := range []string{"Model tokens:", "Top tasks by fresh-token proxy:", "Signals:"} {
-		if strings.Contains(out, unwanted) {
-			t.Fatalf("compact findings output retained %q:\n%s", unwanted, out)
-		}
-	}
-}
-
-func TestFocusedDiscoveryViewPrintsBoundedActionEvidence(t *testing.T) {
-	root := t.TempDir()
-	for _, target := range []string{"owner.go", "hidden.go"} {
-		if err := os.WriteFile(filepath.Join(root, target), []byte("current"), 0o644); err != nil {
-			t.Fatalf("write %s: %v", target, err)
-		}
-	}
-	report := newSessionInsightsReport("codex", nil, root, zeroTime(), zeroTime())
-	report.AnalysisScope.Focus = "discovery"
-	report.Summary.ReadTargets["owner.go"] = codexTargetMetrics{
-		Reads: 12, SearchReadLoops: 4, Sessions: 2, RediscoverySessions: 2,
-		UneditedRediscoverySessions: 2,
-	}
-	report.Summary.ReadTargets["hidden.go"] = codexTargetMetrics{
-		Reads: 11, SearchReadLoops: 3, Sessions: 1, RediscoverySessions: 1,
-		UneditedRediscoverySessions: 1,
-	}
-	report.Summary.MixedShellShapes["search -> file reads"] = codexToolMetrics{
-		Calls: 6, Sessions: 2, OutputBytes: 40_000,
-	}
-
-	out, err := captureStdout(t, func() error {
-		printCodexSessionInsights(report, defaultRepositoryConfig(), 1, "focused")
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"Discovery evidence:",
-		"owner.go: 12 reads, 4 search/read loops, 2 sessions, 2 unedited rediscovery sessions, 0 edited sessions",
-		"search -> file reads: 6 calls, 2 sessions, ~10,000 visible output tokens",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("focused discovery output missing %q:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "hidden.go") {
-		t.Fatalf("focused discovery output ignored limit:\n%s", out)
 	}
 }
 

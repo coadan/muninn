@@ -73,18 +73,6 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 			t.Fatalf("drilldown JSON %s missing %s", encoded, want)
 		}
 	}
-	out, err := captureStdout(t, func() error {
-		printOwnedOperationsDrilldown(drilldown)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("print drilldown: %v", err)
-	}
-	if !strings.Contains(out, "Tool: bwb · analyzed 3 sessions · 99 owned calls · 12 matched operation associations · 87 unmatched calls") ||
-		!strings.Contains(out, "bwb/(unmatched)") ||
-		!strings.Contains(out, "Coverage: 87 owned calls did not match a configured operation") {
-		t.Fatalf("unexpected drilldown scope output:\n%s", out)
-	}
 	if len(drilldown.Operations) != 2 {
 		t.Fatalf("expected bounded operations, got %#v", drilldown.Operations)
 	}

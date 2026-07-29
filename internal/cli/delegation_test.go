@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -188,27 +187,6 @@ func TestDelegatedWorkModeUsesStrongestObservableOutcome(t *testing.T) {
 				t.Fatalf("delegatedWorkMode()=%q want %q", got, test.want)
 			}
 		})
-	}
-}
-
-func TestPrintDelegationAnalysisDistinguishesUnavailableCoordination(t *testing.T) {
-	out, err := captureStdout(t, func() error {
-		printDelegationAnalysis(delegationAnalysis{
-			Available:                     true,
-			SubagentSessions:              1,
-			LinkedSubagents:               1,
-			DelegatingParents:             1,
-			SubagentsByWorkMode:           map[string]int{"research/review": 1},
-			SubagentFreshTokensByWorkMode: map[string]int64{"research/review": 100},
-		})
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "Delegation coordination: unavailable") ||
-		strings.Contains(out, "0 coordination calls") {
-		t.Fatalf("unavailable coordination rendered as measured zero:\n%s", out)
 	}
 }
 

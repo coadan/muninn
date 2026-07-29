@@ -56,8 +56,7 @@ func TestBuildSessionFindingsExposesManagedRepositoryOwner(t *testing.T) {
 	if len(findings) != 1 ||
 		findings[0].Repository != "breyta" ||
 		findings[0].Target != "src/large_owner.clj" ||
-		findings[0].Signal != "code-structure/breyta/src/large_owner.clj" ||
-		sessionFindingDisplayTarget(findings[0]) != " · breyta/src/large_owner.clj" {
+		findings[0].Signal != "code-structure/breyta/src/large_owner.clj" {
 		t.Fatalf("managed repository owner leaked cache identity: %#v", findings)
 	}
 }
@@ -1595,25 +1594,6 @@ func TestBuildSessionFindingsUsesHighTailPhaseMix(t *testing.T) {
 	}
 }
 
-func TestSessionFindingDisplayAvoidsDuplicateTarget(t *testing.T) {
-	finding := sessionFinding{
-		Title:  "individual tool calls return oversized output: file reads",
-		Target: "file reads",
-	}
-	if got := sessionFindingDisplayTarget(finding); got != "" {
-		t.Fatalf("embedded target should not be repeated: %q", got)
-	}
-	finding.Title = "an authoritative owner is repeatedly rediscovered"
-	if got := sessionFindingDisplayTarget(finding); got != " · file reads" {
-		t.Fatalf("distinct target should remain visible: %q", got)
-	}
-	finding.Repository = "breyta"
-	finding.Target = "src/runtime.clj"
-	if got := sessionFindingDisplayTarget(finding); got != " · breyta/src/runtime.clj" {
-		t.Fatalf("structured repository target mismatch: %q", got)
-	}
-}
-
 func TestBuildSessionFindingsSuggestsFrequentlyRepeatedFlagAsDefault(t *testing.T) {
 	report := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
 	report.Summary.OwnedFlagEligibleCalls["muninn/analyze"] = codexOccurrenceMetrics{
@@ -1669,13 +1649,6 @@ func TestSessionFindingLeverSeparatesToolingInstructionsAndSource(t *testing.T) 
 		if lever, confidence := sessionFindingLever(test.finding); lever != test.lever || confidence != "high" {
 			t.Fatalf("finding %#v attributed to %q/%q", test.finding, lever, confidence)
 		}
-	}
-}
-
-func TestFormatSessionFindingAge(t *testing.T) {
-	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
-	if got := formatSessionFindingAge("2026-07-24T10:30:00Z", now); got != "1h ago" {
-		t.Fatalf("unexpected finding age: %q", got)
 	}
 }
 

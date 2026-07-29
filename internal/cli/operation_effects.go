@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -143,30 +142,4 @@ func ownedOperationEffectMagnitude(effect ownedOperationEffect) float64 {
 		math.Abs(effect.FreshTokenDelta),
 		math.Max(math.Abs(effect.ToolRoundtripDelta), math.Abs(effect.DurationDelta)),
 	)
-}
-
-func printOwnedOperationEffects(effects []ownedOperationEffect, limit int) {
-	if len(effects) == 0 {
-		return
-	}
-	rows := effects
-	if limit > 0 && len(rows) > limit {
-		rows = rows[:limit]
-	}
-	fmt.Println("\nMatched owned-operation associations:")
-	fmt.Printf("%-36s %8s %13s %10s %10s %10s %12s\n", "OPERATION", "COHORTS", "TASKS W/WO", "FRESH", "CALLS", "TIME", "DIRECTION")
-	for _, effect := range rows {
-		fmt.Printf(
-			"%-36s %8d %6d/%-6d %9.0f%% %9.0f%% %9.0f%% %12s\n",
-			truncateCodexLabel(effect.Operation, 36),
-			effect.MatchedCohorts,
-			effect.TasksWith,
-			effect.TasksWithout,
-			100*effect.FreshTokenDelta,
-			100*effect.ToolRoundtripDelta,
-			100*effect.DurationDelta,
-			effect.Direction,
-		)
-	}
-	fmt.Println("Observed within matched agent/model/effort/task-family cohorts; association is not causal.")
 }
