@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const codexSessionInsightsSchemaVersion = 55
+const codexSessionInsightsSchemaVersion = 56
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)

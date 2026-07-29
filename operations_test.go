@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 			codexAggregateMetrics: codexAggregateMetrics{
 				Sessions: 3,
 				OwnedTooling: map[string]codexToolMetrics{
-					"bwb": {Calls: 12},
+					"bwb": {Calls: 99},
 				},
 				OwnedOperations: map[string]codexOwnedOperationMetrics{
 					"bwb/status":  {Calls: 8, OutputBytes: 800},
@@ -51,8 +52,32 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build drilldown: %v", err)
 	}
-	if drilldown.Tool != "bwb" || drilldown.Sessions != 3 || drilldown.ToolCalls != 12 {
+	if drilldown.Tool != "bwb" || drilldown.AnalysisSessions != 3 ||
+		drilldown.OperationAssociations != 12 {
 		t.Fatalf("unexpected drilldown scope: %#v", drilldown)
+	}
+	encoded, err := json.Marshal(drilldown)
+	if err != nil {
+		t.Fatalf("marshal drilldown: %v", err)
+	}
+	for _, want := range []string{`"analysisSessions":3`, `"operationAssociations":12`} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("drilldown JSON %s missing %s", encoded, want)
+		}
+	}
+	if strings.Contains(string(encoded), `"toolCalls"`) {
+		t.Fatalf("operation drilldown retained unrelated broad-tool calls: %s", encoded)
+	}
+	out, err := captureStdout(t, func() error {
+		printOwnedOperationsDrilldown(drilldown)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("print drilldown: %v", err)
+	}
+	if !strings.Contains(out, "Tool: bwb · analyzed 3 sessions · 12 matched operation associations") ||
+		strings.Contains(out, "tool calls") {
+		t.Fatalf("unexpected drilldown scope output:\n%s", out)
 	}
 	if len(drilldown.Operations) != 2 {
 		t.Fatalf("expected bounded operations, got %#v", drilldown.Operations)
@@ -75,6 +100,7 @@ func TestBuildOwnedOperationsDrilldownFiltersRanksAndBounds(t *testing.T) {
 		t.Fatalf("build exact operation drilldown: %v", err)
 	}
 	if exact.Tool != "bwb" || exact.Operation != "bwb/status" ||
+		exact.OperationAssociations != 8 ||
 		len(exact.Operations) != 1 || exact.Operations[0].Operation != "bwb/status" {
 		t.Fatalf("unexpected exact operation drilldown: %#v", exact)
 	}
