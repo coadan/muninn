@@ -188,8 +188,11 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 
 	for _, owned := range config.OwnedTools {
 		metrics := summary.OwnedTooling[owned.ID]
-		outputTokens := estimatedTokens(metrics.OutputBytes)
-		if metrics.FailedCalls < 2 && metrics.TruncatedCalls < 3 && outputTokens < 50_000 {
+		failedCalls := max(metrics.FailedCalls-metrics.AmbiguousFailedCalls, 0)
+		truncatedCalls := max(metrics.TruncatedCalls-metrics.AmbiguousTruncatedCalls, 0)
+		outputBytes := max(metrics.OutputBytes-metrics.AmbiguousOutputBytes, 0)
+		outputTokens := estimatedTokens(outputBytes)
+		if failedCalls < 2 && truncatedCalls < 3 && outputTokens < 50_000 {
 			continue
 		}
 		action := strings.TrimSpace(owned.Recommendation)
@@ -200,17 +203,19 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			Category: "owned-tool",
 			Control:  "local",
 			Title:    "locally controlled tooling has recurring friction: " + owned.ID,
-			Evidence: fmt.Sprintf("%s calls, %s failures, %s truncations, ~%s visible output tokens",
+			Evidence: fmt.Sprintf("%s calls, %s bundled calls, %s attributable failures, %s attributable truncations, ~%s attributable output tokens, ~%s ambiguous bundled output tokens",
 				formatCodexCount(int64(metrics.Calls)),
-				formatCodexCount(int64(metrics.FailedCalls)),
-				formatCodexCount(int64(metrics.TruncatedCalls)),
+				formatCodexCount(int64(metrics.AmbiguousCalls)),
+				formatCodexCount(int64(failedCalls)),
+				formatCodexCount(int64(truncatedCalls)),
 				formatCodexCount(outputTokens),
+				formatCodexCount(estimatedTokens(metrics.AmbiguousOutputBytes)),
 			),
 			Action:   action,
 			Count:    metrics.Calls,
 			Target:   owned.ID,
 			LastSeen: sessionFindingLastSeen(report, "owned-tool", owned.ID),
-			score:    500 + metrics.FailedCalls*20 + metrics.TruncatedCalls*5 + int(outputTokens/10_000),
+			score:    500 + failedCalls*20 + truncatedCalls*5 + int(outputTokens/10_000),
 		})
 	}
 

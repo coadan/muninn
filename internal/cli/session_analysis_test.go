@@ -620,6 +620,20 @@ func TestAnalyzeCodexSessionsRanksFailureContextByCrossSessionRecurrence(t *test
 	}
 }
 
+func TestAddCodexOwnedToolMetricsRetainsBundledSubset(t *testing.T) {
+	metrics := map[string]codexToolMetrics{}
+	addCodexOwnedToolMetrics(metrics, "repo", false, 1, false, false, 400)
+	addCodexOwnedToolMetrics(metrics, "repo", true, 1, true, true, 800)
+
+	got := metrics["repo"]
+	if got.Calls != 2 || got.AmbiguousCalls != 1 ||
+		got.FailedCalls != 1 || got.AmbiguousFailedCalls != 1 ||
+		got.TruncatedCalls != 1 || got.AmbiguousTruncatedCalls != 1 ||
+		got.OutputBytes != 1_200 || got.AmbiguousOutputBytes != 800 {
+		t.Fatalf("owned tool metrics did not retain bundled subset: %#v", got)
+	}
+}
+
 func TestAnalyzeCodexSessionsFiltersExactTaskAndRebuildsSummary(t *testing.T) {
 	sessionsDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "breyta-workbench")

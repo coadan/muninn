@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 71
+const codexSessionInsightsSchemaVersion = 72
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -60,12 +60,17 @@ type codexAggregateMetrics struct {
 }
 
 type codexToolMetrics struct {
-	Calls                 int   `json:"calls"`
-	Sessions              int   `json:"sessions"`
-	FailedCalls           int   `json:"failedCalls"`
-	TruncatedCalls        int   `json:"truncatedCalls"`
-	OutputBytes           int64 `json:"outputBytes"`
-	EstimatedOutputTokens int64 `json:"estimatedOutputTokens"`
+	Calls                          int   `json:"calls"`
+	AmbiguousCalls                 int   `json:"ambiguousCalls,omitempty"`
+	Sessions                       int   `json:"sessions"`
+	FailedCalls                    int   `json:"failedCalls"`
+	AmbiguousFailedCalls           int   `json:"ambiguousFailedCalls,omitempty"`
+	TruncatedCalls                 int   `json:"truncatedCalls"`
+	AmbiguousTruncatedCalls        int   `json:"ambiguousTruncatedCalls,omitempty"`
+	OutputBytes                    int64 `json:"outputBytes"`
+	AmbiguousOutputBytes           int64 `json:"ambiguousOutputBytes,omitempty"`
+	EstimatedOutputTokens          int64 `json:"estimatedOutputTokens"`
+	EstimatedAmbiguousOutputTokens int64 `json:"estimatedAmbiguousOutputTokens,omitempty"`
 }
 
 type codexOwnedOperationMetrics struct {
