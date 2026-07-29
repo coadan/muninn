@@ -109,7 +109,9 @@ activity. `highest` priority is reserved for high-confidence locally
 controlled changes; other high-confidence changes follow, then medium- and
 low-confidence candidates. Impact evidence orders interventions within the
 same priority tier, so raw scores from unlike signal categories are not
-compared as though they had one scale. JSON retains
+compared as though they had one scale. Failures, output, waits, and delivery
+evidence for a configured local operation consolidate at its tool owner, so
+one locally controlled change produces one intervention. JSON retains
 both `interventions` and the constituent `findings`. Default JSON also includes
 compact scope, outcome, profile, delegation, and diagnostic summaries; it
 omits task rows and high-cardinality analytical maps. Use `--details --json`

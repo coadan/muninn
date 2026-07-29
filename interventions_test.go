@@ -51,24 +51,46 @@ func TestBuildSessionInterventionsGroupsOwnedOperationsUnderTool(t *testing.T) {
 	findings := []sessionFinding{
 		{
 			Category: "owned-tool", Signal: "owned-tool/bwb", Target: "bwb",
-			Title: "tool friction", Lever: "tooling", Confidence: "high", score: 900,
+			Title: "tool friction", Control: "local", Lever: "tooling", Confidence: "high", score: 900,
 		},
 		{
 			Category: "owned-operation", Signal: "owned-operation/bwb/publish", Target: "bwb/publish",
-			Title: "publish friction", Action: "fix publish", Lever: "tooling", Confidence: "high", score: 700,
+			Title: "publish friction", Action: "fix publish", Control: "local",
+			Lever: "tooling", Confidence: "high", score: 700,
 		},
 		{
 			Category: "delivery-quality", Signal: "delivery-quality/bwb/test", Target: "bwb/test",
-			Title: "delivered changes repeatedly fail downstream checks",
-			Lever: "tooling", Confidence: "high", score: 650,
+			Title:   "delivered changes repeatedly fail downstream checks",
+			Control: "local", Lever: "tooling", Confidence: "high", score: 650,
+		},
+		{
+			Category: "session-loop", Signal: "session-loop/progress-stall/bwb/api", Target: "bwb/api",
+			Title:   "progress stalls while waiting on: bwb/api",
+			Control: "local", Lever: "tooling", Confidence: "medium", score: 600,
 		},
 	}
 	got := buildSessionInterventions(findings)
 	if len(got) != 1 || got[0].ID != "intervention/tool/bwb" ||
 		got[0].PrimarySignal != "owned-operation/bwb/publish" ||
 		got[0].Action != "fix publish" ||
-		!reflect.DeepEqual(got[0].SupportingSignals, []string{"delivery-quality/bwb/test", "owned-tool/bwb"}) {
+		!reflect.DeepEqual(got[0].SupportingSignals, []string{
+			"delivery-quality/bwb/test",
+			"owned-tool/bwb",
+			"session-loop/progress-stall/bwb/api",
+		}) {
 		t.Fatalf("owned-tool intervention mismatch: %#v", got)
+	}
+}
+
+func TestBuildSessionInterventionsDoesNotTreatRepositorySourceAsLocalTool(t *testing.T) {
+	findings := []sessionFinding{{
+		Category: "delivery-quality", Signal: "delivery-quality/packages/runtime",
+		Target: "packages/runtime", Title: "source failure",
+		Control: "repository", Lever: "source code", Confidence: "medium",
+	}}
+	got := buildSessionInterventions(findings)
+	if len(got) != 1 || got[0].ID != "intervention/delivery-quality/packages/runtime" {
+		t.Fatalf("repository source was grouped as a local tool: %#v", got)
 	}
 }
 
