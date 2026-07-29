@@ -67,8 +67,8 @@ The main surface has two commands:
   related findings, and supports focused evidence, owned-operation drill-down,
   and adjacent-period comparison. Each intervention provides its bounded
   `focus` route. `--details` selects the full JSON report.
-- `muninn failures <tool/operation>` returns a bounded failure
-  timeline for one configured locally controlled operation.
+- `muninn failures <tool/operation>` returns a bounded JSON failure timeline
+  for one configured locally controlled operation.
 
 Narrow the analysis when investigating a specific kind of friction:
 
