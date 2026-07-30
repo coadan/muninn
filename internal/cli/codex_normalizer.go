@@ -48,6 +48,7 @@ type codexRolloutPayload struct {
 type indexedCodexDescriptor struct {
 	codexToolCallDescriptor
 	OccurredAt                    time.Time
+	ToolRound                     int
 	SelectorDigests               []string
 	CommandCandidates             []ownedCommandInvocation
 	OwnedOperations               []string
@@ -153,6 +154,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				descriptor := indexedCodexDescriptor{
 					codexToolCallDescriptor: codexToolCallDescriptor{Name: name},
 					OccurredAt:              timestamp,
+					ToolRound:               toolRound,
 					SelectorDigests:         codexSelectorDigests(name, payload.Arguments, payload.Input),
 					CommandCandidates:       codexCommandInvocations(name, payload.Arguments, payload.Input),
 					EmitsSessionMarker:      codexEmitsExplicitSessionMarker(name, payload.Input),
@@ -260,6 +262,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					Family:                        descriptor.Family,
 					Shape:                         descriptor.Shape,
 					NestedToolContext:             descriptor.NestedToolContext,
+					ToolRound:                     descriptor.ToolRound,
 					CallOccurredAt:                descriptor.OccurredAt,
 					Failed:                        failed,
 					Truncated:                     codexToolOutputTruncated(text),

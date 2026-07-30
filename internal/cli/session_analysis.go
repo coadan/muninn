@@ -49,6 +49,7 @@ func newCodexAggregateMetrics() codexAggregateMetrics {
 		MixedShellShapes:             map[string]codexToolMetrics{},
 		CrossCallTransitions:         map[string]codexTransitionMetrics{},
 		OwnedOperationChains:         map[string]codexTransitionMetrics{},
+		OwnedOperationRetries:        map[string]ownedOperationRetryMetrics{},
 		OwnedTooling:                 map[string]codexToolMetrics{},
 		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexOwnedOperationMetrics{},
@@ -163,6 +164,7 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	}
 	addCodexTransitionMetrics(target.CrossCallTransitions, record.CrossCallTransitions)
 	addCodexTransitionMetrics(target.OwnedOperationChains, record.OwnedOperationChains)
+	addOwnedOperationRetryMetrics(target.OwnedOperationRetries, record.OwnedOperationRetries)
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(target.OwnedTooling, id, metrics)
 	}
@@ -195,6 +197,25 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	addDeliveryReworkMetrics(&target.DeliveryRework, record.DeliveryRework)
 	addDownstreamQualityMetrics(&target.DownstreamQuality, record.DownstreamQuality)
 	mergeSessionActivity(target.Activity, record.Activity)
+}
+
+func addOwnedOperationRetryMetrics(
+	target,
+	addition map[string]ownedOperationRetryMetrics,
+) {
+	for operation, value := range addition {
+		metrics := target[operation]
+		metrics.Attempts += value.Attempts
+		metrics.RepeatedFailures += value.RepeatedFailures
+		metrics.SuccessfulRetries += value.SuccessfulRetries
+		if value.Attempts > 0 {
+			metrics.Sessions++
+		}
+		if value.RepeatedFailures > 0 {
+			metrics.RepeatedFailureSessions++
+		}
+		target[operation] = metrics
+	}
 }
 
 func addCodexWaitMetrics(target, addition map[string]codexWaitMetrics) {

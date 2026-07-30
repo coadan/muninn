@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 105
+const codexSessionInsightsSchemaVersion = 106
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -36,6 +36,7 @@ type codexAggregateMetrics struct {
 	MixedShellShapes             map[string]codexToolMetrics                  `json:"mixedShellShapes"`
 	CrossCallTransitions         map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
 	OwnedOperationChains         map[string]codexTransitionMetrics            `json:"ownedOperationChains"`
+	OwnedOperationRetries        map[string]ownedOperationRetryMetrics        `json:"ownedOperationRetries"`
 	OwnedTooling                 map[string]codexToolMetrics                  `json:"ownedTooling"`
 	OwnedToolUnmatched           map[string]codexToolMetrics                  `json:"ownedToolUnmatched,omitempty"`
 	OwnedOperations              map[string]codexOwnedOperationMetrics        `json:"ownedOperations"`
@@ -98,6 +99,14 @@ type codexTransitionMetrics struct {
 type codexOccurrenceMetrics struct {
 	Count    int `json:"count"`
 	Sessions int `json:"sessions"`
+}
+
+type ownedOperationRetryMetrics struct {
+	Attempts                int `json:"attempts"`
+	RepeatedFailures        int `json:"repeatedFailures"`
+	SuccessfulRetries       int `json:"successfulRetries"`
+	Sessions                int `json:"sessions"`
+	RepeatedFailureSessions int `json:"repeatedFailureSessions"`
 }
 
 type codexWaitMetrics struct {
@@ -195,6 +204,7 @@ type codexSessionRecord struct {
 	MixedShellShapes             map[string]codexToolMetrics
 	CrossCallTransitions         map[string]int
 	OwnedOperationChains         map[string]int
+	OwnedOperationRetries        map[string]ownedOperationRetryMetrics
 	OwnedTooling                 map[string]codexToolMetrics
 	OwnedToolUnmatched           map[string]codexToolMetrics
 	OwnedOperations              map[string]codexToolMetrics

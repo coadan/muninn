@@ -263,6 +263,8 @@ func compactionPhaseFinding(finding sessionFinding) (string, bool) {
 
 func interventionPrimaryPriority(finding sessionFinding) int {
 	switch {
+	case finding.Category == "recovery-loop":
+		return 8
 	case finding.Category == "diagnostic-contract":
 		return 7
 	case finding.Category == "owned-operation", finding.Category == "verification-loop":

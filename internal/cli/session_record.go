@@ -36,6 +36,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	previousTokens := normalizedTokenUsage{}
 	hasPreviousTokens := false
 	operationChain := ownedOperationChainState{}
+	operationRetry := ownedOperationRetryState{}
 	episode := newTaskEpisode(record)
 	deliveryTrackers := map[string]*deliveryReworkTracker{}
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
@@ -214,12 +215,14 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			previousCommand = normalizedSessionEvent{}
 			previousCommandRound = 0
 			operationChain.reset()
+			operationRetry.reset()
 		case sessionEventCompaction:
 			record.Compactions++
 			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
 		case sessionEventToolCall:
 			record.ToolCalls++
 			operationChain.observe(&record, event, eventOperations)
+			operationRetry.observeCall(event, eventOperations)
 			if delegationOperation(event) {
 				touchSessionActivity(record.Activity, "delegation", event.ToolName, event.OccurredAt)
 			}
@@ -315,6 +318,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			if event.CallOccurredAt.Before(since) || event.CallOccurredAt.After(generatedAt) {
 				continue
 			}
+			operationRetry.observeOutput(&record, event, eventOperations)
 			episode.observe(event, normalizedTokenUsage{}, eventOperations)
 			record.ToolOutputBytes += event.OutputBytes
 			if event.Truncated {
@@ -459,6 +463,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		MixedShellShapes:             map[string]codexToolMetrics{},
 		CrossCallTransitions:         map[string]int{},
 		OwnedOperationChains:         map[string]int{},
+		OwnedOperationRetries:        map[string]ownedOperationRetryMetrics{},
 		OwnedTooling:                 map[string]codexToolMetrics{},
 		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexToolMetrics{},
