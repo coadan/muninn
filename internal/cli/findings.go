@@ -1093,7 +1093,7 @@ func sessionFindingLever(finding sessionFinding) (string, string) {
 		default:
 			return "source code", "medium"
 		}
-	case "discovery", "agent-interface", "default-candidate", "output-cost":
+	case "discovery", "agent-interface", "operation-chain", "default-candidate", "output-cost":
 		return "tooling", "medium"
 	case "session-loop":
 		switch {
@@ -1466,6 +1466,7 @@ func repositoryManifestTarget(target string) bool {
 func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 	limits := map[string]int{
 		"agent-interface":       4,
+		"operation-chain":       4,
 		"default-candidate":     6,
 		"code-structure":        6,
 		"instruction-discovery": 4,

@@ -71,6 +71,7 @@ func buildAgentInterfaceFindings(
 			score:    300 + metrics.Sessions*10 + metrics.Count,
 		})
 	}
+	findings = append(findings, buildOwnedOperationChainFindings(report)...)
 
 	if summary.InlineOrchestrationCalls > 0 {
 		title := "long inline code is carrying orchestration inside a tool call"
