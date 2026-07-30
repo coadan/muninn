@@ -35,6 +35,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	previousCommand := normalizedSessionEvent{}
 	previousTokens := normalizedTokenUsage{}
 	hasPreviousTokens := false
+	operationChain := ownedOperationChainState{}
 	episode := newTaskEpisode(record)
 	deliveryTrackers := map[string]*deliveryReworkTracker{}
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
@@ -212,11 +213,13 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			episode = newTaskEpisode(record)
 			previousCommand = normalizedSessionEvent{}
 			previousCommandRound = 0
+			operationChain.reset()
 		case sessionEventCompaction:
 			record.Compactions++
 			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
 		case sessionEventToolCall:
 			record.ToolCalls++
+			operationChain.observe(&record, event, eventOperations)
 			if delegationOperation(event) {
 				touchSessionActivity(record.Activity, "delegation", event.ToolName, event.OccurredAt)
 			}
@@ -455,6 +458,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		ShellCommandsByFamily:        map[string]codexToolMetrics{},
 		MixedShellShapes:             map[string]codexToolMetrics{},
 		CrossCallTransitions:         map[string]int{},
+		OwnedOperationChains:         map[string]int{},
 		OwnedTooling:                 map[string]codexToolMetrics{},
 		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexToolMetrics{},

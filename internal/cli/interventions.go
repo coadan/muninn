@@ -213,6 +213,9 @@ func interventionPriorityLabel(priority int) string {
 }
 
 func sessionInterventionKey(finding sessionFinding, dominantPhases map[string]bool) string {
+	if strings.HasPrefix(finding.Title, "recurring owned-operation chain: ") {
+		return signalID("intervention", "workflow", "owned-operations", finding.Target)
+	}
 	if strings.HasPrefix(finding.Title, "frequently repeated CLI flag may belong in the default: ") {
 		return signalID("intervention", "default", finding.Target)
 	}

@@ -18,6 +18,7 @@ Muninn keeps these activities distinct:
 - structured Heimdal failures and post-failure recovery cost;
 - root-agent and delegated work, coordination, and overlap;
 - repository navigation, repeated reads, and instruction footprint.
+- recurring three-step chains of definitely attributed configured operations.
 
 ## Confidence and recurrence
 
@@ -73,6 +74,14 @@ becoming an interface intervention. Git inspection transitions use only fixed
 sub-operation labels—`status`, `diff`, `history`, `refs`, or `search`—so
 repeated change inspection is actionable without retaining revisions, paths,
 patterns, or other arguments.
+
+Owned-operation chain findings use exactly three adjacent outer calls with one
+definitely attributed configured operation per call. Ambiguous command bundles,
+unowned calls, non-adjacent rounds, and chains containing only one repeated
+operation are excluded. A chain must recur across at least two sessions, with
+at least six occurrences and three occurrences per affected session. Reports
+retain only configured operation IDs; raw commands and arguments are never
+retained.
 
 Rapid-poll findings likewise require at least three short continuation polls
 per affected session and at least five polls overall. Occasional early polling
