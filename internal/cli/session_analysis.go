@@ -50,6 +50,10 @@ func newCodexAggregateMetrics() codexAggregateMetrics {
 		CrossCallTransitions:         map[string]codexTransitionMetrics{},
 		OwnedOperationChains:         map[string]codexTransitionMetrics{},
 		OwnedOperationRetries:        map[string]ownedOperationRetryMetrics{},
+		ToolingBypasses:              map[string]codexTransitionMetrics{},
+		HelpEffectiveness:            map[string]helpEffectivenessMetrics{},
+		VerificationEscalations:      map[string]codexTransitionMetrics{},
+		SearchEffectiveness:          map[string]searchEffectivenessMetrics{},
 		OwnedTooling:                 map[string]codexToolMetrics{},
 		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexOwnedOperationMetrics{},
@@ -165,6 +169,10 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	addCodexTransitionMetrics(target.CrossCallTransitions, record.CrossCallTransitions)
 	addCodexTransitionMetrics(target.OwnedOperationChains, record.OwnedOperationChains)
 	addOwnedOperationRetryMetrics(target.OwnedOperationRetries, record.OwnedOperationRetries)
+	addCodexTransitionMetrics(target.ToolingBypasses, record.ToolingBypasses)
+	addHelpEffectivenessMetrics(target.HelpEffectiveness, record.HelpEffectiveness)
+	addCodexTransitionMetrics(target.VerificationEscalations, record.VerificationEscalations)
+	addSearchEffectivenessMetrics(target.SearchEffectiveness, record.SearchEffectiveness)
 	for id, metrics := range record.OwnedTooling {
 		addCodexToolMetricsValue(target.OwnedTooling, id, metrics)
 	}
@@ -214,6 +222,41 @@ func addOwnedOperationRetryMetrics(
 		if value.RepeatedFailures > 0 {
 			metrics.RepeatedFailureSessions++
 		}
+		target[operation] = metrics
+	}
+}
+
+func addHelpEffectivenessMetrics(
+	target,
+	addition map[string]helpEffectivenessMetrics,
+) {
+	for operation, value := range addition {
+		metrics := target[operation]
+		metrics.Lookups += value.Lookups
+		metrics.SuccessfulUses += value.SuccessfulUses
+		metrics.FailedUses += value.FailedUses
+		metrics.FailedLookups += value.FailedLookups
+		metrics.RepeatedLookups += value.RepeatedLookups
+		metrics.AbandonedLookups += value.AbandonedLookups
+		metrics.Sessions += value.Sessions
+		metrics.IneffectiveSessions += value.IneffectiveSessions
+		target[operation] = metrics
+	}
+}
+
+func addSearchEffectivenessMetrics(
+	target,
+	addition map[string]searchEffectivenessMetrics,
+) {
+	for operation, value := range addition {
+		metrics := target[operation]
+		metrics.Bursts += value.Bursts
+		metrics.SearchCalls += value.SearchCalls
+		metrics.InefficientBursts += value.InefficientBursts
+		metrics.InefficientResolved += value.InefficientResolved
+		metrics.InefficientAbandoned += value.InefficientAbandoned
+		metrics.Sessions += value.Sessions
+		metrics.InefficientSessions += value.InefficientSessions
 		target[operation] = metrics
 	}
 }

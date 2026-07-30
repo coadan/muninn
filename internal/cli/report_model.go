@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 106
+const codexSessionInsightsSchemaVersion = 107
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -37,6 +37,10 @@ type codexAggregateMetrics struct {
 	CrossCallTransitions         map[string]codexTransitionMetrics            `json:"crossCallTransitions"`
 	OwnedOperationChains         map[string]codexTransitionMetrics            `json:"ownedOperationChains"`
 	OwnedOperationRetries        map[string]ownedOperationRetryMetrics        `json:"ownedOperationRetries"`
+	ToolingBypasses              map[string]codexTransitionMetrics            `json:"toolingBypasses"`
+	HelpEffectiveness            map[string]helpEffectivenessMetrics          `json:"helpEffectiveness"`
+	VerificationEscalations      map[string]codexTransitionMetrics            `json:"verificationEscalations"`
+	SearchEffectiveness          map[string]searchEffectivenessMetrics        `json:"searchEffectiveness"`
 	OwnedTooling                 map[string]codexToolMetrics                  `json:"ownedTooling"`
 	OwnedToolUnmatched           map[string]codexToolMetrics                  `json:"ownedToolUnmatched,omitempty"`
 	OwnedOperations              map[string]codexOwnedOperationMetrics        `json:"ownedOperations"`
@@ -107,6 +111,17 @@ type ownedOperationRetryMetrics struct {
 	SuccessfulRetries       int `json:"successfulRetries"`
 	Sessions                int `json:"sessions"`
 	RepeatedFailureSessions int `json:"repeatedFailureSessions"`
+}
+
+type helpEffectivenessMetrics struct {
+	Lookups             int `json:"lookups"`
+	SuccessfulUses      int `json:"successfulUses"`
+	FailedUses          int `json:"failedUses"`
+	FailedLookups       int `json:"failedLookups"`
+	RepeatedLookups     int `json:"repeatedLookups"`
+	AbandonedLookups    int `json:"abandonedLookups"`
+	Sessions            int `json:"sessions"`
+	IneffectiveSessions int `json:"ineffectiveSessions"`
 }
 
 type codexWaitMetrics struct {
@@ -205,6 +220,10 @@ type codexSessionRecord struct {
 	CrossCallTransitions         map[string]int
 	OwnedOperationChains         map[string]int
 	OwnedOperationRetries        map[string]ownedOperationRetryMetrics
+	ToolingBypasses              map[string]int
+	HelpEffectiveness            map[string]helpEffectivenessMetrics
+	VerificationEscalations      map[string]int
+	SearchEffectiveness          map[string]searchEffectivenessMetrics
 	OwnedTooling                 map[string]codexToolMetrics
 	OwnedToolUnmatched           map[string]codexToolMetrics
 	OwnedOperations              map[string]codexToolMetrics

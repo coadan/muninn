@@ -16,12 +16,16 @@ Muninn helps identify:
   a workflow boundary that should own the sequence;
 - opaque non-zero exits that lack a specific failure contract, plus unchanged
   retries that repeatedly reproduce the same owned-operation failure;
+- explicit lower-level bypasses of preferred repository operations and help
+  lookups that do not lead to a successful next operation;
+- broad verification failures repeatedly used before focused diagnosis;
 - long CLI flags supplied on at least 80% of locally owned tool calls across
   multiple sessions, which may belong in defaults or repository inference;
 - progress stalls, rapid polling, abandoned continuations, and costly
   cross-call workflow loops;
-- repeated source discovery and navigation into owners associated with high
-  task cost, review rework, or downstream failures;
+- repeated search bursts with low search-to-owner yield, plus source discovery
+  and navigation into owners associated with high task cost, review rework, or
+  downstream failures;
 - oversized always-on instructions and recurring instruction-discovery gaps;
 - repeated exact verification without intervening edits, expensive repair
   loops, and checks whose absence is associated with downstream escapes;

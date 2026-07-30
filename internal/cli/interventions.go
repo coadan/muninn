@@ -225,6 +225,12 @@ func sessionInterventionKey(finding sessionFinding, dominantPhases map[string]bo
 	if finding.Category == "owned-operation" {
 		return signalID("intervention", "operation", finding.Target)
 	}
+	if finding.Category == "tooling-bypass" || finding.Category == "help-effectiveness" {
+		return signalID("intervention", "operation", finding.Target)
+	}
+	if finding.Category == "search-inefficiency" && finding.Control == "local" {
+		return signalID("intervention", "operation", finding.Target)
+	}
 	if finding.Control == "local" && finding.Lever == "tooling" {
 		tool, operation, found := strings.Cut(finding.Target, "/")
 		if found && strings.TrimSpace(tool) != "" && strings.TrimSpace(operation) != "" {
@@ -246,6 +252,7 @@ func sessionInterventionKey(finding sessionFinding, dominantPhases map[string]bo
 		return "intervention/workflow/discovery"
 	}
 	if finding.Category == "verification-loop" ||
+		finding.Category == "verification-escalation" ||
 		finding.Signal == "agent-interface/repeated-cross-call-workflow-verification" {
 		return "intervention/workflow/verification"
 	}
@@ -265,10 +272,18 @@ func interventionPrimaryPriority(finding sessionFinding) int {
 	switch {
 	case finding.Category == "recovery-loop":
 		return 8
+	case finding.Category == "tooling-bypass":
+		return 8
 	case finding.Category == "diagnostic-contract":
 		return 7
 	case finding.Category == "owned-operation", finding.Category == "verification-loop":
 		return 6
+	case finding.Category == "verification-escalation":
+		return 6
+	case finding.Category == "help-effectiveness":
+		return 5
+	case finding.Category == "search-inefficiency":
+		return 5
 	case finding.Category == "owned-tool":
 		return 5
 	case finding.Category == "default-candidate":

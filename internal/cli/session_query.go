@@ -25,7 +25,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.input_tokens, events.cached_input_tokens,
 		events.uncached_input_tokens, events.output_tokens,
 		events.reasoning_tokens, events.total_tokens, events.selector_digests,
-		events.owned_operations, events.owned_flags, events.owned_flag_tools,
+		events.owned_operations, events.bypassed_operations,
+		events.owned_flags, events.owned_flag_tools,
 		events.operation_task,
 		events.operation_attribution_ambiguous,
 		events.operation_continues, events.targets, events.inline_bytes,
@@ -64,6 +65,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			truncated                     int
 			selectorDigests               string
 			ownedOperations               string
+			bypassedOperations            string
 			ownedFlags                    string
 			ownedFlagScopes               string
 			operationTask                 string
@@ -104,6 +106,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&event.Tokens.TotalTokens,
 			&selectorDigests,
 			&ownedOperations,
+			&bypassedOperations,
 			&ownedFlags,
 			&ownedFlagScopes,
 			&operationTask,
@@ -149,6 +152,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		}
 		_ = json.Unmarshal([]byte(selectorDigests), &event.SelectorDigests)
 		_ = json.Unmarshal([]byte(ownedOperations), &event.OwnedOperations)
+		_ = json.Unmarshal([]byte(bypassedOperations), &event.BypassedOperations)
 		_ = json.Unmarshal([]byte(ownedFlags), &event.OwnedFlags)
 		_ = json.Unmarshal([]byte(ownedFlagScopes), &event.OwnedFlagScopes)
 		event.OperationTask = operationTask

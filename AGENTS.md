@@ -63,6 +63,11 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
   failure-contract findings.
 - `internal/cli/recovery_retries.go`: unchanged immediate owned-operation retry
   outcomes and recovery-loop findings.
+- `internal/cli/tooling_bypass.go`, `internal/cli/help_effectiveness.go`, and
+  `internal/cli/verification_escalation.go`: configured workflow-contract
+  effectiveness signals.
+- `internal/cli/search_effectiveness.go`: privacy-safe search-burst convergence
+  and abandonment accounting.
 - `internal/cli/store.go`, `internal/cli/session_index.go`,
   `internal/cli/session_query.go`, and `internal/cli/failure_store.go`: SQLite
   lifecycle, derived indexing, analysis reads, and failure timelines.

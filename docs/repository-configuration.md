@@ -22,8 +22,25 @@ signals.
       "operationsOnly": false,
       "operations": [
         {
-          "id": "status",
-          "args": ["task", "*", "status"]
+          "id": "help",
+          "args": ["help"],
+          "kind": "help"
+        },
+        {
+          "id": "search",
+          "args": ["search"],
+          "kind": "search"
+        },
+        {
+          "id": "test-all",
+          "args": ["test"],
+          "kind": "verification-broad",
+          "bypassPatterns": [
+            {
+              "executable": "raw-test-runner",
+              "args": ["**"]
+            }
+          ]
         },
         {
           "id": "review-wait",
@@ -56,6 +73,22 @@ bounded external waits.
 `expectedFailureReasons` keeps an expected fixed failure label in metrics while
 preventing it from becoming an actionable operation finding.
 
+`kind` adds the minimum operation semantics required by cross-operation
+signals:
+
+- `help` measures whether the next definite operation for the same tool
+  succeeds without another lookup or abandonment;
+- `search` measures search-to-owner yield even when the executable is not a
+  shell search command;
+- `verification-focused` and `verification-broad` identify recurring broad
+  failures followed by focused diagnosis before an edit.
+
+`bypassPatterns` explicitly identifies lower-level executable/argument
+patterns that should normally route through the containing preferred
+operation. Muninn reports only the preferred operation ID and counts a bypass
+only when attribution is definite. Do not configure patterns for intentionally
+supported alternatives.
+
 `taskArgumentAfter` retains one bounded logical argument following the named
 token so failure reports can group by task without retaining other command
 text. `operationsOnly` is useful when the executable is a shared launcher and
@@ -74,8 +107,8 @@ required `--wait` selector should be a broader default. A remaining switch
 supplied on at least 80% of definite calls across multiple sessions becomes a
 candidate-default finding.
 
-Run with `--refresh` after changing owned tools or operation patterns so cached
-source events are reclassified.
+Run with `--refresh` after changing owned tools, operation patterns, kinds, or
+bypass patterns so cached source events are reclassified.
 
 ## Suppress a signal
 

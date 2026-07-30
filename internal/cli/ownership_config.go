@@ -7,10 +7,17 @@ import (
 )
 
 type ownedOperationConfig struct {
-	ID                     string   `json:"id"`
-	Args                   []string `json:"args"`
-	ExpectedWait           bool     `json:"expectedWait,omitempty"`
-	ExpectedFailureReasons []string `json:"expectedFailureReasons,omitempty"`
+	ID                     string                     `json:"id"`
+	Args                   []string                   `json:"args"`
+	Kind                   string                     `json:"kind,omitempty"`
+	BypassPatterns         []ownedBypassPatternConfig `json:"bypassPatterns,omitempty"`
+	ExpectedWait           bool                       `json:"expectedWait,omitempty"`
+	ExpectedFailureReasons []string                   `json:"expectedFailureReasons,omitempty"`
+}
+
+type ownedBypassPatternConfig struct {
+	Executable string   `json:"executable"`
+	Args       []string `json:"args"`
 }
 
 type ownedToolConfig struct {
@@ -59,6 +66,18 @@ func validateOwnedToolConfig(configs []ownedToolConfig) error {
 				return errors.New("ownedTools operation ids must be unique within each tool")
 			}
 			operationIDs[operationID] = struct{}{}
+			switch operation.Kind {
+			case "", "help", "search", "verification-focused", "verification-broad":
+			default:
+				return errors.New("ownedTools operation kind must be help, search, verification-focused, or verification-broad")
+			}
+			for _, pattern := range operation.BypassPatterns {
+				executable := strings.TrimSpace(pattern.Executable)
+				if executable == "" || filepath.Base(executable) != executable ||
+					len(strings.Fields(executable)) != 1 || len(pattern.Args) == 0 {
+					return errors.New("ownedTools operation bypassPatterns require one executable name and a non-empty args pattern")
+				}
+			}
 			expectedReasons := map[string]struct{}{}
 			for _, reason := range operation.ExpectedFailureReasons {
 				normalized := strings.ToLower(strings.TrimSpace(reason))

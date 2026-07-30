@@ -186,6 +186,10 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	}
 	findings = append(findings, buildDiagnosticContractFindings(report, ownership)...)
 	findings = append(findings, buildOwnedOperationRetryFindings(report)...)
+	findings = append(findings, buildToolingBypassFindings(report)...)
+	findings = append(findings, buildHelpEffectivenessFindings(report)...)
+	findings = append(findings, buildVerificationEscalationFindings(report)...)
+	findings = append(findings, buildSearchEffectivenessFindings(report)...)
 
 	verificationName, verification := dominantVerificationRepairLoop(
 		summary.DeliveryRework.VerificationChecks,
@@ -1095,7 +1099,7 @@ func sessionFindingLever(finding sessionFinding) (string, string) {
 		default:
 			return "source code", "medium"
 		}
-	case "discovery", "agent-interface", "operation-chain", "diagnostic-contract", "recovery-loop", "default-candidate", "output-cost":
+	case "discovery", "agent-interface", "operation-chain", "diagnostic-contract", "recovery-loop", "tooling-bypass", "help-effectiveness", "verification-escalation", "search-inefficiency", "default-candidate", "output-cost":
 		return "tooling", "medium"
 	case "session-loop":
 		switch {
@@ -1467,23 +1471,27 @@ func repositoryManifestTarget(target string) bool {
 
 func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 	limits := map[string]int{
-		"agent-interface":       4,
-		"operation-chain":       4,
-		"diagnostic-contract":   4,
-		"recovery-loop":         4,
-		"default-candidate":     6,
-		"code-structure":        6,
-		"instruction-discovery": 4,
-		"instruction-footprint": 1,
-		"recurring-failure":     4,
-		"diagnostic-failure":    6,
-		"owned-tool":            4,
-		"owned-operation":       6,
-		"session-loop":          6,
-		"output-cost":           3,
-		"delivery-quality":      3,
-		"delegation-cost":       3,
-		"task-cost":             2,
+		"agent-interface":         4,
+		"operation-chain":         4,
+		"diagnostic-contract":     4,
+		"recovery-loop":           4,
+		"tooling-bypass":          4,
+		"help-effectiveness":      4,
+		"verification-escalation": 4,
+		"search-inefficiency":     4,
+		"default-candidate":       6,
+		"code-structure":          6,
+		"instruction-discovery":   4,
+		"instruction-footprint":   1,
+		"recurring-failure":       4,
+		"diagnostic-failure":      6,
+		"owned-tool":              4,
+		"owned-operation":         6,
+		"session-loop":            6,
+		"output-cost":             3,
+		"delivery-quality":        3,
+		"delegation-cost":         3,
+		"task-cost":               2,
 	}
 	codeStructureSelections := selectRepositoryScopedCodeStructureFindings(
 		findings,

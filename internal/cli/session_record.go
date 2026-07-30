@@ -37,6 +37,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	hasPreviousTokens := false
 	operationChain := ownedOperationChainState{}
 	operationRetry := ownedOperationRetryState{}
+	helpEffectiveness := helpEffectivenessState{}
+	verificationEscalation := verificationEscalationState{}
+	searchEffectiveness := searchBurstState{}
 	episode := newTaskEpisode(record)
 	deliveryTrackers := map[string]*deliveryReworkTracker{}
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
@@ -153,6 +156,10 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		if len(eventOperations) == 0 {
 			eventOperations = ownership.classifyOperations(event.CommandCandidates)
 		}
+		eventBypassedOperations := event.BypassedOperations
+		if len(eventBypassedOperations) == 0 {
+			eventBypassedOperations = ownership.classifyBypassedOperations(event.CommandCandidates)
+		}
 		eventFlags := event.OwnedFlags
 		eventFlagScopes := event.OwnedFlagScopes
 		if len(event.CommandCandidates) > 0 {
@@ -208,6 +215,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 		switch event.Kind {
 		case sessionEventComplete:
+			helpEffectiveness.finish(&record, true)
 			record.Completed = true
 			touchSessionActivity(record.Activity, "completion", "", event.OccurredAt)
 			record.TaskEpisodes = append(record.TaskEpisodes, episode)
@@ -216,6 +224,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			previousCommandRound = 0
 			operationChain.reset()
 			operationRetry.reset()
+			helpEffectiveness.reset()
+			verificationEscalation.reset()
+			searchEffectiveness.reset()
 		case sessionEventCompaction:
 			record.Compactions++
 			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
@@ -223,6 +234,10 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			record.ToolCalls++
 			operationChain.observe(&record, event, eventOperations)
 			operationRetry.observeCall(event, eventOperations)
+			helpEffectiveness.observeCall(&record, event, eventOperations, ownership)
+			verificationEscalation.observeCall(&record, event, eventOperations, ownership)
+			searchEffectiveness.observeCall(&record, event, eventOperations, ownership)
+			recordToolingBypasses(&record, event, eventOperations, eventBypassedOperations)
 			if delegationOperation(event) {
 				touchSessionActivity(record.Activity, "delegation", event.ToolName, event.OccurredAt)
 			}
@@ -319,6 +334,8 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				continue
 			}
 			operationRetry.observeOutput(&record, event, eventOperations)
+			helpEffectiveness.observeOutput(&record, event, eventOperations, ownership)
+			verificationEscalation.observeOutput(event, eventOperations)
 			episode.observe(event, normalizedTokenUsage{}, eventOperations)
 			record.ToolOutputBytes += event.OutputBytes
 			if event.Truncated {
@@ -388,6 +405,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if activeDiagnostic != nil {
 		record.DiagnosticFailures = append(record.DiagnosticFailures, *activeDiagnostic)
 	}
+	terminal := lastEventKind == sessionEventComplete || generatedAt.Sub(record.EndedAt) >= 30*time.Minute
+	helpEffectiveness.finish(&record, terminal)
+	searchEffectiveness.finishSession(&record, terminal)
 	for _, tracker := range deliveryTrackers {
 		addDeliveryReworkMetrics(&record.DeliveryRework, tracker.metrics)
 	}
@@ -410,7 +430,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if record.StartedAt.IsZero() {
 		return codexSessionRecord{}, nil
 	}
-	if lastEventKind == sessionEventComplete || generatedAt.Sub(record.EndedAt) >= 30*time.Minute {
+	if terminal {
 		// ponytail: context-level accounting can undercount concurrent yielded
 		// operations with the same attribution; add provider operation IDs if
 		// this becomes material in real session evidence.
@@ -464,6 +484,10 @@ func newCodexSessionRecord() codexSessionRecord {
 		CrossCallTransitions:         map[string]int{},
 		OwnedOperationChains:         map[string]int{},
 		OwnedOperationRetries:        map[string]ownedOperationRetryMetrics{},
+		ToolingBypasses:              map[string]int{},
+		HelpEffectiveness:            map[string]helpEffectivenessMetrics{},
+		VerificationEscalations:      map[string]int{},
+		SearchEffectiveness:          map[string]searchEffectivenessMetrics{},
 		OwnedTooling:                 map[string]codexToolMetrics{},
 		OwnedToolUnmatched:           map[string]codexToolMetrics{},
 		OwnedOperations:              map[string]codexToolMetrics{},

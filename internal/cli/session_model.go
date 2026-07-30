@@ -47,6 +47,7 @@ type normalizedSessionEvent struct {
 	SelectorDigests               []string
 	CommandCandidates             []ownedCommandInvocation
 	OwnedOperations               []string
+	BypassedOperations            []string
 	OwnedFlags                    []string
 	OwnedFlagScopes               []string
 	OperationTask                 string

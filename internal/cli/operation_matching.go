@@ -15,6 +15,14 @@ func normalizeOperationPattern(pattern []string) []string {
 }
 
 func (catalog ownershipCatalog) classifyOperations(invocations []ownedCommandInvocation) []string {
+	return classifyOperationRules(catalog.operations, invocations)
+}
+
+func (catalog ownershipCatalog) classifyBypassedOperations(invocations []ownedCommandInvocation) []string {
+	return classifyOperationRules(catalog.bypassOperations, invocations)
+}
+
+func classifyOperationRules(rules []ownedOperationRule, invocations []ownedCommandInvocation) []string {
 	var matches []string
 	for _, invocation := range invocations {
 		executable := strings.ToLower(filepath.Base(invocation.Executable))
@@ -24,7 +32,7 @@ func (catalog ownershipCatalog) classifyOperations(invocations []ownedCommandInv
 		}
 		var invocationMatches []ownedOperationRule
 		bestSpecificity := ownedOperationSpecificity{}
-		for _, rule := range catalog.operations {
+		for _, rule := range rules {
 			if executable != rule.Executable || !operationPatternMatches(rule.Args, args) {
 				continue
 			}
