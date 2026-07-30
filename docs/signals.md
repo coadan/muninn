@@ -19,6 +19,8 @@ Muninn keeps these activities distinct:
 - root-agent and delegated work, coordination, and overlap;
 - repository navigation, repeated reads, and instruction footprint.
 - recurring three-step chains of definitely attributed configured operations.
+- owned operations whose recurring failures lack an actionable fixed
+  classification.
 
 ## Confidence and recurrence
 
@@ -55,6 +57,12 @@ described or ranked as cross-session recurrence. Successful operation output
 must exceed both a 50,000-token floor and the cohort-relative cost threshold;
 output-only operation findings remain medium priority rather than inheriting
 highest priority solely from local ownership.
+
+When at least three failures across two sessions use `other non-zero exit`, and
+that generic label accounts for at least half of an owned operation's
+actionable failures, Muninn flags the operation's diagnostic contract. The
+repair target is a stable machine-readable failure class and concise
+next-action metadata, not another prose pattern in Muninn.
 
 Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned

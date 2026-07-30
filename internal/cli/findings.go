@@ -184,6 +184,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			score:      650 + metrics.Sessions*20 + actionableFailures*30 + metrics.TruncatedCalls*10 + min(metrics.Calls, 200) + int(metrics.EstimatedOutputTokens/5_000),
 		})
 	}
+	findings = append(findings, buildDiagnosticContractFindings(report, ownership)...)
 
 	verificationName, verification := dominantVerificationRepairLoop(
 		summary.DeliveryRework.VerificationChecks,
@@ -1093,7 +1094,7 @@ func sessionFindingLever(finding sessionFinding) (string, string) {
 		default:
 			return "source code", "medium"
 		}
-	case "discovery", "agent-interface", "operation-chain", "default-candidate", "output-cost":
+	case "discovery", "agent-interface", "operation-chain", "diagnostic-contract", "default-candidate", "output-cost":
 		return "tooling", "medium"
 	case "session-loop":
 		switch {
@@ -1467,6 +1468,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 	limits := map[string]int{
 		"agent-interface":       4,
 		"operation-chain":       4,
+		"diagnostic-contract":   4,
 		"default-candidate":     6,
 		"code-structure":        6,
 		"instruction-discovery": 4,

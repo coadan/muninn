@@ -648,8 +648,16 @@ func TestBuildSessionFindingsRequiresRecurringOwnedOperationFriction(t *testing.
 		"repo/worktree-land": {"other non-zero exit": 1},
 	}
 	findings = buildSessionFindings(report, defaultRepositoryConfig())
-	if len(findings) != 1 ||
-		!strings.Contains(findings[0].Evidence, "3 actionable failures across 2 failure sessions") {
+	var operationFinding *sessionFinding
+	for index := range findings {
+		if findings[index].Category == "owned-operation" {
+			operationFinding = &findings[index]
+			break
+		}
+	}
+	if len(findings) != 2 ||
+		operationFinding == nil ||
+		!strings.Contains(operationFinding.Evidence, "3 actionable failures across 2 failure sessions") {
 		t.Fatalf("cross-session owned-operation friction missing: %#v", findings)
 	}
 }

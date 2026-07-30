@@ -7,13 +7,14 @@ import (
 
 var sessionFocusCategories = map[string]map[string]bool{
 	"tooling": {
-		"owned-tool":         true,
-		"owned-operation":    true,
-		"operation-chain":    true,
-		"default-candidate":  true,
-		"recurring-failure":  true,
-		"diagnostic-failure": true,
-		"output-cost":        true,
+		"owned-tool":          true,
+		"owned-operation":     true,
+		"operation-chain":     true,
+		"diagnostic-contract": true,
+		"default-candidate":   true,
+		"recurring-failure":   true,
+		"diagnostic-failure":  true,
+		"output-cost":         true,
 	},
 	"instructions": {
 		"instruction-discovery": true,
@@ -32,8 +33,9 @@ var sessionFocusCategories = map[string]map[string]bool{
 		"instruction-discovery": true,
 	},
 	"failures": {
-		"recurring-failure":  true,
-		"diagnostic-failure": true,
+		"recurring-failure":   true,
+		"diagnostic-failure":  true,
+		"diagnostic-contract": true,
 	},
 	"loops": {
 		"agent-interface":   true,
@@ -62,6 +64,7 @@ var preferredSessionFindingFocus = map[string]string{
 	"instruction-footprint": "instructions",
 	"agent-interface":       "interface",
 	"operation-chain":       "interface",
+	"diagnostic-contract":   "failures",
 	"code-structure":        "structure",
 	"discovery":             "discovery",
 	"session-loop":          "loops",
