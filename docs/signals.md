@@ -17,12 +17,15 @@ Muninn keeps these activities distinct:
 - context compactions attributed to the phase that preceded them;
 - structured Heimdal failures and post-failure recovery cost;
 - root-agent and delegated work, coordination, and overlap;
-- repository navigation, repeated reads, and instruction footprint.
-- recurring three-step chains of definitely attributed configured operations.
+- repository navigation, repeated reads, and instruction footprint;
+- recurring three-step chains of definitely attributed configured operations;
 - owned operations whose recurring failures lack an actionable fixed
-  classification.
+  classification;
 - unchanged immediate retries of failed configured operations, separated into
-  repeated failures and successful retries.
+  repeated failures and successful retries;
+- explicitly configured tooling bypasses and the outcome of help lookups;
+- broad-failure-to-focused-diagnosis verification escalation;
+- search bursts split into converged and abandoned search-to-owner outcomes.
 
 ## Confidence and recurrence
 
@@ -71,6 +74,36 @@ operation in the immediately following outer call, with no edit, inspection,
 or other tool call between attempts. Muninn reports successful retries
 separately and creates a recovery-loop finding only when at least three retries
 fail again across two sessions. Continuation polling is not a retry.
+
+Tooling-bypass findings require an explicit `bypassPatterns` declaration and
+at least five definite bypass invocations across two sessions. Muninn never
+infers that an arbitrary shell command is forbidden. The finding targets the
+preferred configured operation so it consolidates with that operation's other
+evidence.
+
+Help effectiveness applies only to operations declared with `kind: "help"`.
+A lookup is successful when a definite operation for the same owned tool runs
+successfully within the next three outer calls. Failed help, a failed next
+operation, another help lookup, or terminal abandonment remains separately
+counted. A finding requires at least five lookups, at least three ineffective
+outcomes across two sessions, and an ineffective share of at least half.
+
+Verification escalation applies to configured `verification-broad` and
+`verification-focused` operations for the same tool. A finding requires at
+least three failed broad checks followed by a focused check before any edit,
+across two sessions. Broad checks that pass, or focused diagnosis after an
+edit, do not count.
+
+Search effectiveness counts outer-call bursts, not commands bundled into one
+call. Three or more separate search calls before the first read or edit form an
+inefficient burst; findings require at least three such bursts across two
+sessions. Reports separate bursts that eventually reach a read/edit from those
+that are abandoned. Operations declared with `kind: "search"` retain their
+configured ID. When a repository declares exactly one such operation, generic
+shell-search bursts also route to that owner, allowing evidence such as
+`ygg/search` to improve the owned search surface without declaring every
+individual shell search a bypass. Queries, results, and raw command text are
+never retained.
 
 Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned

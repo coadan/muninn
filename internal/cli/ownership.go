@@ -16,6 +16,8 @@ type ownershipCatalog struct {
 	byDigest         map[string][]string
 	byExecutable     map[string][]string
 	operations       []ownedOperationRule
+	bypassOperations []ownedOperationRule
+	operationKinds   map[string]string
 	expectedFailures map[string]map[string]struct{}
 	expectedWaits    map[string]struct{}
 	taskMarkers      map[string][]string
@@ -39,11 +41,13 @@ type ownershipIndexConfig struct {
 }
 
 type ownershipIndexOperationConfig struct {
-	ID   string   `json:"id"`
-	Args []string `json:"args"`
+	ID             string                     `json:"id"`
+	Args           []string                   `json:"args"`
+	Kind           string                     `json:"kind,omitempty"`
+	BypassPatterns []ownedBypassPatternConfig `json:"bypassPatterns,omitempty"`
 }
 
-const ownershipClassificationVersion = 3
+const ownershipClassificationVersion = 4
 
 func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 	indexConfigs := make([]ownershipIndexConfig, 0, len(configs))
@@ -56,8 +60,10 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 		}
 		for _, operation := range config.Operations {
 			indexConfig.Operations = append(indexConfig.Operations, ownershipIndexOperationConfig{
-				ID:   operation.ID,
-				Args: operation.Args,
+				ID:             operation.ID,
+				Args:           operation.Args,
+				Kind:           operation.Kind,
+				BypassPatterns: operation.BypassPatterns,
 			})
 		}
 		indexConfigs = append(indexConfigs, indexConfig)
@@ -75,6 +81,7 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 		byExecutable:     map[string][]string{},
 		expectedFailures: map[string]map[string]struct{}{},
 		expectedWaits:    map[string]struct{}{},
+		operationKinds:   map[string]string{},
 		taskMarkers:      map[string][]string{},
 		operationsOnly:   map[string]bool{},
 		cacheKey:         hex.EncodeToString(configDigest[:8]),
@@ -94,14 +101,26 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 			}
 			for _, operation := range config.Operations {
 				operationID := strings.TrimSpace(operation.ID)
+				operationKey := id + "/" + operationID
 				catalog.operations = append(catalog.operations, ownedOperationRule{
 					ToolID:      id,
 					OperationID: operationID,
 					Executable:  normalizedExecutable,
 					Args:        normalizeOperationPattern(operation.Args),
 				})
+				if kind := strings.TrimSpace(operation.Kind); kind != "" {
+					catalog.operationKinds[operationKey] = kind
+				}
+				for _, pattern := range operation.BypassPatterns {
+					catalog.bypassOperations = append(catalog.bypassOperations, ownedOperationRule{
+						ToolID:      id,
+						OperationID: operationID,
+						Executable:  strings.ToLower(filepath.Base(strings.TrimSpace(pattern.Executable))),
+						Args:        normalizeOperationPattern(pattern.Args),
+					})
+				}
 				if len(operation.ExpectedFailureReasons) > 0 {
-					key := id + "/" + operationID
+					key := operationKey
 					if catalog.expectedFailures[key] == nil {
 						catalog.expectedFailures[key] = map[string]struct{}{}
 					}
@@ -110,7 +129,7 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 					}
 				}
 				if operation.ExpectedWait {
-					catalog.expectedWaits[id+"/"+operationID] = struct{}{}
+					catalog.expectedWaits[operationKey] = struct{}{}
 				}
 			}
 		}
@@ -120,6 +139,24 @@ func newOwnershipCatalog(configs []ownedToolConfig) ownershipCatalog {
 		}
 	}
 	return catalog
+}
+
+func (catalog ownershipCatalog) operationKind(operation string) string {
+	return catalog.operationKinds[operation]
+}
+
+func (catalog ownershipCatalog) singleOperationOfKind(kind string) string {
+	match := ""
+	for operation, operationKind := range catalog.operationKinds {
+		if operationKind != kind {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = operation
+	}
+	return match
 }
 
 func (catalog ownershipCatalog) operationWaitExpected(operation string) bool {
