@@ -12,6 +12,10 @@ Muninn helps identify:
 
 - locally controlled tools and operations with recurring failures, truncation,
   oversized output, or excessive repetition;
+- recurring three-operation chains that suggest a missing combined command or
+  a workflow boundary that should own the sequence;
+- opaque non-zero exits that lack a specific failure contract, plus unchanged
+  retries that repeatedly reproduce the same owned-operation failure;
 - long CLI flags supplied on at least 80% of locally owned tool calls across
   multiple sessions, which may belong in defaults or repository inference;
 - progress stalls, rapid polling, abandoned continuations, and costly
