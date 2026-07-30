@@ -23,9 +23,14 @@ func TestAnalyzeUsesJSONByDefault(t *testing.T) {
 }
 
 func TestAnalyzeRejectsRemovedJSONFlag(t *testing.T) {
-	err := cmdAnalyze(t.TempDir(), []string{"--json"})
+	output, err := captureStdout(t, func() error {
+		return cmdAnalyze(t.TempDir(), []string{"--json"})
+	})
 	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -json") {
 		t.Fatalf("removed --json flag error=%v", err)
+	}
+	if output != "" {
+		t.Fatalf("invalid option emitted stdout: %q", output)
 	}
 }
 

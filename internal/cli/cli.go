@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -29,8 +30,9 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func setFlagSetUsage(fs *flag.FlagSet, usageLine, summary string, examples []string) {
-	fs.Usage = func() {
+func setFlagSetUsage(fs *flag.FlagSet, usageLine, summary string, examples []string) func() {
+	fs.SetOutput(io.Discard)
+	show := func() {
 		if strings.TrimSpace(summary) != "" {
 			fmt.Println(summary)
 			fmt.Println()
@@ -39,7 +41,9 @@ func setFlagSetUsage(fs *flag.FlagSet, usageLine, summary string, examples []str
 		fmt.Printf("  %s\n", usageLine)
 		fmt.Println()
 		fmt.Println("Flags:")
+		fs.SetOutput(os.Stdout)
 		fs.PrintDefaults()
+		fs.SetOutput(io.Discard)
 		if len(examples) == 0 {
 			return
 		}
@@ -51,6 +55,17 @@ func setFlagSetUsage(fs *flag.FlagSet, usageLine, summary string, examples []str
 			}
 		}
 	}
+	fs.Usage = func() {}
+	return show
+}
+
+func flagHelpRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 func cmdCodex(root string, args []string) error {

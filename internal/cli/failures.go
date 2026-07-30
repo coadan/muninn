@@ -52,7 +52,6 @@ type ownedOperationFailureReport struct {
 
 func cmdFailures(root string, args []string) error {
 	fs := flag.NewFlagSet("muninn failures", flag.ContinueOnError)
-	fs.SetOutput(os.Stdout)
 	sinceRaw := fs.String("since", "7d", "lookback duration (for example 24h, 7d, or 2w)")
 	providerName := fs.String("provider", defaultSessionProvider, sessionProviderFlagHelp())
 	sessionsDir := fs.String("sessions-dir", "", "override the selected provider's default session directory")
@@ -73,7 +72,7 @@ func cmdFailures(root string, args []string) error {
 		defaultFailureEventLimit,
 		"maximum definite failure events to return (1-100); ambiguous evidence is capped at 5",
 	)
-	setFlagSetUsage(
+	showUsage := setFlagSetUsage(
 		fs,
 		"muninn failures <tool/operation> [--repo <path>] [--since <duration>] [--task <task-id>] [--reason <label>] [--limit <n>]",
 		"Inspect bounded, privacy-safe failure events for one configured owned operation.",
@@ -86,8 +85,9 @@ func cmdFailures(root string, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: muninn failures <tool/operation> [flags]")
 	}
-	if isHelpToken(args[0]) {
-		return fs.Parse(args)
+	if isHelpToken(args[0]) || flagHelpRequested(args[1:]) {
+		showUsage()
+		return flag.ErrHelp
 	}
 	selectedOperation := strings.TrimSpace(args[0])
 	if selectedOperation == "" || strings.HasPrefix(selectedOperation, "-") {

@@ -32,6 +32,7 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
 
 - `cmd/muninn/main.go`: thin process entry point.
 - `internal/cli/cli.go`: top-level command routing.
+- `internal/cli/errors.go`: compact structured CLI error contract.
 - `internal/cli/analyze_command.go` and `internal/cli/config.go`: analysis CLI
   orchestration and repository policy.
 - `internal/cli/session_provider.go`: provider contract and declarative
