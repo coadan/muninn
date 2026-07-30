@@ -138,6 +138,9 @@ func TestParseCodexSessionPreservesNestedContinuationTool(t *testing.T) {
 	if len(session.Events) != 4 ||
 		session.Events[2].NestedToolContext != "nested tool write_stdin" ||
 		session.Events[3].NestedToolContext != "nested tool write_stdin" ||
+		session.Events[0].ToolRound != 1 ||
+		session.Events[1].ToolRound != 1 ||
+		session.Events[3].ToolRound != 1 ||
 		!session.Events[3].OperationContinues ||
 		session.Events[3].Family == "" {
 		t.Fatalf("nested continuation attribution mismatch: %#v", session.Events)

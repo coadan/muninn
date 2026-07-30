@@ -21,6 +21,8 @@ Muninn keeps these activities distinct:
 - recurring three-step chains of definitely attributed configured operations.
 - owned operations whose recurring failures lack an actionable fixed
   classification.
+- unchanged immediate retries of failed configured operations, separated into
+  repeated failures and successful retries.
 
 ## Confidence and recurrence
 
@@ -63,6 +65,12 @@ that generic label accounts for at least half of an owned operation's
 actionable failures, Muninn flags the operation's diagnostic contract. The
 repair target is a stable machine-readable failure class and concise
 next-action metadata, not another prose pattern in Muninn.
+
+Owned-operation retry findings require the same definitely attributed
+operation in the immediately following outer call, with no edit, inspection,
+or other tool call between attempts. Muninn reports successful retries
+separately and creates a recovery-loop finding only when at least three retries
+fail again across two sessions. Continuation polling is not a retry.
 
 Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned

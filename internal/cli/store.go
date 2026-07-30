@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 33
+const sessionStoreSchemaVersion = 34
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionStore struct {
