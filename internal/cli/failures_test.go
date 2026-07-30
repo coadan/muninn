@@ -56,8 +56,13 @@ func TestFailuresRejectsRemovedOperationFlag(t *testing.T) {
 }
 
 func TestFailuresRejectsRemovedJSONFlag(t *testing.T) {
-	err := cmdFailures(t.TempDir(), []string{"runner/check", "--json"})
+	output, err := captureStdout(t, func() error {
+		return cmdFailures(t.TempDir(), []string{"runner/check", "--json"})
+	})
 	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -json") {
 		t.Fatalf("removed --json flag error=%v", err)
+	}
+	if output != "" {
+		t.Fatalf("invalid option emitted stdout: %q", output)
 	}
 }

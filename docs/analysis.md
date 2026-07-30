@@ -99,3 +99,10 @@ Unrelated and unchanged sources are negatively cached. Complete discovery
 prunes sources that disappeared or left the selected provider scope.
 Incompatible schemas rebuild the derived cache instead of carrying migration
 compatibility.
+
+## Error contract
+
+Successful analysis and failure timelines emit JSON to stdout. Command errors
+emit a compact JSON envelope to stderr with `schemaVersion`, `status: "error"`,
+and fixed `error.code`, `error.message`, and `error.nextAction` fields. Explicit
+`--help` remains human-readable. There is no output-format flag.

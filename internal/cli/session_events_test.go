@@ -59,6 +59,7 @@ func TestCodexToolFailureReasonUsesFixedPrivacySafeLabels(t *testing.T) {
 		"linting took 13ms, errors: 1, warnings: 0":                               "lint failure",
 		"FAIL in (expected-result)":                                               "test failure",
 		"Process exited with code 1":                                              "other non-zero exit",
+		`{"schemaVersion":1,"status":"error","error":{"code":"invalid-option"}}`:  "unsupported command option",
 	}
 	for input, want := range tests {
 		if got := codexToolFailureReason(input); got != want {

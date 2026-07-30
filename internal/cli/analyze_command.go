@@ -17,7 +17,6 @@ import (
 
 func cmdAnalyze(root string, args []string) error {
 	fs := flag.NewFlagSet("muninn analyze", flag.ContinueOnError)
-	fs.SetOutput(os.Stdout)
 	sinceRaw := fs.String("since", "7d", "lookback duration (for example 24h, 7d, or 2w)")
 	sinceCommit := fs.String("since-commit", "", "analyze activity after a Git commit timestamp")
 	providerName := fs.String("provider", defaultSessionProvider, sessionProviderFlagHelp())
@@ -38,7 +37,7 @@ func cmdAnalyze(root string, args []string) error {
 	detailsOutput := fs.Bool("details", false, "emit the full JSON report; with --operation, show all operation rows")
 	focus := fs.String("focus", "", "filter findings: friction (broad), tooling, instructions, interface, structure, discovery, failures, loops, output, or quality")
 	operation := fs.String("operation", "", "show configured operations for one locally owned tool or exact tool/operation ID")
-	setFlagSetUsage(
+	showUsage := setFlagSetUsage(
 		fs,
 		"muninn analyze [--repo <path>] [--since <duration>] [--task <task-id>] [--focus <area>] [--details] [--operation <tool-or-operation>] [--compare previous]",
 		"Summarize token usage and tool-output attribution without exposing session content or command text.",
@@ -55,6 +54,10 @@ func cmdAnalyze(root string, args []string) error {
 			"muninn analyze --repo . --since 14d --include-archived",
 		},
 	)
+	if flagHelpRequested(args) {
+		showUsage()
+		return flag.ErrHelp
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

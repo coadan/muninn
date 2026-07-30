@@ -5,7 +5,6 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"os"
 
 	"github.com/coadan/muninn/internal/cli"
@@ -19,6 +18,8 @@ func main() {
 	if err == nil || errors.Is(err, flag.ErrHelp) {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "error:", err)
+	if writeErr := cli.WriteError(os.Stderr, err); writeErr != nil {
+		_, _ = os.Stderr.WriteString("{\"schemaVersion\":1,\"status\":\"error\",\"error\":{\"code\":\"error-report-failed\"}}\n")
+	}
 	os.Exit(1)
 }

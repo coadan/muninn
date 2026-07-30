@@ -177,6 +177,7 @@ func codexToolFailureReason(statusText string) string {
 		return "unsupported command target"
 	case strings.Contains(preview, "unknown option") ||
 		strings.Contains(preview, "unknown flag") ||
+		strings.Contains(preview, `"code":"invalid-option"`) ||
 		strings.Contains(preview, "unrecognized option"):
 		return "unsupported command option"
 	case strings.Contains(preview, "cannot combine --table with named views"):
