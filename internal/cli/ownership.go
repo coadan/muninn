@@ -145,20 +145,6 @@ func (catalog ownershipCatalog) operationKind(operation string) string {
 	return catalog.operationKinds[operation]
 }
 
-func (catalog ownershipCatalog) singleOperationOfKind(kind string) string {
-	match := ""
-	for operation, operationKind := range catalog.operationKinds {
-		if operationKind != kind {
-			continue
-		}
-		if match != "" {
-			return ""
-		}
-		match = operation
-	}
-	return match
-}
-
 func (catalog ownershipCatalog) operationWaitExpected(operation string) bool {
 	_, ok := catalog.expectedWaits[operation]
 	return ok

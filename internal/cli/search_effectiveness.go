@@ -114,11 +114,9 @@ func searchBurstTarget(
 	operations []string,
 	ownership ownershipCatalog,
 ) string {
-	if !event.OperationAttributionAmbiguous && len(operations) == 1 {
+	if !event.OperationAttributionAmbiguous && len(operations) == 1 &&
+		ownership.operationKind(operations[0]) == "search" {
 		return operations[0]
-	}
-	if operation := ownership.singleOperationOfKind("search"); operation != "" {
-		return operation
 	}
 	return "search"
 }

@@ -53,7 +53,7 @@ func TestSearchBurstDoesNotPenalizeBundledSearchAndRead(t *testing.T) {
 	}
 }
 
-func TestGenericSearchBurstRoutesToSingleConfiguredSearchOwner(t *testing.T) {
+func TestGenericSearchBurstRemainsBackendNeutral(t *testing.T) {
 	catalog := newOwnershipCatalog([]ownedToolConfig{{
 		ID:          "ygg",
 		Executables: []string{"ygg"},
@@ -62,8 +62,35 @@ func TestGenericSearchBurstRoutesToSingleConfiguredSearchOwner(t *testing.T) {
 		}},
 	}})
 	event := normalizedSessionEvent{FirstFamily: "search", LastFamily: "search"}
-	if got := searchBurstTarget(event, nil, catalog); got != "ygg/search" {
-		t.Fatalf("search burst target=%q", got)
+	if target := searchBurstTarget(event, nil, catalog); target != "search" {
+		t.Fatalf("search burst target=%q", target)
+	}
+}
+
+func TestGenericSearchBurstDoesNotChargeOptionalSearchBackend(t *testing.T) {
+	record := newCodexSessionRecord()
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "ygg",
+		Executables: []string{"ygg"},
+		Operations: []ownedOperationConfig{{
+			ID: "search", Args: []string{"search"}, Kind: "search",
+		}},
+	}})
+	state := searchBurstState{}
+	for round := 1; round <= 3; round++ {
+		event := normalizedSessionEvent{
+			Kind: sessionEventToolCall, ToolRound: round,
+			FirstFamily: "search", LastFamily: "search",
+		}
+		state.observeCall(&record, event, nil, catalog)
+	}
+	state.finishSession(&record, true)
+	if _, exists := record.SearchEffectiveness["ygg/search"]; exists {
+		t.Fatalf("generic search charged optional backend: %#v", record.SearchEffectiveness)
+	}
+	metrics := record.SearchEffectiveness["search"]
+	if metrics.InefficientBursts != 1 || metrics.InefficientAbandoned != 1 {
+		t.Fatalf("generic search effectiveness=%#v", metrics)
 	}
 }
 
