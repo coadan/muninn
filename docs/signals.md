@@ -99,11 +99,11 @@ call. Three or more separate search calls before the first read or edit form an
 inefficient burst; findings require at least three such bursts across two
 sessions. Reports separate bursts that eventually reach a read/edit from those
 that are abandoned. Operations declared with `kind: "search"` retain their
-configured ID. When a repository declares exactly one such operation, generic
-shell-search bursts also route to that owner, allowing evidence such as
-`ygg/search` to improve the owned search surface without declaring every
-individual shell search a bypass. Queries, results, and raw command text are
-never retained.
+configured ID, and only bursts that actually invoke that operation measure its
+search effectiveness. Generic shell-search bursts remain under the neutral
+`search` target; Muninn does not assume that any configured backend is
+preferred or exclusive. Queries, results, and raw command text are never
+retained.
 
 Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned
