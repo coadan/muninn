@@ -30,6 +30,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		record.CWD = workspaceRoot
 	}
 	record.Task = codexTaskName(workspaceRoot, record.CWD)
+	record.TokenTelemetryExcluded = hasImplausibleTokenTelemetry(session.Events, since, generatedAt)
 
 	previousCommandRound := 0
 	previousCommand := normalizedSessionEvent{}
@@ -76,7 +77,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		if !inRepositoryScope {
 			continue
 		}
-		if event.Kind == sessionEventToken {
+		if event.Kind == sessionEventToken && !record.TokenTelemetryExcluded {
 			addNormalizedTokenUsage(&record.Tokens, tokenIncrement)
 		}
 		if activeDiagnostic != nil &&
@@ -93,6 +94,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				activeDiagnostic.EndedAt = event.OccurredAt
 				switch event.Kind {
 				case sessionEventToken:
+					if record.TokenTelemetryExcluded {
+						break
+					}
 					addNormalizedTokenUsage(&activeDiagnostic.Tokens, tokenIncrement)
 				case sessionEventToolCall:
 					activeDiagnostic.ToolCalls++
@@ -178,7 +182,11 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			event.OperationTask = repositoryTaskForWorkingDirectory(eventCWD, workspaceRoot)
 		}
 		if event.Kind != sessionEventToolOutput {
-			episode.observe(event, tokenIncrement, eventOperations)
+			episodeTokens := tokenIncrement
+			if record.TokenTelemetryExcluded && event.Kind == sessionEventToken {
+				episodeTokens = normalizedTokenUsage{}
+			}
+			episode.observe(event, episodeTokens, eventOperations)
 		}
 		eventTask := ownedOperationTask(event, ownership, record.Task)
 		deliveryTracker := deliveryTrackers[eventTask]
@@ -402,6 +410,12 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	if !episode.StartedAt.IsZero() {
 		record.TaskEpisodes = append(record.TaskEpisodes, episode)
 	}
+	if record.TokenTelemetryExcluded {
+		// The same malformed provider stream also replays completion markers.
+		// Keep its tool and lifecycle evidence, but do not manufacture task
+		// outcomes from an untrustworthy transcript.
+		record.TaskEpisodes = nil
+	}
 	if activeDiagnostic != nil {
 		record.DiagnosticFailures = append(record.DiagnosticFailures, *activeDiagnostic)
 	}
@@ -473,6 +487,57 @@ func normalizedTokenUsageIncrement(current, previous normalizedTokenUsage, hasPr
 		ReasoningTokens:     max(int64(0), current.ReasoningTokens-previous.ReasoningTokens),
 		TotalTokens:         max(int64(0), current.TotalTokens-previous.TotalTokens),
 	}
+}
+
+const (
+	minTokenTelemetrySnapshots = 1_000
+	minTokenTelemetryElapsed   = time.Second
+	maxTokenTelemetryPerSecond = 1_000_000
+	maxFreshTelemetryPerSecond = 100_000
+)
+
+// hasImplausibleTokenTelemetry rejects a provider counter stream only when its
+// aggregate rate is physically implausible. Codex sometimes mirrors a global
+// token stream into a short-lived child transcript; treating those snapshots as
+// that child's cumulative usage overwhelms profile and delegation analysis.
+func hasImplausibleTokenTelemetry(events []normalizedSessionEvent, since, generatedAt time.Time) bool {
+	previous := normalizedTokenUsage{}
+	hasPrevious := false
+	usage := normalizedTokenUsage{}
+	snapshots := 0
+	var first, last time.Time
+	for _, event := range events {
+		if event.Kind != sessionEventToken {
+			continue
+		}
+		if event.OccurredAt.Before(since) {
+			previous = event.Tokens
+			hasPrevious = true
+			continue
+		}
+		if event.OccurredAt.After(generatedAt) {
+			continue
+		}
+		increment := normalizedTokenUsageIncrement(event.Tokens, previous, hasPrevious)
+		previous = event.Tokens
+		hasPrevious = true
+		if first.IsZero() {
+			first = event.OccurredAt
+		}
+		last = event.OccurredAt
+		snapshots++
+		addNormalizedTokenUsage(&usage, increment)
+	}
+	if snapshots < minTokenTelemetrySnapshots || last.Sub(first) < minTokenTelemetryElapsed {
+		return false
+	}
+	seconds := int64(last.Sub(first).Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+	fresh := usage.UncachedInputTokens + usage.OutputTokens
+	return usage.TotalTokens/seconds > maxTokenTelemetryPerSecond &&
+		fresh/seconds > maxFreshTelemetryPerSecond
 }
 
 func newCodexSessionRecord() codexSessionRecord {

@@ -13,6 +13,7 @@ func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
 	report.Tasks = []codexTaskInsights{{Task: "private-task"}}
 	report.Summary.Sessions = 3
 	report.Summary.ToolCalls = 12
+	report.Summary.ExcludedTokenStreams = 2
 	report.Summary.ToolCallsByName["large-detail"] = 10
 	report.Outcomes.Completed = 2
 	report.Outcomes.Phases = map[string]taskPhaseAnalysis{"large-detail": {}}
@@ -40,6 +41,7 @@ func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
 		`"detailLevel":"summary"`,
 		`"sessions":3`,
 		`"toolCalls":12`,
+		`"excludedTokenTelemetrySessions":2`,
 		`"failureFingerprints":1`,
 		`"totalInterventions":6`,
 		`"intervention/tool/example"`,

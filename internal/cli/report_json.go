@@ -15,6 +15,7 @@ type compactSessionSummary struct {
 	SessionsWithCompaction int                  `json:"sessionsWithCompactions"`
 	Tokens                 normalizedTokenUsage `json:"tokens"`
 	FreshTokens            int64                `json:"freshTokens"`
+	ExcludedTokenStreams   int                  `json:"excludedTokenTelemetrySessions"`
 	ToolCalls              int                  `json:"toolCalls"`
 	FailedToolCalls        int                  `json:"failedToolCalls"`
 	TruncatedToolCalls     int                  `json:"truncatedToolCalls"`
@@ -164,6 +165,7 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 			SessionsWithCompaction: summary.SessionsWithCompactions,
 			Tokens:                 summary.Tokens,
 			FreshTokens:            summary.FreshTokens,
+			ExcludedTokenStreams:   summary.ExcludedTokenStreams,
 			ToolCalls:              summary.ToolCalls,
 			FailedToolCalls:        summary.FailedToolCalls,
 			TruncatedToolCalls:     summary.TruncatedToolCalls,
