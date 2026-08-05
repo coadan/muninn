@@ -61,6 +61,8 @@ func TestCodexToolFailureReasonUsesFixedPrivacySafeLabels(t *testing.T) {
 		"Process exited with code 1":                                               "other non-zero exit",
 		`{"schemaVersion":1,"status":"error","error":{"code":"invalid-option"}}`:   "unsupported command option",
 		`{"schemaVersion":1,"status":"error","error":{"code":"operation-failed"}}`: "operation failure",
+		`{"ok":false,"error":{"code":"flows_push_save_failed"}}`:                   "flows push save failure",
+		`{"ok":false,"error":{"code":"flows_push_validation_failed"}}`:             "flows push validation failure",
 	}
 	for input, want := range tests {
 		if got := codexToolFailureReason(input); got != want {
@@ -101,6 +103,41 @@ func TestParseCodexSessionClassifiesStructuredCLIErrorWithoutRetainingDetails(t 
 	encoded, _ := json.Marshal(session)
 	if strings.Contains(string(encoded), "private database path failed") || strings.Contains(string(encoded), "retry safely") {
 		t.Fatalf("CLI error details escaped normalization: %s", encoded)
+	}
+}
+
+func TestParseCodexSessionClassifiesFlowsPushErrorWithoutRetainingDetails(t *testing.T) {
+	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "flows-push-error", []any{
+		map[string]any{
+			"timestamp": "2026-08-05T08:00:00Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call", "call_id": "push", "name": "exec",
+				"input": `const result = await tools.exec_command({cmd:"bwb cli flows push --file ./flow.clj"}); text(result);`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-08-05T08:00:01Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call_output", "call_id": "push",
+				"output": []any{
+					map[string]any{"type": "input_text", "text": "Script failed with code 1"},
+					map[string]any{"type": "input_text", "text": `{"error":{"code":"flows_push_save_failed","message":"private API topology","details":{"token":"sensitive"}},"ok":false}`},
+				},
+			},
+		},
+	})
+	session, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatalf("parse flows push error: %v", err)
+	}
+	if len(session.Events) != 2 || !session.Events[1].Failed || session.Events[1].FailureReason != "flows push save failure" {
+		t.Fatalf("flows push error classification=%#v", session.Events)
+	}
+	encoded, _ := json.Marshal(session)
+	if strings.Contains(string(encoded), "private API topology") || strings.Contains(string(encoded), "sensitive") {
+		t.Fatalf("flows push error details escaped normalization: %s", encoded)
 	}
 }
 

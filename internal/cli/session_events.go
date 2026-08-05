@@ -12,7 +12,7 @@ var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
 var nonZeroProcessExitCodePattern = regexp.MustCompile(`(?i)process exited with code\s+[1-9][0-9]*`)
 var searchMissExitCodePattern = regexp.MustCompile(`(?im)(?:"exit_code"\s*:\s*1(?:[^0-9]|$)|^exit code:\s*1(?:[^0-9]|$)|process exited with code\s+1(?:[^0-9]|$))`)
-var cliErrorCodePattern = regexp.MustCompile(`(?is)"schemaversion"\s*:\s*1\s*,\s*"status"\s*:\s*"error"\s*,\s*"error"\s*:\s*\{\s*"code"\s*:\s*"([a-z][a-z0-9-]{0,63})"`)
+var cliErrorCodePattern = regexp.MustCompile(`(?is)"error"\s*:\s*\{\s*"code"\s*:\s*"([a-z][a-z0-9_-]{0,63})"`)
 
 func addCodexToolMetrics(metrics map[string]codexToolMetrics, key string, calls int, failed, truncated bool, outputBytes int64) {
 	if key == "" {
@@ -240,7 +240,7 @@ func codexCLIErrorReason(text string) string {
 	if len(matches) != 2 {
 		return ""
 	}
-	// The whitelist keeps normalization privacy-safe: only fixed Muninn error
+	// The whitelist keeps normalization privacy-safe: only fixed command error
 	// codes are retained, never error messages or suggested actions.
 	switch matches[1] {
 	case "invalid-option":
@@ -253,6 +253,10 @@ func codexCLIErrorReason(text string) string {
 		return "operation failure"
 	case "error-report-failed":
 		return "error reporting failure"
+	case "flows_push_save_failed":
+		return "flows push save failure"
+	case "flows_push_validation_failed":
+		return "flows push validation failure"
 	default:
 		return ""
 	}
