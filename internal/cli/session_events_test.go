@@ -35,36 +35,72 @@ func TestCodexToolOutputFailedUsesStatusBlockOnly(t *testing.T) {
 
 func TestCodexToolFailureReasonUsesFixedPrivacySafeLabels(t *testing.T) {
 	tests := map[string]string{
-		"--api override is disabled unless you provide a service-account API key": "local CLI targeting",
-		"parse-error: missing test result sentinel":                               "test harness protocol",
-		"nREPL eval failed before reporting test results":                         "test harness protocol",
-		"verification changed files after staging; inspect changes and rerun":     "verification changed staged state",
-		"GraphQL: Head sha can't be blank, No commits between main and task/x":    "PR branch state",
-		"unknown nREPL target \"test\"":                                           "unsupported command target",
-		"Unknown option: --path":                                                  "unsupported command option",
-		"diagnostic query cannot combine --table with named views.":               "unsupported command combination",
-		"Specify --playthrough latest or an exact id because there are two.":      "ambiguous playthrough selection",
-		"The completed run has no diagnostic snapshot (no_playthrough).":          "missing diagnostic evidence",
-		"listen tcp 127.0.0.1:8080: bind: address already in use":                 "port collision",
-		"dial tcp 127.0.0.1:8090: connection refused":                             "local service unavailable",
-		"Void development runtime stopped because SpacetimeDB is not running.":    "local service unavailable",
-		"Live diagnostic query has no tracked Void development runtime.":          "local service unavailable",
-		"SpacetimeDB schema inspection failed: failed to find database":           "local service unavailable",
-		"HTTP 502: Bad Gateway":                                                   "transient service failure",
-		"GitHub couldn't respond to GitHub's servers":                             "transient service failure",
-		"zsh: command not found: playwright-cli":                                  "missing executable",
-		"fixture file not found: fixtures/missing.clj":                            "missing path or fixture",
-		"command timed out after 30s":                                             "timeout",
-		"Process exited with code 130":                                            "interrupted process",
-		"linting took 13ms, errors: 1, warnings: 0":                               "lint failure",
-		"FAIL in (expected-result)":                                               "test failure",
-		"Process exited with code 1":                                              "other non-zero exit",
-		`{"schemaVersion":1,"status":"error","error":{"code":"invalid-option"}}`:  "unsupported command option",
+		"--api override is disabled unless you provide a service-account API key":  "local CLI targeting",
+		"parse-error: missing test result sentinel":                                "test harness protocol",
+		"nREPL eval failed before reporting test results":                          "test harness protocol",
+		"verification changed files after staging; inspect changes and rerun":      "verification changed staged state",
+		"GraphQL: Head sha can't be blank, No commits between main and task/x":     "PR branch state",
+		"unknown nREPL target \"test\"":                                            "unsupported command target",
+		"Unknown option: --path":                                                   "unsupported command option",
+		"diagnostic query cannot combine --table with named views.":                "unsupported command combination",
+		"Specify --playthrough latest or an exact id because there are two.":       "ambiguous playthrough selection",
+		"The completed run has no diagnostic snapshot (no_playthrough).":           "missing diagnostic evidence",
+		"listen tcp 127.0.0.1:8080: bind: address already in use":                  "port collision",
+		"dial tcp 127.0.0.1:8090: connection refused":                              "local service unavailable",
+		"Void development runtime stopped because SpacetimeDB is not running.":     "local service unavailable",
+		"Live diagnostic query has no tracked Void development runtime.":           "local service unavailable",
+		"SpacetimeDB schema inspection failed: failed to find database":            "local service unavailable",
+		"HTTP 502: Bad Gateway":                                                    "transient service failure",
+		"GitHub couldn't respond to GitHub's servers":                              "transient service failure",
+		"zsh: command not found: playwright-cli":                                   "missing executable",
+		"fixture file not found: fixtures/missing.clj":                             "missing path or fixture",
+		"command timed out after 30s":                                              "timeout",
+		"Process exited with code 130":                                             "interrupted process",
+		"linting took 13ms, errors: 1, warnings: 0":                                "lint failure",
+		"FAIL in (expected-result)":                                                "test failure",
+		"Process exited with code 1":                                               "other non-zero exit",
+		`{"schemaVersion":1,"status":"error","error":{"code":"invalid-option"}}`:   "unsupported command option",
+		`{"schemaVersion":1,"status":"error","error":{"code":"operation-failed"}}`: "operation failure",
 	}
 	for input, want := range tests {
 		if got := codexToolFailureReason(input); got != want {
 			t.Fatalf("codexToolFailureReason(%q)=%q want %q", input, got, want)
 		}
+	}
+}
+
+func TestParseCodexSessionClassifiesStructuredCLIErrorWithoutRetainingDetails(t *testing.T) {
+	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "structured-cli-error", []any{
+		map[string]any{
+			"timestamp": "2026-08-05T08:00:00Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call", "call_id": "analyze", "name": "exec",
+				"input": `const result = await tools.exec_command({cmd:"muninn analyze --repo ."}); text(result);`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-08-05T08:00:01Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "custom_tool_call_output", "call_id": "analyze",
+				"output": []any{
+					map[string]any{"type": "input_text", "text": "Script failed with code 1"},
+					map[string]any{"type": "input_text", "text": `{"schemaVersion":1,"status":"error","error":{"code":"operation-failed","message":"private database path failed","nextAction":"retry safely"}}`},
+				},
+			},
+		},
+	})
+	session, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatalf("parse structured CLI error: %v", err)
+	}
+	if len(session.Events) != 2 || !session.Events[1].Failed || session.Events[1].FailureReason != "operation failure" {
+		t.Fatalf("structured CLI error classification=%#v", session.Events)
+	}
+	encoded, _ := json.Marshal(session)
+	if strings.Contains(string(encoded), "private database path failed") || strings.Contains(string(encoded), "retry safely") {
+		t.Fatalf("CLI error details escaped normalization: %s", encoded)
 	}
 }
 

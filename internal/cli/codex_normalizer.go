@@ -250,7 +250,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				reason := ""
 				context := ""
 				if failed {
-					reason = codexToolFailureReasonForDescriptor(statusText, descriptor.codexToolCallDescriptor)
+					reason = codexToolFailureReasonForDescriptor(text, descriptor.codexToolCallDescriptor)
 					context = codexFailureContextLabel(descriptor.codexToolCallDescriptor)
 				}
 				sequence++
