@@ -12,6 +12,7 @@ var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
 var nonZeroProcessExitCodePattern = regexp.MustCompile(`(?i)process exited with code\s+[1-9][0-9]*`)
 var searchMissExitCodePattern = regexp.MustCompile(`(?im)(?:"exit_code"\s*:\s*1(?:[^0-9]|$)|^exit code:\s*1(?:[^0-9]|$)|process exited with code\s+1(?:[^0-9]|$))`)
+var cliErrorCodePattern = regexp.MustCompile(`(?is)"schemaversion"\s*:\s*1\s*,\s*"status"\s*:\s*"error"\s*,\s*"error"\s*:\s*\{\s*"code"\s*:\s*"([a-z][a-z0-9-]{0,63})"`)
 
 func addCodexToolMetrics(metrics map[string]codexToolMetrics, key string, calls int, failed, truncated bool, outputBytes int64) {
 	if key == "" {
@@ -160,6 +161,9 @@ func codexToolFailureReason(statusText string) string {
 	if len(preview) > 32768 {
 		preview = preview[:32768]
 	}
+	if reason := codexCLIErrorReason(preview); reason != "" {
+		return reason
+	}
 	switch {
 	case strings.Contains(preview, "--api override is disabled"):
 		return "local CLI targeting"
@@ -228,6 +232,29 @@ func codexToolFailureReason(statusText string) string {
 		return "test failure"
 	default:
 		return "other non-zero exit"
+	}
+}
+
+func codexCLIErrorReason(text string) string {
+	matches := cliErrorCodePattern.FindStringSubmatch(text)
+	if len(matches) != 2 {
+		return ""
+	}
+	// The whitelist keeps normalization privacy-safe: only fixed Muninn error
+	// codes are retained, never error messages or suggested actions.
+	switch matches[1] {
+	case "invalid-option":
+		return "unsupported command option"
+	case "unknown-command":
+		return "unknown command"
+	case "invalid-arguments":
+		return "invalid command arguments"
+	case "operation-failed":
+		return "operation failure"
+	case "error-report-failed":
+		return "error reporting failure"
+	default:
+		return ""
 	}
 }
 
