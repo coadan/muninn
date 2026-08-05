@@ -155,6 +155,9 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	}
 	addNormalizedTokenUsage(&target.Tokens, record.Tokens)
 	target.FreshTokens += record.Tokens.UncachedInputTokens + record.Tokens.OutputTokens
+	if record.TokenTelemetryExcluded {
+		target.ExcludedTokenStreams++
+	}
 	target.ToolCalls += record.ToolCalls
 	target.FailedToolCalls += record.FailedToolCalls
 	target.TruncatedToolCalls += record.TruncatedToolCalls

@@ -100,6 +100,54 @@ func TestAnalyzeCodexSessionsAggregatesFinalCumulativeUsageAndFriction(t *testin
 	}
 }
 
+func TestAnalyzeCodexSessionsExcludesImplausibleTokenTelemetry(t *testing.T) {
+	sessionsDir := t.TempDir()
+	workspaceRoot := filepath.Join(t.TempDir(), "void2")
+	startedAt := time.Date(2026, 8, 3, 20, 7, 45, 0, time.UTC)
+	events := []any{
+		map[string]any{
+			"timestamp": startedAt.Format(time.RFC3339Nano),
+			"type":      "session_meta",
+			"payload":   map[string]any{"cwd": workspaceRoot},
+		},
+	}
+	for index := 0; index <= minTokenTelemetrySnapshots; index++ {
+		tokens := int64(index+1) * 1_000_000
+		events = append(events, map[string]any{
+			"timestamp": startedAt.Add(time.Duration(index+1) * time.Millisecond).Format(time.RFC3339Nano),
+			"type":      "event_msg",
+			"payload": map[string]any{
+				"type": "token_count",
+				"info": map[string]any{"total_token_usage": map[string]any{
+					"input_tokens": tokens, "cached_input_tokens": tokens - 200_000,
+					"output_tokens": 200_000, "total_tokens": tokens + 200_000,
+				}},
+			},
+		})
+	}
+	events = append(events, map[string]any{
+		"timestamp": startedAt.Add(2 * time.Second).Format(time.RFC3339Nano),
+		"type":      "event_msg",
+		"payload":   map[string]any{"type": "task_complete"},
+	})
+	writeCodexSessionFixture(t, sessionsDir, "implausible-token-telemetry", events)
+
+	generatedAt := startedAt.Add(time.Hour)
+	report, err := analyzeCodexSessions([]string{sessionsDir}, workspaceRoot, startedAt.Add(-time.Minute), generatedAt)
+	if err != nil {
+		t.Fatalf("analyzeCodexSessions: %v", err)
+	}
+	if report.Summary.ExcludedTokenStreams != 1 {
+		t.Fatalf("excluded token telemetry sessions=%d want 1", report.Summary.ExcludedTokenStreams)
+	}
+	if report.Summary.Tokens.TotalTokens != 0 || report.Summary.FreshTokens != 0 {
+		t.Fatalf("implausible telemetry must not affect cost totals: %#v", report.Summary)
+	}
+	if report.Outcomes.Completed != 0 || report.Outcomes.ToolUsingCompleted != 0 {
+		t.Fatalf("implausible telemetry must not fabricate task outcomes: %#v", report.Outcomes)
+	}
+}
+
 func TestAnalyzeCodexSessionsAttributesContinuationOutputToCommandFamily(t *testing.T) {
 	sessionsDir := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "breyta-workbench")

@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 108
+const codexSessionInsightsSchemaVersion = 109
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -27,6 +27,7 @@ type codexAggregateMetrics struct {
 	SessionsWithCompactions      int                                          `json:"sessionsWithCompactions"`
 	Tokens                       normalizedTokenUsage                         `json:"tokens"`
 	FreshTokens                  int64                                        `json:"freshTokens"`
+	ExcludedTokenStreams         int                                          `json:"excludedTokenTelemetrySessions"`
 	ToolCalls                    int                                          `json:"toolCalls"`
 	FailedToolCalls              int                                          `json:"failedToolCalls"`
 	TruncatedToolCalls           int                                          `json:"truncatedToolCalls"`
@@ -209,6 +210,7 @@ type codexSessionRecord struct {
 	Completed                    bool
 	Compactions                  int
 	Tokens                       normalizedTokenUsage
+	TokenTelemetryExcluded       bool
 	ToolCalls                    int
 	FailedToolCalls              int
 	TruncatedToolCalls           int
