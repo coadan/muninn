@@ -111,6 +111,7 @@ absolute paths, secrets, or provider session identifiers.
 - [Analysis and reports](docs/analysis.md)
 - [Signal interpretation](docs/signals.md)
 - [Comparing periods](docs/comparison.md)
+- [Decretion experiments](docs/decretion.md)
 - [Repository configuration](docs/repository-configuration.md)
 - [Improvement workflow](docs/improvement-workflow.md)
 - [Privacy and data model](docs/privacy.md)

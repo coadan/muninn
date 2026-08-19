@@ -3,7 +3,8 @@
 Muninn indexes attributable coding-agent session metadata for one repository
 and turns it into a ranked intervention queue. This page covers cohort and
 report selection. See [Signal interpretation](signals.md) for the evidence
-model and [Comparing periods](comparison.md) for longitudinal analysis.
+model, [Comparing periods](comparison.md) for longitudinal analysis, and
+[Decretion experiments](decretion.md) for reversible subtraction tests.
 
 ## Select a cohort
 
