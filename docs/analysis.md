@@ -105,6 +105,12 @@ prunes sources that disappeared or left the selected provider scope.
 Incompatible schemas rebuild the derived cache instead of carrying migration
 compatibility.
 
+Guidance load events remain cached, but loaded-skill token estimates are
+resolved again at analysis time from the provider's current installed skill
+roots. Editing an installed `SKILL.md` therefore updates footprint and
+decretion evidence without `--refresh`. When no current installed artifact can
+be resolved, Muninn retains the ingestion-time estimate rather than guessing.
+
 ## Error contract
 
 Successful analysis and failure timelines emit JSON to stdout. Command errors

@@ -184,6 +184,7 @@ func cmdAnalyze(root string, args []string) error {
 	if err != nil {
 		return err
 	}
+	refreshReportGuidanceSizes(&report, source, resolvedRepoRoot)
 	report.Provider = source.Name()
 	report.AnalysisScope = sessionAnalysisScope{
 		WindowKind:      windowKind,
@@ -210,6 +211,7 @@ func cmdAnalyze(root string, args []string) error {
 		if err != nil {
 			return err
 		}
+		refreshReportGuidanceSizes(&previous, source, resolvedRepoRoot)
 		previous.Provider = source.Name()
 		previous.AnalysisScope = report.AnalysisScope
 		instructionBoundary := previousUntil

@@ -66,6 +66,14 @@ transiently from `SKILL.md` read candidates and discards the source path before
 storage. Shared analysis owns reload accounting and findings; it never branches
 on the provider wire format.
 
+A provider may resolve current guidance sizes for validated logical IDs after
+cached analysis. Codex searches only its current user, system, plugin, and
+repository-local skill roots and returns the largest matching artifact when a
+logical ID is duplicated. Shared analysis overlays token estimates on summary
+and task metrics; historical load and reload counts remain unchanged. Paths
+used for resolution are transient and are never stored or reported. If the
+provider cannot resolve an ID, the stored ingestion-time estimate remains.
+
 The adapter must not pass prompts, messages, raw commands, raw output, absolute
 paths, secrets, or provider session identifiers into reports. `SourcePath` and
 `CWD` are local index metadata only. Provider identifiers used for lineage must

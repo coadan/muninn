@@ -77,6 +77,67 @@ func guidanceArtifactEstimatedTokens(candidate string, workingDirectories []stri
 	return 0
 }
 
+func codexGuidanceArtifactSizes(workspaceRoot string, ids []string) map[string]int64 {
+	wanted := map[string]bool{}
+	for _, id := range ids {
+		if guidanceArtifactIDPattern.MatchString(id) {
+			wanted[id] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+	sizes := map[string]int64{}
+	codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	if codexHome == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			codexHome = filepath.Join(home, ".codex")
+		}
+	}
+	roots := []string{filepath.Join(workspaceRoot, ".codex", "skills")}
+	if codexHome != "" {
+		roots = append(
+			roots,
+			filepath.Join(codexHome, "skills"),
+			filepath.Join(codexHome, "plugins", "cache"),
+		)
+	}
+	for _, root := range roots {
+		collectGuidanceArtifactSizes(root, wanted, sizes)
+	}
+	return sizes
+}
+
+func collectGuidanceArtifactSizes(root string, wanted map[string]bool, sizes map[string]int64) {
+	if strings.TrimSpace(root) == "" {
+		return
+	}
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if entry != nil && entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() || !strings.EqualFold(entry.Name(), "SKILL.md") {
+			return nil
+		}
+		id := filepath.Base(filepath.Dir(path))
+		if !wanted[id] {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		tokens := estimatedTokens(info.Size())
+		if current, ok := sizes[id]; !ok || tokens > current {
+			sizes[id] = tokens
+		}
+		return nil
+	})
+}
+
 func codexEditTargetCandidates(toolName, input string) []string {
 	if strings.ToLower(strings.TrimSpace(toolName)) != "apply_patch" {
 		return nil

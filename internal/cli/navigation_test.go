@@ -47,6 +47,38 @@ func TestCanonicalRepositoryTargetPreservesNonWorkbenchPaths(t *testing.T) {
 	}
 }
 
+func TestCodexGuidanceArtifactSizesUsesCurrentLargestInstalledMatch(t *testing.T) {
+	codexHome := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	writeInstructionFixture(
+		t,
+		filepath.Join(codexHome, "skills", "current-skill", "SKILL.md"),
+		"12345678",
+	)
+	writeInstructionFixture(
+		t,
+		filepath.Join(codexHome, "plugins", "cache", "owner", "plugin", "skills", "current-skill", "SKILL.md"),
+		"123456789012",
+	)
+	writeInstructionFixture(
+		t,
+		filepath.Join(workspace, ".codex", "skills", "local-skill", "SKILL.md"),
+		"1234",
+	)
+
+	got := codexGuidanceArtifactSizes(
+		workspace,
+		[]string{"current-skill", "local-skill", "missing-skill", "not valid"},
+	)
+	if got["current-skill"] != 3 || got["local-skill"] != 1 {
+		t.Fatalf("current guidance sizes=%#v", got)
+	}
+	if _, ok := got["missing-skill"]; ok {
+		t.Fatalf("missing skill received a guessed size: %#v", got)
+	}
+}
+
 func TestCodexEditTargetsRemainAttributableAfterWorktreeRemoval(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".workbench", "repos", "breyta"), 0o755); err != nil {

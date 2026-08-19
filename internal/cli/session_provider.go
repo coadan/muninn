@@ -26,16 +26,18 @@ type sessionProvider interface {
 	Name() string
 	Discover(explicit string, includeArchived bool) (sessionDiscovery, error)
 	Metadata(sessionDiscovery) map[string]normalizedSessionMetadata
+	GuidanceArtifactSizes(workspaceRoot string, ids []string) map[string]int64
 }
 
 // sessionProviderAdapter keeps provider registration declarative. A new
 // harness supplies discovery and normalization; metadata enrichment is
 // optional.
 type sessionProviderAdapter struct {
-	name      string
-	discover  func(string, bool) (sessionDiscovery, error)
-	normalize func(string) (normalizedSession, error)
-	metadata  func(sessionDiscovery) map[string]normalizedSessionMetadata
+	name          string
+	discover      func(string, bool) (sessionDiscovery, error)
+	normalize     func(string) (normalizedSession, error)
+	metadata      func(sessionDiscovery) map[string]normalizedSessionMetadata
+	guidanceSizes func(string, []string) map[string]int64
 }
 
 func (provider sessionProviderAdapter) Name() string {
@@ -63,6 +65,16 @@ func (provider sessionProviderAdapter) Metadata(discovery sessionDiscovery) map[
 	return provider.metadata(discovery)
 }
 
+func (provider sessionProviderAdapter) GuidanceArtifactSizes(
+	workspaceRoot string,
+	ids []string,
+) map[string]int64 {
+	if provider.guidanceSizes == nil {
+		return nil
+	}
+	return provider.guidanceSizes(workspaceRoot, ids)
+}
+
 func (provider sessionProviderAdapter) validate(registryName string) error {
 	if provider.name == "" {
 		return fmt.Errorf("session provider %q has no stable name", registryName)
@@ -77,10 +89,11 @@ func (provider sessionProviderAdapter) validate(registryName string) error {
 }
 
 var codexSessionProvider = sessionProviderAdapter{
-	name:      "codex",
-	discover:  discoverCodexSessionSource,
-	normalize: parseCodexNormalizedSession,
-	metadata:  codexSessionMetadata,
+	name:          "codex",
+	discover:      discoverCodexSessionSource,
+	normalize:     parseCodexNormalizedSession,
+	metadata:      codexSessionMetadata,
+	guidanceSizes: codexGuidanceArtifactSizes,
 }
 
 var sessionProviders = map[string]sessionProviderAdapter{
