@@ -140,6 +140,7 @@ func TestBuildSessionFindingsReportsRecurringSkillReloads(t *testing.T) {
 	}
 	report.Summary.SkillLoads["browser-qa"] = guidanceLoadMetrics{
 		Loads: 10, Tasks: 5, Reloads: 5, ReloadTasks: 3,
+		EstimatedTokens: 1_000, EstimatedRedundantTokens: 5_000, RedundantLoadPercent: 50,
 	}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 || findings[0].Category != "skill-reload" || findings[0].Target != "browser-qa" {

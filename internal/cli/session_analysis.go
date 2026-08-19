@@ -77,8 +77,10 @@ func newCodexAggregateMetrics() codexAggregateMetrics {
 }
 
 func finishSessionInsightsReport(report *codexSessionInsightsReport, taskMap map[string]*codexTaskInsights) {
+	finishGuidanceLoadMetrics(report.Summary.SkillLoads)
 	report.Tasks = make([]codexTaskInsights, 0, len(taskMap))
 	for _, task := range taskMap {
+		finishGuidanceLoadMetrics(task.SkillLoads)
 		report.Tasks = append(report.Tasks, *task)
 	}
 	sort.Slice(report.Tasks, func(i, j int) bool {
@@ -100,6 +102,17 @@ func finishSessionInsightsReport(report *codexSessionInsightsReport, taskMap map
 	report.Profiles = analyzeModelEffortProfiles(report.sessionRecords)
 	report.Delegation = analyzeDelegation(report.sessionRecords)
 	report.Diagnostics = analyzeDiagnosticFailures(report.sessionRecords)
+}
+
+func finishGuidanceLoadMetrics(metricsByID map[string]guidanceLoadMetrics) {
+	for id, metrics := range metricsByID {
+		metrics.EstimatedLoadedTokens = int64(metrics.Loads) * metrics.EstimatedTokens
+		metrics.EstimatedRedundantTokens = int64(metrics.Reloads) * metrics.EstimatedTokens
+		if metrics.Loads > 0 {
+			metrics.RedundantLoadPercent = 100 * metrics.Reloads / metrics.Loads
+		}
+		metricsByID[id] = metrics
+	}
 }
 
 func parseCodexSession(path, workspaceRoot string, since, generatedAt time.Time) (codexSessionRecord, error) {

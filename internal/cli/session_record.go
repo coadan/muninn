@@ -43,6 +43,8 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	searchEffectiveness := searchBurstState{}
 	episode := newTaskEpisode(record)
 	taskSkillLoads := map[string]int{}
+	taskSkillReloads := map[string]bool{}
+	contextSkillLoads := map[string]int{}
 	deliveryTrackers := map[string]*deliveryReworkTracker{}
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
 	var activeDiagnostic *diagnosticFailureEpisode
@@ -224,8 +226,10 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 		switch event.Kind {
 		case sessionEventComplete:
-			finishSkillLoadTask(&record, taskSkillLoads)
+			finishSkillLoadTask(&record, taskSkillLoads, taskSkillReloads)
 			clear(taskSkillLoads)
+			clear(taskSkillReloads)
+			clear(contextSkillLoads)
 			helpEffectiveness.finish(&record, true)
 			record.Completed = true
 			touchSessionActivity(record.Activity, "completion", "", event.OccurredAt)
@@ -240,6 +244,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			searchEffectiveness.reset()
 		case sessionEventCompaction:
 			record.Compactions++
+			clear(contextSkillLoads)
 			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
 		case sessionEventToolCall:
 			record.ToolCalls++
@@ -247,8 +252,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				if artifact.Kind != "skill" || artifact.ID == "" {
 					continue
 				}
-				record.SkillLoads[artifact.ID]++
-				taskSkillLoads[artifact.ID]++
+				recordGuidanceLoad(
+					&record, taskSkillLoads, taskSkillReloads, contextSkillLoads, artifact,
+				)
 				record.SkillInstructionTokens[artifact.ID] = max(
 					record.SkillInstructionTokens[artifact.ID], artifact.EstimatedTokens,
 				)
@@ -421,7 +427,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 		}
 	}
-	finishSkillLoadTask(&record, taskSkillLoads)
+	finishSkillLoadTask(&record, taskSkillLoads, taskSkillReloads)
 	if !episode.StartedAt.IsZero() {
 		record.TaskEpisodes = append(record.TaskEpisodes, episode)
 	}
@@ -597,14 +603,29 @@ func newCodexSessionRecord() codexSessionRecord {
 	}
 }
 
-func finishSkillLoadTask(record *codexSessionRecord, loads map[string]int) {
+func recordGuidanceLoad(
+	record *codexSessionRecord,
+	taskLoads map[string]int,
+	taskReloads map[string]bool,
+	contextLoads map[string]int,
+	artifact normalizedGuidanceArtifact,
+) {
+	record.SkillLoads[artifact.ID]++
+	taskLoads[artifact.ID]++
+	if contextLoads[artifact.ID] > 0 {
+		record.SkillReloads[artifact.ID]++
+		taskReloads[artifact.ID] = true
+	}
+	contextLoads[artifact.ID]++
+}
+
+func finishSkillLoadTask(record *codexSessionRecord, loads map[string]int, reloads map[string]bool) {
 	for id, count := range loads {
 		if count <= 0 {
 			continue
 		}
 		record.SkillLoadTasks[id]++
-		if count > 1 {
-			record.SkillReloads[id] += count - 1
+		if reloads[id] {
 			record.SkillReloadTasks[id]++
 		}
 	}

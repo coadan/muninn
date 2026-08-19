@@ -55,19 +55,38 @@ func TestAddGuidanceLoadMetricsSeparatesHealthyLoadsFromReloads(t *testing.T) {
 	second.SkillReloadTasks["browser-qa"] = 1
 	second.SkillInstructionTokens["browser-qa"] = 4_500
 	addGuidanceLoadMetrics(target, second)
+	finishGuidanceLoadMetrics(target)
 	got := target["browser-qa"]
-	if got.Loads != 4 || got.Tasks != 2 || got.Reloads != 2 || got.ReloadTasks != 1 || got.EstimatedTokens != 4_500 {
+	if got.Loads != 4 || got.Tasks != 2 || got.Reloads != 2 || got.ReloadTasks != 1 ||
+		got.EstimatedTokens != 4_500 || got.EstimatedLoadedTokens != 18_000 ||
+		got.EstimatedRedundantTokens != 9_000 || got.RedundantLoadPercent != 50 {
 		t.Fatalf("guidance load metrics=%#v", got)
 	}
 }
 
-func TestFinishSkillLoadTaskDoesNotTreatNextTaskAsReload(t *testing.T) {
+func TestGuidanceReloadRequiresSameUninterruptedTaskContext(t *testing.T) {
 	record := newCodexSessionRecord()
-	record.SkillLoads["browser-qa"] = 2
-	finishSkillLoadTask(&record, map[string]int{"browser-qa": 1})
-	finishSkillLoadTask(&record, map[string]int{"browser-qa": 1})
-	if record.SkillLoadTasks["browser-qa"] != 2 || record.SkillReloads["browser-qa"] != 0 || record.SkillReloadTasks["browser-qa"] != 0 {
-		t.Fatalf("cross-task loads classified as reloads: %#v", record)
+	taskLoads := map[string]int{}
+	taskReloads := map[string]bool{}
+	contextLoads := map[string]int{}
+	artifact := normalizedGuidanceArtifact{Kind: "skill", ID: "browser-qa"}
+	recordGuidanceLoad(&record, taskLoads, taskReloads, contextLoads, artifact)
+	clear(contextLoads) // A compaction discards the earlier context.
+	recordGuidanceLoad(&record, taskLoads, taskReloads, contextLoads, artifact)
+	finishSkillLoadTask(&record, taskLoads, taskReloads)
+	if record.SkillLoadTasks["browser-qa"] != 1 || record.SkillReloads["browser-qa"] != 0 || record.SkillReloadTasks["browser-qa"] != 0 {
+		t.Fatalf("post-compaction load classified as reload: %#v", record)
+	}
+
+	record = newCodexSessionRecord()
+	taskLoads = map[string]int{}
+	taskReloads = map[string]bool{}
+	contextLoads = map[string]int{}
+	recordGuidanceLoad(&record, taskLoads, taskReloads, contextLoads, artifact)
+	recordGuidanceLoad(&record, taskLoads, taskReloads, contextLoads, artifact)
+	finishSkillLoadTask(&record, taskLoads, taskReloads)
+	if record.SkillReloads["browser-qa"] != 1 || record.SkillReloadTasks["browser-qa"] != 1 {
+		t.Fatalf("same-context reload missing: %#v", record)
 	}
 }
 
