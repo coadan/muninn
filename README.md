@@ -1,130 +1,179 @@
+<p align="center">
+  <img src="assets/muninn-logo.png" alt="Muninn" width="360">
+</p>
+
 # Muninn
 
-<img src="assets/muninn-logo.png" alt="Muninn logo" width="512">
+**Turn coding-agent session metadata into a privacy-safe improvement queue.**
 
-Agent harness session analysis for agentic improvement loops.
+Muninn is a local CLI for finding avoidable cost and friction in coding-agent
+work. It examines normalized session metadata across completed tasks, identifies
+recurring patterns in tooling, instructions, discovery, verification, and
+delivery, then returns a bounded list of the changes most worth investigating.
 
-Muninn is a CLI for finding avoidable cost and friction in coding-agent
-sessions. It turns local session metadata into actionable signals about tooling,
-instructions, code navigation, verification, and delivery rework.
+It is not a transcript reader or a surveillance tool. Muninn is designed to
+show where the workflow is losing time, context, or money without retaining the
+prompts, messages, raw commands, raw output, paths, secrets, or provider session
+identifiers that produced it.
 
-Muninn helps identify:
+> **Status:** Codex is the first supported session provider. The analysis,
+> storage, findings, and reporting model are provider-neutral so other harnesses
+> can add a discovery and normalization adapter without changing the core.
 
-- locally controlled tools and operations with recurring failures, truncation,
-  oversized output, or excessive repetition;
-- recurring three-operation chains that suggest a missing combined command or
-  a workflow boundary that should own the sequence;
-- opaque non-zero exits that lack a specific failure contract, plus unchanged
-  retries that repeatedly reproduce the same owned-operation failure;
-- explicit lower-level bypasses of preferred repository operations and help
-  lookups that do not lead to a successful next operation;
-- broad verification failures repeatedly used before focused diagnosis;
-- long CLI flags supplied on at least 80% of locally owned tool calls across
-  multiple sessions, which may belong in defaults or repository inference;
-- progress stalls, rapid polling, abandoned continuations, and costly
-  cross-call workflow loops;
-- repeated search bursts with low search-to-owner yield, distinguishing calls
-  made to an owned search operation from backend-neutral generic search, plus
-  source discovery and navigation into owners associated with high task cost,
-  review rework, or downstream failures;
-- oversized always-on, scoped, and loaded skill instructions;
-- repeated skill-instruction reloads and placement-aware routes from concise
-  repository instructions to authoritative docs or source owners;
-- repeated exact verification without intervening edits, expensive repair
-  loops, and checks whose absence is associated with downstream escapes;
-- workflow phases that concentrate context compactions and their observed
-  fresh-token, output, and roundtrip cost;
-- delegated work split into implementation, delivery, verification,
-  research/review, other-tool, and response-only modes, with lineage coverage,
-  parent overlap, concurrency, and explicit coordination observability;
-- performance changes across matched agent, model, reasoning-effort, and task
-  cohorts without ignoring observed delivery quality, plus observational
-  with/without comparisons for owned operations.
+## From session exhaust to an improvement decision
 
-These signals distinguish tool-interface, repository-structure, instruction,
-verification, and delivery problems so improvements target the system that
-produced the friction.
+Imagine a repository where agent work is expensive, but nobody knows why:
 
-Muninn currently ingests Codex sessions. Additional coding harnesses plug in
-through one declarative discovery/normalization adapter; storage, repository
-scoping, analysis, findings, and reports stay independent of the source format.
+```sh
+muninn analyze --repo . --since 7d --compare previous
+```
 
-## Install
+Muninn returns compact JSON with a ranked, consolidated intervention queue. An
+intervention identifies the recurring signal, the locally controlled tool,
+workflow, or owner it concerns, the confidence and priority of the evidence,
+and the next bounded analytical view to inspect. You can then focus on one
+concern rather than rereading every session:
 
-```bash
+```sh
+muninn analyze --repo . --focus tooling
+muninn analyze --repo . --focus discovery
+muninn analyze --repo . --operation repository-cli/test --details
+muninn failures repository-cli/test --repo . --since 14d
+```
+
+The goal is not to optimize every command. It is to make the next system-level
+improvement clear: fix an owned tool's failure contract, combine a recurring
+workflow, tighten an instruction route, reduce an output-heavy operation, add a
+focused verification step, or leave a healthy pattern alone.
+
+```mermaid
+flowchart LR
+    S["Coding-agent sessions"] --> A["Provider adapter"]
+    A --> N["Normalized private metadata"]
+    N --> I["Local SQLite index"]
+    I --> F["Recurring signals"]
+    F --> Q["Ranked intervention queue"]
+    Q --> C["Focused improvement decision"]
+```
+
+## What Muninn looks for
+
+Muninn treats recurring, attributable patterns as evidence—not proof of
+causality. It keeps different improvement levers separate so the result points
+at the part of the system that can actually change.
+
+| Area | Examples of useful signals |
+| --- | --- |
+| Tooling | Repeated owned-operation failures, opaque non-zero exits, unchanged retries, truncation, oversized output, and lower-level bypasses. |
+| Workflow | Recurrent cross-call operation chains, rapid continuation polling, expensive inline scripts, and missing combined commands. |
+| Instructions and context | Oversized always-on guidance, repeated skill reloads, weak routes from repository instructions to authoritative owners, and compaction pressure. |
+| Discovery | Repeated search bursts that fail to reach a source owner, or repository navigation associated with task cost or rework. |
+| Verification and delivery | Broad failures repeatedly followed by focused diagnosis, duplicate checks without edits, and delivery evidence associated with downstream escapes. |
+| Cost and quality | Fresh, cached, reasoning, and output tokens; roundtrips; completed-task cohorts; and observed delivery quality. |
+
+Related evidence consolidates into one intervention for the same configured
+operation or current code owner. A frequently edited file with no quality or
+cost evidence remains healthy demand, not a finding.
+
+## Privacy is a product boundary
+
+Muninn stores only the normalized metadata needed to improve cost per completed
+task. Reports never contain:
+
+- prompts or conversation messages;
+- raw command arguments or tool output;
+- absolute paths, provider session identifiers, or arbitrary user prose; or
+- secret values.
+
+For locally configured tools, a report may retain a fixed operation name or a
+normalized flag name such as `json`, but never the flag value or surrounding
+arguments. Provider-specific IDs and paths are used only while an adapter
+ingests a session; shared analysis operates on the normalized model.
+
+Read the [privacy and data model](docs/privacy.md) for the exact boundary.
+
+## Start locally
+
+Install the CLI with Go:
+
+```sh
 go install github.com/coadan/muninn/cmd/muninn@latest
 ```
 
-To install from a source checkout:
+Then analyze the current repository's recent work:
 
-```bash
-make install
+```sh
+muninn analyze --repo . --since 24h
 ```
 
-This runs the test suite and installs `muninn` into `$(go env GOPATH)/bin`.
+Use a day or week window when comparing an intervention with the immediately
+preceding period:
 
-## Quick start
-
-```bash
-muninn
-muninn analyze --repo . --since 24h
+```sh
 muninn analyze --repo . --since 1d --compare previous
 muninn analyze --repo . --since 7d --compare previous
 ```
 
-The main surface has two commands:
+The default output is a compact JSON report. Add `--details` for the full
+analytical maps. `muninn failures <tool-or-operation>` provides a bounded,
+separately attributed timeline when a configured operation needs diagnosis.
 
-- `muninn analyze` returns a compact JSON intervention queue that consolidates
-  related findings, and supports focused evidence, owned-operation drill-down,
-  and adjacent-period comparison. Each intervention provides its bounded
-  `focus` route. `--details` selects the full JSON report.
-- `muninn failures <tool/operation>` returns bounded, separately attributed
-  definite and ambiguous JSON failure timelines for one configured locally
-  controlled operation.
+## Use evidence to improve the harness
 
-Narrow the analysis when investigating a specific kind of friction:
+Muninn is most useful as a loop, not a dashboard:
 
-```bash
-muninn analyze --repo . --focus tooling
-muninn analyze --repo . --focus structure
-muninn analyze --repo . --focus quality
-muninn analyze --repo . --operation repository-cli/test
-muninn analyze --repo . --details
-muninn failures repository-cli/test --repo . --since 14d
-```
+1. Analyze a meaningful cohort of completed tasks.
+2. Select one high-confidence, locally controlled intervention.
+3. Change the tool, instruction, source owner, or verification workflow it
+   identifies.
+4. Compare a later day or week against the previous period.
+5. Keep, revise, or remove the change based on observed cost and quality.
 
-`--compare previous` returns the current rolling lookback and the immediately
-preceding window of the same size in one JSON report. Choose `--since 1d` after
-a day of work or `--since 7d` after a week. The cohorts do not overlap. The
-report retains completed-task, agent, model, reasoning-effort, task-family, and
-delivery-quality evidence for both periods. Structured `trends` include
-completed-task cost, matched performance and quality, and normalized rates;
-diagnostic fingerprints and stable intervention IDs have their own comparison
-states. Add `--details` for the full reports behind both cohorts.
+The comparison is observational. Muninn aligns completed tasks by agent, model,
+reasoning effort, and task family where possible; it reports associations rather
+than claiming that a tool caused an outcome. The
+[improvement workflow](docs/improvement-workflow.md) and
+[decretion experiments](docs/decretion.md) explain how to run reversible,
+evidence-backed changes.
 
-Muninn does not report prompts, messages, raw commands, raw tool output,
-absolute paths, secrets, or provider session identifiers.
+## What Muninn does—and does not—do
 
-## Documentation
+- It builds a disposable local SQLite index per repository and keeps provider
+  ingestion behind an explicit adapter boundary.
+- It reports bounded evidence and fixed classifications rather than copying raw
+  session content into a report.
+- It distinguishes owned operations from generic shell activity so a finding
+  targets the tool or workflow that can actually be improved.
+- It does **not** read or retain agent prose, turn into a hosted analytics
+  service, or automatically modify repositories, prompts, tools, or workflows.
 
-- [Documentation index](docs/README.md)
-- [Analysis and reports](docs/analysis.md)
-- [Signal interpretation](docs/signals.md)
-- [Comparing periods](docs/comparison.md)
-- [Decretion experiments](docs/decretion.md)
-- [Repository configuration](docs/repository-configuration.md)
-- [Improvement workflow](docs/improvement-workflow.md)
-- [Privacy and data model](docs/privacy.md)
-- [Adding session providers](docs/session-providers.md)
+Muninn helps you decide what to change next; the owning repository and its
+maintainers remain responsible for the change and its verification.
 
-Run `muninn --help` for the complete command surface.
+## Learn more
+
+- [Documentation index](docs/README.md) — guides by analytical goal
+- [Analysis and reports](docs/analysis.md) — cohorts, focus views, details, and
+  failure timelines
+- [Signal interpretation](docs/signals.md) — recurrence, confidence,
+  attribution, and intervention construction
+- [Comparing periods](docs/comparison.md) — adjacent-period analysis
+- [Repository configuration](docs/repository-configuration.md) — locally owned
+  tools, operations, and false-positive controls
+- [Session providers](docs/session-providers.md) — adding another harness format
+
+Run `muninn --help`, `muninn analyze --help`, or `muninn failures --help` for
+the complete command reference.
 
 ## Development
 
-```bash
-make help
+From a source checkout:
+
+```sh
 make check
 make build
 ```
+
+## License
 
 Muninn is released under the [MIT License](LICENSE).
