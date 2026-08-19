@@ -37,7 +37,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	ownership := newOwnershipCatalog(config.OwnedTools)
 	var findings []sessionFinding
 
-	if report.Instructions.RootBytes >= largeGuidanceArtifactBytes {
+	if report.Instructions.RootEstimatedTokens >= largeGuidanceArtifactTokens {
 		findings = append(findings, sessionFinding{
 			Category: "instruction-footprint",
 			Control:  "repository",
@@ -56,7 +56,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 		})
 	}
 	for _, file := range report.Instructions.Files {
-		if file.Scope != "scoped" || file.Bytes < largeGuidanceArtifactBytes {
+		if file.Scope != "scoped" || file.EstimatedTokens < largeGuidanceArtifactTokens {
 			continue
 		}
 		findings = append(findings, sessionFinding{
