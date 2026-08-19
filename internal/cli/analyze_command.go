@@ -46,6 +46,7 @@ func cmdAnalyze(root string, args []string) error {
 			"muninn analyze --repo . --since 24h",
 			"muninn analyze --repo . --since 1d --compare previous",
 			"muninn analyze --repo . --since 7d --compare previous",
+			"muninn analyze --repo . --since-commit HEAD~3 --compare previous",
 			"muninn analyze --repo . --since 24h --operation repository-cli",
 			"muninn analyze --repo . --since 24h --operation repository-cli/test",
 			"muninn analyze --repo . --since 24h --operation repository-cli --details",
@@ -77,9 +78,6 @@ func cmdAnalyze(root string, args []string) error {
 	if comparison != "" && comparison != "previous" {
 		return errors.New("--compare must be \"previous\" when set")
 	}
-	if comparison == "previous" && strings.TrimSpace(*sinceCommit) != "" {
-		return errors.New("--compare previous requires a rolling --since lookback")
-	}
 	if comparison == "previous" && strings.TrimSpace(*operation) != "" {
 		return errors.New("--compare previous cannot be combined with --operation")
 	}
@@ -107,7 +105,7 @@ func cmdAnalyze(root string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve --repo: %w", err)
 	}
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Second)
 	since := time.Time{}
 	windowKind := "lookback"
 	lookbackSeconds := int64(0)
@@ -116,6 +114,10 @@ func cmdAnalyze(root string, args []string) error {
 		since, err = resolveSinceCommit(resolvedRepoRoot, reference)
 		if err != nil {
 			return err
+		}
+		lookbackSeconds = int64(now.Sub(since) / time.Second)
+		if lookbackSeconds <= 0 {
+			return errors.New("--since-commit must resolve before analysis time")
 		}
 	} else {
 		lookback, err := parseCodexLookback(*sinceRaw)
@@ -191,6 +193,7 @@ func cmdAnalyze(root string, args []string) error {
 		Focus:           normalizeTrendFocus(*focus),
 	}
 	report.Instructions = inspectRepositoryInstructions(resolvedRepoRoot, source.Name())
+	report.Decretion = buildDecretionCandidates(report)
 	report.Findings = buildSessionFindings(report, config)
 	report.Findings, err = filterSessionFindings(report.Findings, *focus)
 	if err != nil {
@@ -209,16 +212,21 @@ func cmdAnalyze(root string, args []string) error {
 		}
 		previous.Provider = source.Name()
 		previous.AnalysisScope = report.AnalysisScope
+		instructionBoundary := previousUntil
+		if windowKind == "since-commit" {
+			instructionBoundary = instructionBoundary.Add(-time.Second)
+		}
 		if historical, ok := inspectRepositoryInstructionsAt(
 			resolvedRepoRoot,
 			source.Name(),
-			previousUntil,
+			instructionBoundary,
 		); ok {
 			previous.Instructions = historical
 		} else {
 			previous.Instructions = report.Instructions
 			previous.Instructions.comparisonResolved = false
 		}
+		previous.Decretion = buildDecretionCandidates(previous)
 		previous.Findings = buildSessionFindings(previous, config)
 		previous.Findings, err = filterSessionFindings(previous.Findings, *focus)
 		if err != nil {

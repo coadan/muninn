@@ -11,6 +11,16 @@ Choose one day after concentrated session work and one week for a broader
 workflow change. The preceding horizon is the baseline and the latest horizon
 is current.
 
+To evaluate a committed intervention, use its timestamp as the boundary:
+
+```bash
+muninn analyze --repo . --since-commit <commit> --compare previous
+```
+
+The current cohort runs from the commit timestamp to analysis time. The
+baseline is the equal-duration period immediately before the commit. Muninn
+does not emit the supplied commit reference.
+
 ## Performance evidence
 
 Muninn compares completed-task duration and outer tool roundtrips at p50 and

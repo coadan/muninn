@@ -16,6 +16,7 @@ muninn analyze --repo . --since 24h
 muninn analyze --repo . --since 1d --compare previous
 muninn analyze --repo . --since 7d --compare previous
 muninn analyze --repo . --since-commit HEAD~3
+muninn analyze --repo . --since-commit HEAD~3 --compare previous
 muninn analyze --repo . --task task-id
 muninn analyze --repo . --since 14d --include-archived
 ```

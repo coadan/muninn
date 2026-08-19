@@ -108,6 +108,7 @@ Examples:
   muninn analyze --repo /path/to/repository --since 24h
   muninn analyze --repo . --since 1d --compare previous
   muninn analyze --repo . --since-commit HEAD~3
+  muninn analyze --repo . --since-commit HEAD~3 --compare previous
   muninn analyze --repo . --task my-worktree
   muninn analyze --repo . --since 14d --include-archived
   muninn analyze --repo . --since 24h --operation repository-cli

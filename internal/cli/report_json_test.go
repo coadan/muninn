@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAnalysisJSONPayloadKeepsCompactSignalSurfaceByDefault(t *testing.T) {
@@ -209,6 +210,18 @@ func TestComparisonJSONPayloadDoesNotDirectionLabelSparseWindows(t *testing.T) {
 	if payload.Trends.CompletedTasks.SufficientEvidence ||
 		payload.Trends.CompletedTasks.Direction != "insufficient" {
 		t.Fatalf("sparse completed-task windows received a direction: %#v", payload.Trends.CompletedTasks)
+	}
+}
+
+func TestComparisonJSONPayloadLabelsCommitBoundary(t *testing.T) {
+	baseline := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	current := newSessionInsightsReport("codex", nil, t.TempDir(), zeroTime(), zeroTime())
+	current.AnalysisScope = sessionAnalysisScope{
+		WindowKind: "since-commit", LookbackSeconds: int64((24 * time.Hour) / time.Second),
+	}
+	payload := comparisonJSONPayload(baseline, current, false)
+	if payload.BaselineLabel != "equal-duration pre-commit 1d" {
+		t.Fatalf("commit baseline label=%q", payload.BaselineLabel)
 	}
 }
 

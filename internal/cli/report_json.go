@@ -53,6 +53,7 @@ type compactSessionInsightsReport struct {
 	Since              string                         `json:"since"`
 	AnalysisScope      sessionAnalysisScope           `json:"analysisScope"`
 	Instructions       repositoryInstructionFootprint `json:"instructions"`
+	Decretion          []decretionCandidate           `json:"decretionCandidates,omitempty"`
 	Summary            compactSessionSummary          `json:"summary"`
 	Outcomes           compactOutcomeSummary          `json:"outcomes"`
 	Profiles           modelEffortAnalysis            `json:"profiles"`
@@ -154,6 +155,7 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 		Since:         report.Since,
 		AnalysisScope: report.AnalysisScope,
 		Instructions:  report.Instructions,
+		Decretion:     report.Decretion,
 		Summary: compactSessionSummary{
 			FilesScanned:           summary.FilesScanned,
 			FilesUnreadable:        summary.FilesUnreadable,
@@ -236,7 +238,7 @@ func comparisonJSONPayload(
 		SchemaVersion: current.SchemaVersion,
 		DetailLevel:   detailLevel,
 		Comparison:    "previous",
-		BaselineLabel: "previous non-overlapping " + formatTrendLookback(current.AnalysisScope.LookbackSeconds),
+		BaselineLabel: comparisonBaselineLabel(current.AnalysisScope),
 		Baseline:      analysisJSONPayload(baseline, detailed),
 		Current:       analysisJSONPayload(current, detailed),
 		Cohorts:       comparisonCohortPayload(performance, quality, detailed),

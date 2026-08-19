@@ -18,6 +18,12 @@ Start with the detailed intervention queue:
 muninn analyze --repo . --since 7d --details
 ```
 
+The report's `decretionCandidates` list makes the consumer check explicit for
+guidance candidates. `consumerEvidence.kind` is `injected` for root
+instructions and `explicit-load` for skills. These are exposure signals, not
+proof that any sentence affected the task. Scoped instructions are omitted
+until Muninn can attribute working-directory scope without guessing.
+
 Strong candidates have an attributable cost and a reversible boundary, such
 as:
 
@@ -60,6 +66,18 @@ Capture a baseline and use the same horizon after enough comparable work:
 muninn analyze --repo . --since 1d --compare previous
 muninn analyze --repo . --since 7d --compare previous --details
 ```
+
+For a subtraction committed at a known boundary, compare the post-commit
+period with the immediately preceding period of equal duration:
+
+```bash
+muninn analyze --repo . --since-commit <subtraction-commit> --compare previous
+```
+
+The commit reference is resolved locally to its timestamp and is not emitted
+in the report. `analysisScope.windowKind` is `since-commit`; the baseline label
+identifies an equal-duration pre-commit cohort. Commit timestamps are only a
+boundary: unrelated work after the commit can still confound the comparison.
 
 Use one day for concentrated workflow changes and one week for broader
 guidance or tooling changes. Evaluate:

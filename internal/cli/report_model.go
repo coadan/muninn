@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 113
+const codexSessionInsightsSchemaVersion = 114
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -186,6 +186,7 @@ type codexSessionInsightsReport struct {
 	WorkspaceRoot  string                         `json:"-"`
 	SessionDirs    []string                       `json:"-"`
 	Instructions   repositoryInstructionFootprint `json:"instructions"`
+	Decretion      []decretionCandidate           `json:"decretionCandidates,omitempty"`
 	Summary        codexSessionInsightsSummary    `json:"summary"`
 	Tasks          []codexTaskInsights            `json:"tasks"`
 	Interventions  []sessionIntervention          `json:"interventions"`
@@ -197,6 +198,22 @@ type codexSessionInsightsReport struct {
 	taskEpisodes   []codexTaskEpisode
 	sessionRecords []codexSessionRecord
 	operationTasks map[string]map[string]codexOwnedOperationMetrics
+}
+
+type decretionCandidate struct {
+	Kind             string                    `json:"kind"`
+	Target           string                    `json:"target"`
+	Signals          []string                  `json:"signals"`
+	EstimatedTokens  int64                     `json:"estimatedTokens"`
+	CostBasis        string                    `json:"costBasis"`
+	ConsumerEvidence decretionConsumerEvidence `json:"consumerEvidence"`
+}
+
+type decretionConsumerEvidence struct {
+	Kind      string `json:"kind"`
+	Exposures int    `json:"exposures"`
+	Tasks     int    `json:"tasks,omitempty"`
+	Reloads   int    `json:"sameContextReloads,omitempty"`
 }
 
 type sessionAnalysisScope struct {
