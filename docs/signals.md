@@ -17,8 +17,8 @@ Muninn keeps these activities distinct:
 - context compactions attributed to the phase that preceded them;
 - structured Heimdal failures and post-failure recovery cost;
 - root-agent and delegated work, coordination, and overlap;
-- repository navigation, repeated reads, and instruction footprint;
-- privacy-safe skill loads and repeated skill-instruction reloads;
+- repository navigation, repeated reads, and root or scoped instruction footprint;
+- privacy-safe skill loads, loaded-skill footprint, and repeated skill-instruction reloads;
 - recurring three-step chains of definitely attributed configured operations;
 - owned operations whose recurring failures lack an actionable fixed
   classification;
@@ -51,6 +51,14 @@ same skill instructions to be loaded more than once in a session across at
 least three sessions. The action targets the skill trigger or its instructions;
 Muninn does not infer ineffectiveness from infrequent use and does not retain
 skill contents or load commands.
+
+Muninn highlights an always-on root instruction total, an individual scoped
+instruction file, or a loaded skill at roughly 4,000 estimated tokens or more.
+Skill size is observed from the local file at analysis time and is not claimed
+as the historical size for every load. Size alone does not prove that context
+was unused; it identifies high-impact guidance whose triggers, invariants,
+reference detail, and examples are worth separating. Reports retain only the
+validated skill name and estimated token count, never its path or contents.
 
 Output-heavy bundled discovery remains low confidence when it appears in only
 one session. The same recurrence rule prevents an isolated locally owned stall

@@ -188,7 +188,7 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	addCodexOccurrenceMetrics(target.OwnedFlagEligibleCalls, record.OwnedFlagEligibleCalls)
 	addCodexFailureContexts(target.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
 	addCodexTargetMetrics(target.ReadTargets, record.ReadTargets, record.EditTargets)
-	addGuidanceLoadMetrics(target.SkillLoads, record.SkillLoads)
+	addGuidanceLoadMetrics(target.SkillLoads, record.SkillLoads, record.SkillInstructionTokens)
 	target.InlineOrchestrationCalls += record.InlineOrchestrationCalls
 	target.InlineOrchestrationBytes += record.InlineOrchestrationBytes
 	target.InlineOrchestrationMaxBytes = max(target.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
@@ -212,7 +212,11 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	mergeSessionActivity(target.Activity, record.Activity)
 }
 
-func addGuidanceLoadMetrics(target map[string]guidanceLoadMetrics, additions map[string]int) {
+func addGuidanceLoadMetrics(
+	target map[string]guidanceLoadMetrics,
+	additions map[string]int,
+	estimatedTokensByID map[string]int64,
+) {
 	for id, loads := range additions {
 		if loads <= 0 {
 			continue
@@ -224,6 +228,7 @@ func addGuidanceLoadMetrics(target map[string]guidanceLoadMetrics, additions map
 			metrics.Reloads += loads - 1
 			metrics.ReloadSessions++
 		}
+		metrics.EstimatedTokens = max(metrics.EstimatedTokens, estimatedTokensByID[id])
 		target[id] = metrics
 	}
 }

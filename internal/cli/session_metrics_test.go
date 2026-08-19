@@ -43,10 +43,10 @@ func TestAddCodexTargetMetricsCountsSessionsWithRediscovery(t *testing.T) {
 
 func TestAddGuidanceLoadMetricsSeparatesHealthyLoadsFromReloads(t *testing.T) {
 	target := map[string]guidanceLoadMetrics{}
-	addGuidanceLoadMetrics(target, map[string]int{"browser-qa": 1})
-	addGuidanceLoadMetrics(target, map[string]int{"browser-qa": 3})
+	addGuidanceLoadMetrics(target, map[string]int{"browser-qa": 1}, map[string]int64{"browser-qa": 3_000})
+	addGuidanceLoadMetrics(target, map[string]int{"browser-qa": 3}, map[string]int64{"browser-qa": 4_500})
 	got := target["browser-qa"]
-	if got.Loads != 4 || got.Sessions != 2 || got.Reloads != 2 || got.ReloadSessions != 1 {
+	if got.Loads != 4 || got.Sessions != 2 || got.Reloads != 2 || got.ReloadSessions != 1 || got.EstimatedTokens != 4_500 {
 		t.Fatalf("guidance load metrics=%#v", got)
 	}
 }

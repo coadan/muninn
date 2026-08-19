@@ -21,8 +21,9 @@ failure messages.
 
 Guidance attribution retains only a validated artifact kind and logical name.
 Repository instructions and documentation use repository-relative paths;
-skills use their bounded directory name. Absolute skill paths, instruction
-text, load commands, and loaded content never enter reports.
+skills use their bounded directory name. Guidance may include byte or estimated
+token counts. Absolute skill paths, instruction text, load commands, and loaded
+content never enter reports.
 
 Provider ingestion remains behind an adapter boundary. Provider-specific call
 IDs and paths may be used transiently while ingesting, but shared analysis,

@@ -245,6 +245,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 					continue
 				}
 				record.SkillLoads[artifact.ID]++
+				record.SkillInstructionTokens[artifact.ID] = max(
+					record.SkillInstructionTokens[artifact.ID], artifact.EstimatedTokens,
+				)
 				touchSessionActivity(record.Activity, "skill-load", artifact.ID, event.OccurredAt)
 			}
 			operationChain.observe(&record, event, eventOperations)
@@ -571,6 +574,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		ReadTargets:                  map[string]codexTargetMetrics{},
 		EditTargets:                  map[string]int{},
 		SkillLoads:                   map[string]int{},
+		SkillInstructionTokens:       map[string]int64{},
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
 		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},

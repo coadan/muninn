@@ -68,6 +68,7 @@ type normalizedSessionEvent struct {
 // normalizedGuidanceArtifact is a privacy-safe identity for context loaded by
 // an agent. ID is a validated logical name, never a source path or contents.
 type normalizedGuidanceArtifact struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
+	Kind            string `json:"kind"`
+	ID              string `json:"id"`
+	EstimatedTokens int64  `json:"estimatedTokens,omitempty"`
 }

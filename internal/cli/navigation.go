@@ -35,7 +35,7 @@ func codexReadTargetCandidates(toolName, arguments, input string) []string {
 	return candidates
 }
 
-func codexGuidanceArtifacts(candidates []string) []normalizedGuidanceArtifact {
+func codexGuidanceArtifacts(candidates []string, workingDirectories ...string) []normalizedGuidanceArtifact {
 	var artifacts []normalizedGuidanceArtifact
 	seen := map[string]bool{}
 	for _, candidate := range candidates {
@@ -48,10 +48,33 @@ func codexGuidanceArtifacts(candidates []string) []normalizedGuidanceArtifact {
 			continue
 		}
 		seen[id] = true
-		artifacts = append(artifacts, normalizedGuidanceArtifact{Kind: "skill", ID: id})
+		artifacts = append(artifacts, normalizedGuidanceArtifact{
+			Kind:            "skill",
+			ID:              id,
+			EstimatedTokens: guidanceArtifactEstimatedTokens(candidate, workingDirectories),
+		})
 	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].ID < artifacts[j].ID })
 	return artifacts
+}
+
+func guidanceArtifactEstimatedTokens(candidate string, workingDirectories []string) int64 {
+	paths := []string{candidate}
+	if !filepath.IsAbs(candidate) {
+		paths = paths[:0]
+		for _, directory := range workingDirectories {
+			if strings.TrimSpace(directory) != "" {
+				paths = append(paths, filepath.Join(directory, candidate))
+			}
+		}
+	}
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err == nil && info.Mode().IsRegular() {
+			return estimatedTokens(info.Size())
+		}
+	}
+	return 0
 }
 
 func codexEditTargetCandidates(toolName, input string) []string {

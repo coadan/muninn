@@ -29,13 +29,15 @@ type sessionFinding struct {
 	score      int
 }
 
+const largeGuidanceArtifactBytes = 16 * 1024
+const largeGuidanceArtifactTokens = largeGuidanceArtifactBytes / 4
+
 func buildSessionFindings(report codexSessionInsightsReport, config repositoryConfig) []sessionFinding {
 	summary := report.Summary
 	ownership := newOwnershipCatalog(config.OwnedTools)
 	var findings []sessionFinding
 
-	const largeRootInstructionBytes = 16 * 1024
-	if report.Instructions.RootBytes >= largeRootInstructionBytes {
+	if report.Instructions.RootBytes >= largeGuidanceArtifactBytes {
 		findings = append(findings, sessionFinding{
 			Category: "instruction-footprint",
 			Control:  "repository",
@@ -53,6 +55,26 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			score:      620 + int(report.Instructions.RootEstimatedTokens/100),
 		})
 	}
+	for _, file := range report.Instructions.Files {
+		if file.Scope != "scoped" || file.Bytes < largeGuidanceArtifactBytes {
+			continue
+		}
+		findings = append(findings, sessionFinding{
+			Category:   "instruction-footprint",
+			Control:    "repository",
+			Title:      "large scoped repository instruction file: " + file.Path,
+			Evidence:   fmt.Sprintf("this scoped instruction is %s bytes (~%s tokens whenever its scope applies)", formatCodexCount(file.Bytes), formatCodexCount(file.EstimatedTokens)),
+			Action:     "Keep the scoped trigger, behavioral rules, and local invariants concise; move stable reference material and long examples behind exact documentation or skill routes.",
+			Count:      int(file.EstimatedTokens),
+			Target:     file.Path,
+			LastSeen:   report.GeneratedAt,
+			Lever:      "instructions/docs",
+			Confidence: "high",
+			Why:        "Scoped instructions are injected for every task in their subtree, whether or not each section is relevant.",
+			score:      610 + int(file.EstimatedTokens/100),
+		})
+	}
+	findings = append(findings, buildSkillFootprintFindings(report)...)
 	findings = append(findings, buildSkillReloadFindings(report)...)
 
 	ownedConfigByID := map[string]ownedToolConfig{}
@@ -859,6 +881,36 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	return diversifySessionFindings(findings)
 }
 
+func buildSkillFootprintFindings(report codexSessionInsightsReport) []sessionFinding {
+	var findings []sessionFinding
+	for id, metrics := range report.Summary.SkillLoads {
+		if metrics.EstimatedTokens < largeGuidanceArtifactTokens {
+			continue
+		}
+		findings = append(findings, sessionFinding{
+			Category: "skill-footprint",
+			Control:  "instructions",
+			Title:    "large loaded skill instruction: " + id,
+			Evidence: fmt.Sprintf(
+				"the skill is ~%s tokens at analysis time and was loaded %s across %s sessions",
+				formatCodexCount(metrics.EstimatedTokens),
+				formatCodexCountNoun(int64(metrics.Loads), "time"),
+				formatCodexCountNoun(int64(metrics.Sessions), "session"),
+			),
+			Action:     "Keep the skill entry workflow and decision rules concise; move stable reference detail and long examples into focused files that the skill routes to only when needed.",
+			Count:      int(metrics.EstimatedTokens),
+			Sessions:   metrics.Sessions,
+			Target:     id,
+			LastSeen:   sessionFindingLastSeen(report, "skill-load", id),
+			Lever:      "instructions/docs",
+			Confidence: "high",
+			Why:        "Conditional guidance avoids always-on cost, but a large skill still consumes substantial context on every matching task.",
+			score:      610 + int(metrics.EstimatedTokens/100) + metrics.Sessions*10,
+		})
+	}
+	return findings
+}
+
 func buildSkillReloadFindings(report codexSessionInsightsReport) []sessionFinding {
 	var findings []sessionFinding
 	for id, metrics := range report.Summary.SkillLoads {
@@ -1518,7 +1570,8 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"default-candidate":       6,
 		"code-structure":          6,
 		"instruction-discovery":   4,
-		"instruction-footprint":   1,
+		"instruction-footprint":   4,
+		"skill-footprint":         4,
 		"skill-reload":            4,
 		"recurring-failure":       4,
 		"diagnostic-failure":      6,

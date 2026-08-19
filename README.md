@@ -27,7 +27,7 @@ Muninn helps identify:
   made to an owned search operation from backend-neutral generic search, plus
   source discovery and navigation into owners associated with high task cost,
   review rework, or downstream failures;
-- oversized always-on instructions and recurring instruction-discovery gaps;
+- oversized always-on, scoped, and loaded skill instructions;
 - repeated skill-instruction reloads and placement-aware routes from concise
   repository instructions to authoritative docs or source owners;
 - repeated exact verification without intervening edits, expensive repair

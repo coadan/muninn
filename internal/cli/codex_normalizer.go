@@ -152,7 +152,6 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				}
 				concurrentBatchSize := codexConcurrentToolBatchSize(name, payload.Input)
 				readTargetCandidates := codexReadTargetCandidates(name, payload.Arguments, payload.Input)
-				guidanceArtifacts := codexGuidanceArtifacts(readTargetCandidates)
 				descriptor := indexedCodexDescriptor{
 					codexToolCallDescriptor: codexToolCallDescriptor{Name: name},
 					OccurredAt:              timestamp,
@@ -165,6 +164,8 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					NestedToolContext:       codexNestedToolContext(name, payload.Input),
 					WorkingDirectories:      codexToolWorkingDirectories(name, payload.Arguments, payload.Input),
 				}
+				guidanceDirectories := append(append([]string{}, descriptor.WorkingDirectories...), session.CWD)
+				guidanceArtifacts := codexGuidanceArtifacts(readTargetCandidates, guidanceDirectories...)
 				descriptor.OperationAttributionAmbiguous = len(descriptor.CommandCandidates) > 1
 				continuation := false
 				if reference, ok := codexNestedContinuationReference(name, payload.Input); ok {

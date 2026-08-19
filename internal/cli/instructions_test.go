@@ -82,6 +82,31 @@ func TestBuildSessionFindingsReportsLargeRootInstructionFootprint(t *testing.T) 
 	}
 }
 
+func TestBuildSessionFindingsReportsLargeScopedInstructionAndSkill(t *testing.T) {
+	report := codexSessionInsightsReport{
+		GeneratedAt: "2026-08-11T12:00:00Z",
+		Instructions: repositoryInstructionFootprint{Files: []repositoryInstructionFile{{
+			Path: "worker/AGENTS.md", Scope: "scoped", Bytes: largeGuidanceArtifactBytes,
+			EstimatedTokens: largeGuidanceArtifactTokens,
+		}}},
+		Summary: codexSessionInsightsSummary{codexAggregateMetrics: newCodexAggregateMetrics()},
+	}
+	report.Summary.SkillLoads["backend"] = guidanceLoadMetrics{
+		Loads: 3, Sessions: 2, EstimatedTokens: largeGuidanceArtifactTokens,
+	}
+	findings := buildSessionFindings(report, defaultRepositoryConfig())
+	if len(findings) != 2 {
+		t.Fatalf("size findings=%#v", findings)
+	}
+	categories := map[string]bool{}
+	for _, finding := range findings {
+		categories[finding.Category] = true
+	}
+	if !categories["instruction-footprint"] || !categories["skill-footprint"] {
+		t.Fatalf("size finding categories=%#v", categories)
+	}
+}
+
 func TestInstructionFocusExcludesUnrelatedSessionLoops(t *testing.T) {
 	findings := []sessionFinding{
 		{Category: "instruction-discovery", Title: "instruction rediscovery"},

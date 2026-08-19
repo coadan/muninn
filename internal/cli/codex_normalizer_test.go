@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -28,13 +29,19 @@ func TestCodexRolloutLineNeededSkipsConversationContent(t *testing.T) {
 }
 
 func TestParseCodexSessionRetainsOnlyValidatedSkillIdentity(t *testing.T) {
+	skillPath := filepath.Join(t.TempDir(), "evidence-first-planning", "SKILL.md")
+	writeInstructionFixture(t, skillPath, strings.Repeat("x", largeGuidanceArtifactBytes))
+	arguments, err := json.Marshal(map[string]string{"cmd": "sed -n '1,200p' " + skillPath})
+	if err != nil {
+		t.Fatal(err)
+	}
 	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "skill-load", []any{
 		map[string]any{
 			"timestamp": "2026-07-29T08:00:00Z",
 			"type":      "response_item",
 			"payload": map[string]any{
 				"type": "function_call", "call_id": "skill", "name": "exec_command",
-				"arguments": `{"cmd":"sed -n '1,200p' /private/codex/skills/evidence-first-planning/SKILL.md"}`,
+				"arguments": string(arguments),
 			},
 		},
 	})
@@ -46,7 +53,7 @@ func TestParseCodexSessionRetainsOnlyValidatedSkillIdentity(t *testing.T) {
 		t.Fatalf("skill guidance missing: %#v", session.Events)
 	}
 	got := session.Events[0].GuidanceArtifacts[0]
-	if got.Kind != "skill" || got.ID != "evidence-first-planning" {
+	if got.Kind != "skill" || got.ID != "evidence-first-planning" || got.EstimatedTokens != largeGuidanceArtifactTokens {
 		t.Fatalf("skill guidance=%#v", got)
 	}
 	if invalid := codexGuidanceArtifacts([]string{"/private/skills/not valid/SKILL.md"}); len(invalid) != 0 {
