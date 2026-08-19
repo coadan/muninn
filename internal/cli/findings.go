@@ -892,7 +892,7 @@ func buildSkillFootprintFindings(report codexSessionInsightsReport) []sessionFin
 			Control:  "instructions",
 			Title:    "large loaded skill instruction: " + id,
 			Evidence: fmt.Sprintf(
-				"the skill is ~%s tokens at analysis time and was loaded %s across %s sessions",
+				"the skill is ~%s tokens at analysis time and was loaded %s across %s",
 				formatCodexCount(metrics.EstimatedTokens),
 				formatCodexCountNoun(int64(metrics.Loads), "time"),
 				formatCodexCountNoun(int64(metrics.Sessions), "session"),
