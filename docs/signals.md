@@ -46,11 +46,12 @@ instructions. Repeatable procedures remain candidates for skills, while fixed
 command sequences remain tooling candidates.
 
 Skill-load evidence contains only a validated skill name and counts. Loading a
-skill once is healthy conditional context. A skill-reload finding requires the
-same skill instructions to be loaded more than once in a session across at
-least three sessions. The action targets the skill trigger or its instructions;
-Muninn does not infer ineffectiveness from infrequent use and does not retain
-skill contents or load commands.
+skill once per completion-delimited task is healthy conditional context. A
+skill-reload finding requires the same skill instructions to be loaded more
+than once within a task across at least three tasks. Loads in later tasks in the
+same provider session are not reloads. The action targets the skill trigger or
+its instructions; Muninn does not infer ineffectiveness from infrequent use and
+does not retain skill contents or load commands.
 
 Muninn highlights an always-on root instruction total, an individual scoped
 instruction file, or a loaded skill at roughly 4,000 estimated tokens or more.

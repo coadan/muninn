@@ -205,7 +205,7 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 		got.TotalTokens != 25 {
 		t.Fatalf("indexed window token delta mismatch: %#v", got)
 	}
-	if got := indexed.Summary.SkillLoads["browser-qa"]; got.Loads != 1 || got.Sessions != 1 {
+	if got := indexed.Summary.SkillLoads["browser-qa"]; got.Loads != 1 || got.Tasks != 1 {
 		t.Fatalf("indexed skill loads mismatch: %#v", got)
 	}
 }

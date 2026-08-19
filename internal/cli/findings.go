@@ -895,17 +895,17 @@ func buildSkillFootprintFindings(report codexSessionInsightsReport) []sessionFin
 				"the skill is ~%s tokens at analysis time and was loaded %s across %s",
 				formatCodexCount(metrics.EstimatedTokens),
 				formatCodexCountNoun(int64(metrics.Loads), "time"),
-				formatCodexCountNoun(int64(metrics.Sessions), "session"),
+				formatCodexCountNoun(int64(metrics.Tasks), "task"),
 			),
 			Action:     "Keep the skill entry workflow and decision rules concise; move stable reference detail and long examples into focused files that the skill routes to only when needed.",
 			Count:      int(metrics.EstimatedTokens),
-			Sessions:   metrics.Sessions,
+			Sessions:   metrics.Tasks,
 			Target:     id,
 			LastSeen:   sessionFindingLastSeen(report, "skill-load", id),
 			Lever:      "instructions/docs",
 			Confidence: "high",
 			Why:        "Conditional guidance avoids always-on cost, but a large skill still consumes substantial context on every matching task.",
-			score:      610 + int(metrics.EstimatedTokens/100) + metrics.Sessions*10,
+			score:      610 + int(metrics.EstimatedTokens/100) + metrics.Tasks*10,
 		})
 	}
 	return findings
@@ -914,11 +914,11 @@ func buildSkillFootprintFindings(report codexSessionInsightsReport) []sessionFin
 func buildSkillReloadFindings(report codexSessionInsightsReport) []sessionFinding {
 	var findings []sessionFinding
 	for id, metrics := range report.Summary.SkillLoads {
-		if metrics.Reloads < 3 || metrics.ReloadSessions < 3 {
+		if metrics.Reloads < 3 || metrics.ReloadTasks < 3 {
 			continue
 		}
 		confidence := "medium"
-		if metrics.ReloadSessions >= 5 && metrics.ReloadSessions*2 >= metrics.Sessions {
+		if metrics.ReloadTasks >= 5 && metrics.ReloadTasks*2 >= metrics.Tasks {
 			confidence = "high"
 		}
 		findings = append(findings, sessionFinding{
@@ -926,21 +926,21 @@ func buildSkillReloadFindings(report codexSessionInsightsReport) []sessionFindin
 			Control:  "instructions",
 			Title:    "skill instructions are repeatedly reloaded: " + id,
 			Evidence: fmt.Sprintf(
-				"%s loads across %s sessions included %s extra reloads in %s sessions",
+				"%s loads across %s included %s extra reloads in %s",
 				formatCodexCount(int64(metrics.Loads)),
-				formatCodexCountNoun(int64(metrics.Sessions), "session"),
+				formatCodexCountNoun(int64(metrics.Tasks), "task"),
 				formatCodexCount(int64(metrics.Reloads)),
-				formatCodexCountNoun(int64(metrics.ReloadSessions), "session"),
+				formatCodexCountNoun(int64(metrics.ReloadTasks), "task"),
 			),
 			Action:     "Keep the skill trigger concise and load this skill once per task; remove guidance that causes agents to reopen SKILL.md, and route stable reference detail through focused follow-ups.",
 			Count:      metrics.Reloads,
-			Sessions:   metrics.ReloadSessions,
+			Sessions:   metrics.ReloadTasks,
 			Target:     id,
 			LastSeen:   sessionFindingLastSeen(report, "skill-load", id),
 			Lever:      "instructions/docs",
 			Confidence: confidence,
 			Why:        "Repeatedly loading the same conditional instructions adds context without changing the selected procedure.",
-			score:      600 + metrics.ReloadSessions*20 + metrics.Reloads*5,
+			score:      600 + metrics.ReloadTasks*20 + metrics.Reloads*5,
 		})
 	}
 	return findings

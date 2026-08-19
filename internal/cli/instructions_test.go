@@ -92,7 +92,7 @@ func TestBuildSessionFindingsReportsLargeScopedInstructionAndSkill(t *testing.T)
 		Summary: codexSessionInsightsSummary{codexAggregateMetrics: newCodexAggregateMetrics()},
 	}
 	report.Summary.SkillLoads["backend"] = guidanceLoadMetrics{
-		Loads: 3, Sessions: 2, EstimatedTokens: largeGuidanceArtifactTokens,
+		Loads: 3, Tasks: 2, EstimatedTokens: largeGuidanceArtifactTokens,
 	}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 2 {
@@ -139,7 +139,7 @@ func TestBuildSessionFindingsReportsRecurringSkillReloads(t *testing.T) {
 		Summary: codexSessionInsightsSummary{codexAggregateMetrics: newCodexAggregateMetrics()},
 	}
 	report.Summary.SkillLoads["browser-qa"] = guidanceLoadMetrics{
-		Loads: 10, Sessions: 5, Reloads: 5, ReloadSessions: 3,
+		Loads: 10, Tasks: 5, Reloads: 5, ReloadTasks: 3,
 	}
 	findings := buildSessionFindings(report, defaultRepositoryConfig())
 	if len(findings) != 1 || findings[0].Category != "skill-reload" || findings[0].Target != "browser-qa" {

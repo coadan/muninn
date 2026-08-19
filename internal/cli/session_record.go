@@ -42,6 +42,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	verificationEscalation := verificationEscalationState{}
 	searchEffectiveness := searchBurstState{}
 	episode := newTaskEpisode(record)
+	taskSkillLoads := map[string]int{}
 	deliveryTrackers := map[string]*deliveryReworkTracker{}
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
 	var activeDiagnostic *diagnosticFailureEpisode
@@ -223,6 +224,8 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 		switch event.Kind {
 		case sessionEventComplete:
+			finishSkillLoadTask(&record, taskSkillLoads)
+			clear(taskSkillLoads)
 			helpEffectiveness.finish(&record, true)
 			record.Completed = true
 			touchSessionActivity(record.Activity, "completion", "", event.OccurredAt)
@@ -245,6 +248,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 					continue
 				}
 				record.SkillLoads[artifact.ID]++
+				taskSkillLoads[artifact.ID]++
 				record.SkillInstructionTokens[artifact.ID] = max(
 					record.SkillInstructionTokens[artifact.ID], artifact.EstimatedTokens,
 				)
@@ -417,6 +421,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 		}
 	}
+	finishSkillLoadTask(&record, taskSkillLoads)
 	if !episode.StartedAt.IsZero() {
 		record.TaskEpisodes = append(record.TaskEpisodes, episode)
 	}
@@ -574,6 +579,9 @@ func newCodexSessionRecord() codexSessionRecord {
 		ReadTargets:                  map[string]codexTargetMetrics{},
 		EditTargets:                  map[string]int{},
 		SkillLoads:                   map[string]int{},
+		SkillLoadTasks:               map[string]int{},
+		SkillReloads:                 map[string]int{},
+		SkillReloadTasks:             map[string]int{},
 		SkillInstructionTokens:       map[string]int64{},
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
@@ -586,6 +594,19 @@ func newCodexSessionRecord() codexSessionRecord {
 		AbandonedContinuations:       map[string]int{},
 		OversizedOutputs:             map[string]codexOversizedOutputMetrics{},
 		Activity:                     map[string]time.Time{},
+	}
+}
+
+func finishSkillLoadTask(record *codexSessionRecord, loads map[string]int) {
+	for id, count := range loads {
+		if count <= 0 {
+			continue
+		}
+		record.SkillLoadTasks[id]++
+		if count > 1 {
+			record.SkillReloads[id] += count - 1
+			record.SkillReloadTasks[id]++
+		}
 	}
 }
 

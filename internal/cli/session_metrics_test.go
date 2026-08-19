@@ -43,11 +43,31 @@ func TestAddCodexTargetMetricsCountsSessionsWithRediscovery(t *testing.T) {
 
 func TestAddGuidanceLoadMetricsSeparatesHealthyLoadsFromReloads(t *testing.T) {
 	target := map[string]guidanceLoadMetrics{}
-	addGuidanceLoadMetrics(target, map[string]int{"browser-qa": 1}, map[string]int64{"browser-qa": 3_000})
-	addGuidanceLoadMetrics(target, map[string]int{"browser-qa": 3}, map[string]int64{"browser-qa": 4_500})
+	first := newCodexSessionRecord()
+	first.SkillLoads["browser-qa"] = 1
+	first.SkillLoadTasks["browser-qa"] = 1
+	first.SkillInstructionTokens["browser-qa"] = 3_000
+	addGuidanceLoadMetrics(target, first)
+	second := newCodexSessionRecord()
+	second.SkillLoads["browser-qa"] = 3
+	second.SkillLoadTasks["browser-qa"] = 1
+	second.SkillReloads["browser-qa"] = 2
+	second.SkillReloadTasks["browser-qa"] = 1
+	second.SkillInstructionTokens["browser-qa"] = 4_500
+	addGuidanceLoadMetrics(target, second)
 	got := target["browser-qa"]
-	if got.Loads != 4 || got.Sessions != 2 || got.Reloads != 2 || got.ReloadSessions != 1 || got.EstimatedTokens != 4_500 {
+	if got.Loads != 4 || got.Tasks != 2 || got.Reloads != 2 || got.ReloadTasks != 1 || got.EstimatedTokens != 4_500 {
 		t.Fatalf("guidance load metrics=%#v", got)
+	}
+}
+
+func TestFinishSkillLoadTaskDoesNotTreatNextTaskAsReload(t *testing.T) {
+	record := newCodexSessionRecord()
+	record.SkillLoads["browser-qa"] = 2
+	finishSkillLoadTask(&record, map[string]int{"browser-qa": 1})
+	finishSkillLoadTask(&record, map[string]int{"browser-qa": 1})
+	if record.SkillLoadTasks["browser-qa"] != 2 || record.SkillReloads["browser-qa"] != 0 || record.SkillReloadTasks["browser-qa"] != 0 {
+		t.Fatalf("cross-task loads classified as reloads: %#v", record)
 	}
 }
 
