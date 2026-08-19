@@ -24,6 +24,7 @@ var sessionFocusCategories = map[string]map[string]bool{
 	"instructions": {
 		"instruction-discovery": true,
 		"instruction-footprint": true,
+		"skill-reload":          true,
 	},
 	"interface": {
 		"agent-interface":     true,
@@ -75,6 +76,7 @@ var preferredSessionFindingFocus = map[string]string{
 	"output-cost":             "output",
 	"instruction-discovery":   "instructions",
 	"instruction-footprint":   "instructions",
+	"skill-reload":            "instructions",
 	"agent-interface":         "interface",
 	"operation-chain":         "interface",
 	"diagnostic-contract":     "failures",

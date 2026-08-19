@@ -11,6 +11,7 @@ import (
 
 var codexPatchTargetPattern = regexp.MustCompile(`(?m)^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$`)
 var codexNestedToolCallPattern = regexp.MustCompile(`\btools\.([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
+var guidanceArtifactIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 func codexReadTargetCandidates(toolName, arguments, input string) []string {
 	var candidates []string
@@ -32,6 +33,25 @@ func codexReadTargetCandidates(toolName, arguments, input string) []string {
 		}
 	}
 	return candidates
+}
+
+func codexGuidanceArtifacts(candidates []string) []normalizedGuidanceArtifact {
+	var artifacts []normalizedGuidanceArtifact
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if !strings.EqualFold(filepath.Base(candidate), "SKILL.md") {
+			continue
+		}
+		id := filepath.Base(filepath.Dir(candidate))
+		if !guidanceArtifactIDPattern.MatchString(id) || seen[id] {
+			continue
+		}
+		seen[id] = true
+		artifacts = append(artifacts, normalizedGuidanceArtifact{Kind: "skill", ID: id})
+	}
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].ID < artifacts[j].ID })
+	return artifacts
 }
 
 func codexEditTargetCandidates(toolName, input string) []string {

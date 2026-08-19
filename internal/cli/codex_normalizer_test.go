@@ -27,6 +27,33 @@ func TestCodexRolloutLineNeededSkipsConversationContent(t *testing.T) {
 	}
 }
 
+func TestParseCodexSessionRetainsOnlyValidatedSkillIdentity(t *testing.T) {
+	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "skill-load", []any{
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:00Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "function_call", "call_id": "skill", "name": "exec_command",
+				"arguments": `{"cmd":"sed -n '1,200p' /private/codex/skills/evidence-first-planning/SKILL.md"}`,
+			},
+		},
+	})
+	session, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatalf("parse skill load: %v", err)
+	}
+	if len(session.Events) != 1 || len(session.Events[0].GuidanceArtifacts) != 1 {
+		t.Fatalf("skill guidance missing: %#v", session.Events)
+	}
+	got := session.Events[0].GuidanceArtifacts[0]
+	if got.Kind != "skill" || got.ID != "evidence-first-planning" {
+		t.Fatalf("skill guidance=%#v", got)
+	}
+	if invalid := codexGuidanceArtifacts([]string{"/private/skills/not valid/SKILL.md"}); len(invalid) != 0 {
+		t.Fatalf("invalid skill identity retained: %#v", invalid)
+	}
+}
+
 func TestParseCodexSessionUsesPrivacySafeRolloutLineage(t *testing.T) {
 	sessionsDir := t.TempDir()
 	childID := "provider-child-secret"

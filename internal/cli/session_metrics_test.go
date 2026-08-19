@@ -41,6 +41,16 @@ func TestAddCodexTargetMetricsCountsSessionsWithRediscovery(t *testing.T) {
 	}
 }
 
+func TestAddGuidanceLoadMetricsSeparatesHealthyLoadsFromReloads(t *testing.T) {
+	target := map[string]guidanceLoadMetrics{}
+	addGuidanceLoadMetrics(target, map[string]int{"browser-qa": 1})
+	addGuidanceLoadMetrics(target, map[string]int{"browser-qa": 3})
+	got := target["browser-qa"]
+	if got.Loads != 4 || got.Sessions != 2 || got.Reloads != 2 || got.ReloadSessions != 1 {
+		t.Fatalf("guidance load metrics=%#v", got)
+	}
+}
+
 func TestAddCodexOwnedToolMetricsRetainsBundledSubset(t *testing.T) {
 	metrics := map[string]codexToolMetrics{}
 	addCodexOwnedToolMetrics(metrics, "repo", false, 1, false, false, 400)

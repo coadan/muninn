@@ -240,6 +240,13 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			touchSessionActivity(record.Activity, "compaction", "", event.OccurredAt)
 		case sessionEventToolCall:
 			record.ToolCalls++
+			for _, artifact := range event.GuidanceArtifacts {
+				if artifact.Kind != "skill" || artifact.ID == "" {
+					continue
+				}
+				record.SkillLoads[artifact.ID]++
+				touchSessionActivity(record.Activity, "skill-load", artifact.ID, event.OccurredAt)
+			}
 			operationChain.observe(&record, event, eventOperations)
 			operationRetry.observeCall(event, eventOperations)
 			helpEffectiveness.observeCall(&record, event, eventOperations, ownership)
@@ -563,6 +570,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		OwnedOperationFailureReasons: map[string]map[string]int{},
 		ReadTargets:                  map[string]codexTargetMetrics{},
 		EditTargets:                  map[string]int{},
+		SkillLoads:                   map[string]int{},
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
 		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},

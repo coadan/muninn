@@ -28,6 +28,8 @@ Muninn helps identify:
   source discovery and navigation into owners associated with high task cost,
   review rework, or downstream failures;
 - oversized always-on instructions and recurring instruction-discovery gaps;
+- repeated skill-instruction reloads and placement-aware routes from concise
+  repository instructions to authoritative docs or source owners;
 - repeated exact verification without intervening edits, expensive repair
   loops, and checks whose absence is associated with downstream escapes;
 - workflow phases that concentrate context compactions and their observed

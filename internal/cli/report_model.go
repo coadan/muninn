@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 109
+const codexSessionInsightsSchemaVersion = 110
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -49,6 +49,7 @@ type codexAggregateMetrics struct {
 	OwnedFlagEligibleCalls       map[string]codexOccurrenceMetrics            `json:"ownedFlagEligibleCalls"`
 	OwnedOperationFailureReasons map[string]map[string]codexOccurrenceMetrics `json:"ownedOperationFailureReasons"`
 	ReadTargets                  map[string]codexTargetMetrics                `json:"readTargets"`
+	SkillLoads                   map[string]guidanceLoadMetrics               `json:"skillLoads"`
 	InlineOrchestrationCalls     int                                          `json:"inlineOrchestrationCalls"`
 	InlineOrchestrationBytes     int64                                        `json:"inlineOrchestrationBytes"`
 	InlineOrchestrationMaxBytes  int64                                        `json:"inlineOrchestrationMaxBytes"`
@@ -104,6 +105,13 @@ type codexTransitionMetrics struct {
 type codexOccurrenceMetrics struct {
 	Count    int `json:"count"`
 	Sessions int `json:"sessions"`
+}
+
+type guidanceLoadMetrics struct {
+	Loads          int `json:"loads"`
+	Sessions       int `json:"sessions"`
+	Reloads        int `json:"reloads"`
+	ReloadSessions int `json:"reloadSessions"`
 }
 
 type ownedOperationRetryMetrics struct {
@@ -236,6 +244,7 @@ type codexSessionRecord struct {
 	OwnedOperationFailureReasons map[string]map[string]int
 	ReadTargets                  map[string]codexTargetMetrics
 	EditTargets                  map[string]int
+	SkillLoads                   map[string]int
 	InlineOrchestrationCalls     int
 	InlineOrchestrationBytes     int64
 	InlineOrchestrationMaxBytes  int64

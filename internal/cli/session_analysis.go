@@ -61,6 +61,7 @@ func newCodexAggregateMetrics() codexAggregateMetrics {
 		OwnedFlagEligibleCalls:       map[string]codexOccurrenceMetrics{},
 		OwnedOperationFailureReasons: map[string]map[string]codexOccurrenceMetrics{},
 		ReadTargets:                  map[string]codexTargetMetrics{},
+		SkillLoads:                   map[string]guidanceLoadMetrics{},
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
 		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
@@ -187,6 +188,7 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	addCodexOccurrenceMetrics(target.OwnedFlagEligibleCalls, record.OwnedFlagEligibleCalls)
 	addCodexFailureContexts(target.OwnedOperationFailureReasons, record.OwnedOperationFailureReasons)
 	addCodexTargetMetrics(target.ReadTargets, record.ReadTargets, record.EditTargets)
+	addGuidanceLoadMetrics(target.SkillLoads, record.SkillLoads)
 	target.InlineOrchestrationCalls += record.InlineOrchestrationCalls
 	target.InlineOrchestrationBytes += record.InlineOrchestrationBytes
 	target.InlineOrchestrationMaxBytes = max(target.InlineOrchestrationMaxBytes, record.InlineOrchestrationMaxBytes)
@@ -208,6 +210,22 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	addDeliveryReworkMetrics(&target.DeliveryRework, record.DeliveryRework)
 	addDownstreamQualityMetrics(&target.DownstreamQuality, record.DownstreamQuality)
 	mergeSessionActivity(target.Activity, record.Activity)
+}
+
+func addGuidanceLoadMetrics(target map[string]guidanceLoadMetrics, additions map[string]int) {
+	for id, loads := range additions {
+		if loads <= 0 {
+			continue
+		}
+		metrics := target[id]
+		metrics.Loads += loads
+		metrics.Sessions++
+		if loads > 1 {
+			metrics.Reloads += loads - 1
+			metrics.ReloadSessions++
+		}
+		target[id] = metrics
+	}
 }
 
 func addOwnedOperationRetryMetrics(

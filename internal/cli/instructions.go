@@ -2,9 +2,12 @@ package cli
 
 import (
 	"io/fs"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type repositoryInstructionFile struct {
@@ -22,6 +25,7 @@ type repositoryInstructionFootprint struct {
 	ScopedBytes           int64                       `json:"scopedBytes"`
 	RootEstimatedTokens   int64                       `json:"rootEstimatedTokens"`
 	ScopedEstimatedTokens int64                       `json:"scopedEstimatedTokens"`
+	comparisonResolved    bool
 }
 
 func inspectRepositoryInstructions(root, provider string) repositoryInstructionFootprint {
@@ -70,10 +74,71 @@ func inspectRepositoryInstructions(root, provider string) repositoryInstructionF
 	})
 	footprint.RootEstimatedTokens = estimatedTokens(footprint.RootBytes)
 	footprint.ScopedEstimatedTokens = estimatedTokens(footprint.ScopedBytes)
+	footprint.comparisonResolved = true
 	sort.Slice(footprint.Files, func(i, j int) bool {
 		return footprint.Files[i].Path < footprint.Files[j].Path
 	})
 	return footprint
+}
+
+func inspectRepositoryInstructionsAt(
+	root,
+	provider string,
+	at time.Time,
+) (repositoryInstructionFootprint, bool) {
+	commitOutput, err := exec.Command(
+		"git", "-C", root, "rev-list", "-1", "--before="+at.UTC().Format(time.RFC3339), "HEAD",
+	).Output()
+	if err != nil || strings.TrimSpace(string(commitOutput)) == "" {
+		return repositoryInstructionFootprint{}, false
+	}
+	commit := strings.TrimSpace(string(commitOutput))
+	treeOutput, err := exec.Command("git", "-C", root, "ls-tree", "-r", "-l", "-z", commit).Output()
+	if err != nil {
+		return repositoryInstructionFootprint{}, false
+	}
+	var footprint repositoryInstructionFootprint
+	for _, entry := range strings.Split(string(treeOutput), "\x00") {
+		metadata, path, ok := strings.Cut(entry, "\t")
+		if !ok || ignoredInstructionPath(path) || !repositoryInstructionFileName(filepath.Base(path), provider) {
+			continue
+		}
+		fields := strings.Fields(metadata)
+		if len(fields) < 4 || fields[1] != "blob" {
+			continue
+		}
+		size, err := strconv.ParseInt(fields[3], 10, 64)
+		if err != nil || size < 0 {
+			continue
+		}
+		path = filepath.ToSlash(path)
+		scope := "scoped"
+		if !strings.Contains(path, "/") {
+			scope = "root"
+			footprint.RootFiles++
+			footprint.RootBytes += size
+		} else {
+			footprint.ScopedFiles++
+			footprint.ScopedBytes += size
+		}
+		footprint.Files = append(footprint.Files, repositoryInstructionFile{
+			Path: path, Scope: scope, Bytes: size, EstimatedTokens: estimatedTokens(size),
+		})
+	}
+	footprint.RootEstimatedTokens = estimatedTokens(footprint.RootBytes)
+	footprint.ScopedEstimatedTokens = estimatedTokens(footprint.ScopedBytes)
+	footprint.comparisonResolved = true
+	sort.Slice(footprint.Files, func(i, j int) bool { return footprint.Files[i].Path < footprint.Files[j].Path })
+	return footprint, true
+}
+
+func ignoredInstructionPath(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if ignoredInstructionDirectory(part) {
+			return true
+		}
+	}
+	return false
 }
 
 func repositoryInstructionFileName(name, provider string) bool {
@@ -93,7 +158,7 @@ func repositoryInstructionFileName(name, provider string) bool {
 
 func ignoredInstructionDirectory(name string) bool {
 	switch name {
-	case ".cache", ".git", ".next", ".workbench", ".worktrees", "build", "coverage", "dist", "node_modules", "target", "vendor":
+	case ".cache", ".git", ".midgard", ".next", ".workbench", ".worktrees", "build", "coverage", "dist", "node_modules", "target", "vendor":
 		return true
 	default:
 		return false

@@ -209,7 +209,16 @@ func cmdAnalyze(root string, args []string) error {
 		}
 		previous.Provider = source.Name()
 		previous.AnalysisScope = report.AnalysisScope
-		previous.Instructions = report.Instructions
+		if historical, ok := inspectRepositoryInstructionsAt(
+			resolvedRepoRoot,
+			source.Name(),
+			previousUntil,
+		); ok {
+			previous.Instructions = historical
+		} else {
+			previous.Instructions = report.Instructions
+			previous.Instructions.comparisonResolved = false
+		}
 		previous.Findings = buildSessionFindings(previous, config)
 		previous.Findings, err = filterSessionFindings(previous.Findings, *focus)
 		if err != nil {

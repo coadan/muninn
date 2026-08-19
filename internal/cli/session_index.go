@@ -245,10 +245,10 @@ func (store *sessionStore) replaceSession(
 		reasoning_tokens, total_tokens, selector_digests, owned_operations,
 		bypassed_operations, owned_flags, owned_flag_tools, operation_task,
 		operation_attribution_ambiguous,
-		operation_continues, targets, inline_bytes, concurrent_batch,
+		operation_continues, targets, guidance_artifacts, inline_bytes, concurrent_batch,
 		concurrent_batch_size,
 		diagnostic_json, working_directories, in_repository_scope
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -277,6 +277,10 @@ func (store *sessionStore) replaceSession(
 		targets, err := json.Marshal(event.Targets)
 		if err != nil {
 			return fmt.Errorf("encode repository targets: %w", err)
+		}
+		guidanceArtifacts, err := json.Marshal(event.GuidanceArtifacts)
+		if err != nil {
+			return fmt.Errorf("encode guidance artifacts: %w", err)
 		}
 		workingDirectories, err := json.Marshal(event.WorkingDirectories)
 		if err != nil {
@@ -328,6 +332,7 @@ func (store *sessionStore) replaceSession(
 			boolInt(event.OperationAttributionAmbiguous),
 			boolInt(event.OperationContinues),
 			string(targets),
+			string(guidanceArtifacts),
 			event.InlineBytes,
 			boolInt(event.ConcurrentBatch),
 			event.ConcurrentBatchSize,

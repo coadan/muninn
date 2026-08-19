@@ -53,6 +53,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 			score:      620 + int(report.Instructions.RootEstimatedTokens/100),
 		})
 	}
+	findings = append(findings, buildSkillReloadFindings(report)...)
 
 	ownedConfigByID := map[string]ownedToolConfig{}
 	for _, owned := range config.OwnedTools {
@@ -858,6 +859,41 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	return diversifySessionFindings(findings)
 }
 
+func buildSkillReloadFindings(report codexSessionInsightsReport) []sessionFinding {
+	var findings []sessionFinding
+	for id, metrics := range report.Summary.SkillLoads {
+		if metrics.Reloads < 3 || metrics.ReloadSessions < 3 {
+			continue
+		}
+		confidence := "medium"
+		if metrics.ReloadSessions >= 5 && metrics.ReloadSessions*2 >= metrics.Sessions {
+			confidence = "high"
+		}
+		findings = append(findings, sessionFinding{
+			Category: "skill-reload",
+			Control:  "instructions",
+			Title:    "skill instructions are repeatedly reloaded: " + id,
+			Evidence: fmt.Sprintf(
+				"%s loads across %s sessions included %s extra reloads in %s sessions",
+				formatCodexCount(int64(metrics.Loads)),
+				formatCodexCountNoun(int64(metrics.Sessions), "session"),
+				formatCodexCount(int64(metrics.Reloads)),
+				formatCodexCountNoun(int64(metrics.ReloadSessions), "session"),
+			),
+			Action:     "Keep the skill trigger concise and load this skill once per task; remove guidance that causes agents to reopen SKILL.md, and route stable reference detail through focused follow-ups.",
+			Count:      metrics.Reloads,
+			Sessions:   metrics.ReloadSessions,
+			Target:     id,
+			LastSeen:   sessionFindingLastSeen(report, "skill-load", id),
+			Lever:      "instructions/docs",
+			Confidence: confidence,
+			Why:        "Repeatedly loading the same conditional instructions adds context without changing the selected procedure.",
+			score:      600 + metrics.ReloadSessions*20 + metrics.Reloads*5,
+		})
+	}
+	return findings
+}
+
 func recurringPatternConfidence(sessions int) string {
 	if sessions >= 2 {
 		return "medium"
@@ -1483,6 +1519,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"code-structure":          6,
 		"instruction-discovery":   4,
 		"instruction-footprint":   1,
+		"skill-reload":            4,
 		"recurring-failure":       4,
 		"diagnostic-failure":      6,
 		"owned-tool":              4,

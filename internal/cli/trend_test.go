@@ -101,6 +101,33 @@ func TestRoundtripTrendHelpersCountTransitionsAndWaits(t *testing.T) {
 	}
 }
 
+func TestSessionRateTrendIncludesOnlyResolvedHistoricalInstructionFootprint(t *testing.T) {
+	baseline := codexSessionInsightsReport{SchemaVersion: 110}
+	current := codexSessionInsightsReport{SchemaVersion: 110}
+	baseline.Instructions.RootEstimatedTokens = 100
+	current.Instructions.RootEstimatedTokens = 80
+	current.Instructions.comparisonResolved = true
+
+	for _, metric := range sessionRateTrendMetrics(baseline, current) {
+		if metric.Name == "root instruction tokens" {
+			t.Fatal("unresolved historical footprint became a trend")
+		}
+	}
+	baseline.Instructions.comparisonResolved = true
+	found := false
+	for _, metric := range sessionRateTrendMetrics(baseline, current) {
+		if metric.Name == "root instruction tokens" {
+			found = true
+			if metric.Baseline != 100 || metric.Current != 80 {
+				t.Fatalf("instruction footprint trend=%#v", metric)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("resolved historical footprint was omitted")
+	}
+}
+
 func TestMaterialTrendDirectionRejectsMissingWindowEvidence(t *testing.T) {
 	metric := trendMetric{
 		Baseline:       1,

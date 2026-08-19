@@ -34,6 +34,8 @@ Each intervention includes a `focus` value that can be passed directly to
 - `--focus friction` explicitly selects the broad default queue.
 - `--focus tooling`, `instructions`, `interface`, `structure`, `discovery`,
   `failures`, `loops`, `output`, or `quality` selects one concern.
+- `--focus instructions` includes always-on footprint, instruction and
+  documentation routing gaps, and repeated skill-instruction reloads.
 - `--focus loops` includes verification repair loops as well as session and
   interface loops.
 - `--focus discovery` adds repository-relative read targets and the

@@ -59,6 +59,13 @@ Candidates for commands and paths exist only during normalization and are
 reduced to privacy-safe ownership and repository-relative attribution before
 storage.
 
+When a provider exposes an explicit or tool-mediated guidance load, its adapter
+may attach a normalized guidance artifact to the tool-call event. The artifact
+contains only a fixed kind and validated logical ID. Codex derives skill IDs
+transiently from `SKILL.md` read candidates and discards the source path before
+storage. Shared analysis owns reload accounting and findings; it never branches
+on the provider wire format.
+
 The adapter must not pass prompts, messages, raw commands, raw output, absolute
 paths, secrets, or provider session identifiers into reports. `SourcePath` and
 `CWD` are local index metadata only. Provider identifiers used for lineage must

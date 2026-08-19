@@ -24,7 +24,11 @@ func ownerRediscoveryFindings(report codexSessionInsightsReport, config reposito
 			if !materialOwnerRediscovery(metrics) {
 				continue
 			}
-			title, action := ownerRediscoveryPolicy(target, config)
+			title, action := ownerRediscoveryPolicy(
+				target,
+				config,
+				instructionRouteTarget(target, report.Instructions.Files),
+			)
 			repository, findingTarget, _ := splitManagedRepositoryTarget(target)
 			findings = append(findings, sessionFinding{
 				Category: "instruction-discovery",
@@ -167,12 +171,16 @@ func fileHotspotFindings(report codexSessionInsightsReport) []sessionFinding {
 	return findings
 }
 
-func ownerRediscoveryPolicy(target string, config repositoryConfig) (title, action string) {
+func ownerRediscoveryPolicy(target string, config repositoryConfig, routes ...string) (title, action string) {
 	base := strings.ToLower(filepath.Base(target))
+	route := "repository instructions"
+	if len(routes) > 0 && strings.TrimSpace(routes[0]) != "" {
+		route = routes[0]
+	}
 	switch {
 	case base == "agents.md":
 		return "injected repository instructions are repeatedly reopened",
-			"AGENTS.md is normally injected into the session; clarify the relevant rule or tooling entry point, then avoid rereading the file."
+			"AGENTS.md is normally injected into the session; replace the ambiguous guidance with a concise task trigger and exact owner or tooling route, then avoid rereading the file."
 	case repositoryManifestTarget(target):
 		return "repository manifest is repeatedly reopened",
 			"Add or use a bounded repository command for dependency and script discovery instead of repeatedly rereading the full manifest."
@@ -181,10 +189,34 @@ func ownerRediscoveryPolicy(target string, config repositoryConfig) (title, acti
 			"Expose canonical targets through a concise help target or injected workflow map, then invoke the target directly instead of reopening the build file."
 	case instructionTarget(target):
 		return "documentation entry point is repeatedly reopened",
-			"Route agents to the exact heading through a concise documentation index or heading-aware inspection surface instead of reopening the whole document."
+			fmt.Sprintf("Add a concise task trigger in %s that routes to the exact heading in this document; keep reference detail in the document, or expose a repeatable procedure as a skill instead of copying it into always-on context.", route)
 	default:
-		return "an authoritative owner is repeatedly rediscovered", config.Actions.SourceContext
+		return "an authoritative owner is repeatedly rediscovered",
+			config.Actions.SourceContext + " If the route remains recurrent, add only its task trigger and owner pointer to " + route + "; keep source detail out of always-on instructions."
 	}
+}
+
+func instructionRouteTarget(target string, files []repositoryInstructionFile) string {
+	target = filepath.ToSlash(filepath.Clean(target))
+	best := ""
+	bestDepth := -1
+	for _, file := range files {
+		directory := filepath.ToSlash(filepath.Dir(file.Path))
+		depth := strings.Count(directory, "/")
+		if directory == "." {
+			depth = 0
+		} else if target != directory && !strings.HasPrefix(target, directory+"/") {
+			continue
+		}
+		if depth > bestDepth {
+			best = file.Path
+			bestDepth = depth
+		}
+	}
+	if best == "" {
+		return "repository instructions"
+	}
+	return best
 }
 
 func buildEntrypointTarget(target string) bool {

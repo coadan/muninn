@@ -151,6 +151,8 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					name = "(unknown)"
 				}
 				concurrentBatchSize := codexConcurrentToolBatchSize(name, payload.Input)
+				readTargetCandidates := codexReadTargetCandidates(name, payload.Arguments, payload.Input)
+				guidanceArtifacts := codexGuidanceArtifacts(readTargetCandidates)
 				descriptor := indexedCodexDescriptor{
 					codexToolCallDescriptor: codexToolCallDescriptor{Name: name},
 					OccurredAt:              timestamp,
@@ -215,15 +217,17 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					ConcurrentBatch:               descriptor.ConcurrentBatch,
 					ConcurrentBatchSize:           descriptor.ConcurrentBatchSize,
 					TargetCandidates: append(
-						codexReadTargetCandidates(name, payload.Arguments, payload.Input),
+						readTargetCandidates,
 						codexEditTargetCandidates(name, payload.Input)...,
 					),
+					GuidanceArtifacts:  guidanceArtifacts,
 					InlineBytes:        codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
 					WorkingDirectories: descriptor.WorkingDirectories,
 				}
 				if continuation {
 					event.FirstFamily = ""
 					event.LastFamily = ""
+					event.GuidanceArtifacts = nil
 				}
 				session.Events = append(session.Events, event)
 				if payload.CallID != "" {

@@ -230,7 +230,8 @@ func sessionRateTrendMetrics(
 			MinimumSample:     10,
 		},
 	}
-	if baseline.SchemaVersion >= 28 && current.SchemaVersion >= 28 {
+	if baseline.SchemaVersion >= 28 && current.SchemaVersion >= 28 &&
+		baseline.Instructions.comparisonResolved && current.Instructions.comparisonResolved {
 		metrics = append(metrics, trendMetric{
 			Name:          "root instruction tokens",
 			Baseline:      float64(baseline.Instructions.RootEstimatedTokens),

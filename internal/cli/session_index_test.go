@@ -49,6 +49,25 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 			},
 		},
 		map[string]any{
+			"timestamp": "2026-07-24T08:00:02.500Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"call_id":   "skill",
+				"name":      "exec_command",
+				"arguments": `{"cmd":"sed -n '1,200p' .codex/skills/browser-qa/SKILL.md"}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-24T08:00:02.750Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "function_call_output",
+				"call_id": "skill",
+				"output":  "exit code: 0",
+			},
+		},
+		map[string]any{
 			"timestamp": "2026-07-24T08:00:03Z",
 			"type":      "event_msg",
 			"payload": map[string]any{
@@ -185,6 +204,9 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 		got.OutputTokens != 5 ||
 		got.TotalTokens != 25 {
 		t.Fatalf("indexed window token delta mismatch: %#v", got)
+	}
+	if got := indexed.Summary.SkillLoads["browser-qa"]; got.Loads != 1 || got.Sessions != 1 {
+		t.Fatalf("indexed skill loads mismatch: %#v", got)
 	}
 }
 

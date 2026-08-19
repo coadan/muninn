@@ -57,9 +57,17 @@ type normalizedSessionEvent struct {
 	ConcurrentBatchSize           int
 	TargetCandidates              []string
 	Targets                       []string
+	GuidanceArtifacts             []normalizedGuidanceArtifact
 	InlineBytes                   int64
 	Diagnostic                    *normalizedDiagnosticObservation
 	WorkingDirectories            []string
 	InRepositoryScope             bool
 	RepositoryScopeKnown          bool
+}
+
+// normalizedGuidanceArtifact is a privacy-safe identity for context loaded by
+// an agent. ID is a validated logical name, never a source path or contents.
+type normalizedGuidanceArtifact struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
 }

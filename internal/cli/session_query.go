@@ -29,7 +29,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.owned_flags, events.owned_flag_tools,
 		events.operation_task,
 		events.operation_attribution_ambiguous,
-		events.operation_continues, events.targets, events.inline_bytes,
+		events.operation_continues, events.targets, events.guidance_artifacts, events.inline_bytes,
 		events.concurrent_batch, events.concurrent_batch_size,
 		events.diagnostic_json,
 		events.working_directories, events.in_repository_scope
@@ -75,6 +75,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			concurrentBatchSize           int
 			inRepositoryScope             int
 			targets                       string
+			guidanceArtifacts             string
 			diagnosticJSON                string
 			workingDirectories            string
 		)
@@ -113,6 +114,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&operationAttributionAmbiguous,
 			&operationContinues,
 			&targets,
+			&guidanceArtifacts,
 			&event.InlineBytes,
 			&concurrentBatch,
 			&concurrentBatchSize,
@@ -157,6 +159,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		_ = json.Unmarshal([]byte(ownedFlagScopes), &event.OwnedFlagScopes)
 		event.OperationTask = operationTask
 		_ = json.Unmarshal([]byte(targets), &event.Targets)
+		_ = json.Unmarshal([]byte(guidanceArtifacts), &event.GuidanceArtifacts)
 		_ = json.Unmarshal([]byte(workingDirectories), &event.WorkingDirectories)
 		session.Events = append(session.Events, event)
 	}

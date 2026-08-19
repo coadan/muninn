@@ -18,6 +18,7 @@ Muninn keeps these activities distinct:
 - structured Heimdal failures and post-failure recovery cost;
 - root-agent and delegated work, coordination, and overlap;
 - repository navigation, repeated reads, and instruction footprint;
+- privacy-safe skill loads and repeated skill-instruction reloads;
 - recurring three-step chains of definitely attributed configured operations;
 - owned operations whose recurring failures lack an actionable fixed
   classification;
@@ -35,6 +36,21 @@ a search/read loop without an observed edit in at least three sessions and at
 least 20% of sessions that read the owner. Sessions that edit the target remain
 visible as implementation evidence but do not count as rediscovery friction.
 High confidence requires unedited rediscovery in at least half.
+
+Instruction-discovery actions preserve guidance density. A repeatedly reopened
+documentation owner stays in documentation; the nearest applicable repository
+instructions receive only a concise task trigger and exact route. A repeatedly
+rediscovered source owner receives the same routing recommendation when the
+evidence spans tasks, rather than having source detail copied into always-on
+instructions. Repeatable procedures remain candidates for skills, while fixed
+command sequences remain tooling candidates.
+
+Skill-load evidence contains only a validated skill name and counts. Loading a
+skill once is healthy conditional context. A skill-reload finding requires the
+same skill instructions to be loaded more than once in a session across at
+least three sessions. The action targets the skill trigger or its instructions;
+Muninn does not infer ineffectiveness from infrequent use and does not retain
+skill contents or load commands.
 
 Output-heavy bundled discovery remains low confidence when it appears in only
 one session. The same recurrence rule prevents an isolated locally owned stall
@@ -152,6 +168,12 @@ call and the largest batch size so agents can divide a shared stage budget
 without serializing independent work. The default concurrent stage budget is
 12,000 visible tokens; the action divides that budget by the largest observed
 batch size to suggest an even per-result cap.
+
+Instruction-footprint comparison uses the repository state committed at the
+end of each comparison window. When Git cannot resolve that state, Muninn omits
+the footprint trend instead of reusing the current footprint as historical
+evidence. Generated and disposable worktree directories do not contribute to
+the instruction inventory.
 
 ## Intervention construction
 
