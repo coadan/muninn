@@ -16,7 +16,11 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 	report.Summary.FilesUnreadable = stats.FilesUnreadable
 
 	rows, err := store.db.QueryContext(ctx, `SELECT
-		sessions.id, sources.source_path, sessions.cwd, events.sequence,
+		sessions.id, sources.source_path, sessions.cwd, sessions.model,
+		sessions.reasoning_effort, sessions.agent_kind, sessions.lineage_key,
+		sessions.parent_lineage_key, sessions.spawn_status,
+		sessions.unrecognized_records, sessions.unrecognized_content_blocks,
+		events.sequence,
 		events.occurred_at_ns, events.kind, events.tool_name, events.family,
 		events.shape, events.nested_tool_context, events.first_family,
 		events.last_family, events.tool_round,
@@ -24,7 +28,9 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.output_bytes, events.failure_reason, events.failure_context,
 		events.input_tokens, events.cached_input_tokens,
 		events.uncached_input_tokens, events.output_tokens,
-		events.reasoning_tokens, events.total_tokens, events.selector_digests,
+		events.reasoning_tokens, events.total_tokens, events.provider_cost_usd,
+		events.provider_api_duration_ms, events.provider_tool_duration_ms,
+		events.selector_digests,
 		events.owned_operations, events.bypassed_operations,
 		events.owned_flags, events.owned_flag_tools,
 		events.operation_task,
@@ -58,6 +64,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			sessionID                     int64
 			sourcePath                    string
 			cwd                           string
+			sessionMetadata               normalizedSession
 			event                         normalizedSessionEvent
 			occurredAtNS                  int64
 			callOccurredAtNS              int64
@@ -83,6 +90,14 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&sessionID,
 			&sourcePath,
 			&cwd,
+			&sessionMetadata.Model,
+			&sessionMetadata.ReasoningEffort,
+			&sessionMetadata.AgentKind,
+			&sessionMetadata.LineageKey,
+			&sessionMetadata.ParentLineageKey,
+			&sessionMetadata.SpawnStatus,
+			&sessionMetadata.UnrecognizedRecords,
+			&sessionMetadata.UnrecognizedContentBlocks,
 			&event.Sequence,
 			&occurredAtNS,
 			&event.Kind,
@@ -105,6 +120,9 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&event.Tokens.OutputTokens,
 			&event.Tokens.ReasoningTokens,
 			&event.Tokens.TotalTokens,
+			&event.Cost.CostUSD,
+			&event.Cost.APIDurationMs,
+			&event.Cost.ToolDurationMs,
 			&selectorDigests,
 			&ownedOperations,
 			&bypassedOperations,
@@ -130,7 +148,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		}
 		session := sessions[sessionID]
 		if session == nil {
-			session = &normalizedSession{Provider: provider, SourcePath: sourcePath, CWD: cwd}
+			session = &sessionMetadata
+			session.Provider, session.SourcePath, session.CWD = provider, sourcePath, cwd
 			sessions[sessionID] = session
 			sessionOrder = append(sessionOrder, sessionID)
 		}
@@ -201,18 +220,29 @@ func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int
 	queries := []string{
 		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
 			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
+			provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
 			working_directories, in_repository_scope
 		 FROM events
 		 WHERE session_id = ? AND kind = 'token' AND occurred_at_ns < ?
 		 ORDER BY sequence DESC LIMIT 1`,
 		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
 			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
+			provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
 			working_directories, in_repository_scope
 		 FROM events
-		 WHERE session_id = ? AND occurred_at_ns < ?
+		 WHERE session_id = ? AND kind = 'provider_cost' AND occurred_at_ns < ?
 		 ORDER BY sequence DESC LIMIT 1`,
 		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
 			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
+			provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
+			working_directories, in_repository_scope
+		 FROM events
+		 WHERE session_id = ? AND occurred_at_ns < ?
+		   AND kind <> 'provider_cost'
+		 ORDER BY sequence DESC LIMIT 1`,
+		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
+			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
+			provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
 			working_directories, in_repository_scope
 		 FROM events
 		 WHERE session_id = ? AND occurred_at_ns < ?
@@ -238,6 +268,9 @@ func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int
 			&event.Tokens.OutputTokens,
 			&event.Tokens.ReasoningTokens,
 			&event.Tokens.TotalTokens,
+			&event.Cost.CostUSD,
+			&event.Cost.APIDurationMs,
+			&event.Cost.ToolDurationMs,
 			&workingDirectories,
 			&inRepositoryScope,
 		)

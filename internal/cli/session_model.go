@@ -8,6 +8,9 @@ const (
 	sessionEventToken      = "token"
 	sessionEventComplete   = "complete"
 	sessionEventCompaction = "compaction"
+	// sessionEventProviderCost carries a provider's cumulative cost. It is
+	// telemetry, not task activity: it never opens, extends, or ends a turn.
+	sessionEventProviderCost = "provider_cost"
 )
 
 // normalizedSession is the provider-neutral boundary between ingestion and
@@ -23,7 +26,12 @@ type normalizedSession struct {
 	LineageKey       string
 	ParentLineageKey string
 	SpawnStatus      string
-	Events           []normalizedSessionEvent
+	// UnrecognizedRecords and UnrecognizedContentBlocks count source records
+	// and message content blocks whose type the adapter does not know. They
+	// make provider format drift visible as numbers; type names are never kept.
+	UnrecognizedRecords       int
+	UnrecognizedContentBlocks int
+	Events                    []normalizedSessionEvent
 }
 
 type normalizedSessionEvent struct {
@@ -44,6 +52,7 @@ type normalizedSessionEvent struct {
 	FailureReason                 string
 	FailureContext                string
 	Tokens                        normalizedTokenUsage
+	Cost                          normalizedProviderCost // provider_cost events only
 	SelectorDigests               []string
 	CommandCandidates             []ownedCommandInvocation
 	OwnedOperations               []string

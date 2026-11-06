@@ -13,9 +13,13 @@ import (
 
 // Claude Code transcripts are JSONL files with one record per content block.
 // Assistant records of one API message repeat that message's usage, so usage is
-// counted once per message ID. The normalizer reads only structure: tool names,
-// tool results' size and status, usage, and timestamps. Prompt and assistant
-// text, thinking, and attachments are never decoded.
+// counted once per message ID. Thinking tokens are part of output tokens, as
+// reasoning tokens are in Codex. A root transcript's cost-state records carry
+// the process's cumulative provider cost and API and tool time, subagents
+// included; they become provider_cost events. The normalizer reads
+// only structure: tool names, tool results' size and status, usage, cost
+// totals, and timestamps. Prompt and assistant text, thinking, and attachments
+// are never decoded.
 //
 // Tool names are mapped onto the provider-neutral vocabulary the shared
 // analysis already understands: shell commands are "exec_command", file edits
@@ -25,14 +29,15 @@ import (
 var claudeToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 
 type claudeRecord struct {
-	Type      string `json:"type"`
-	Subtype   string `json:"subtype"`
-	Timestamp string `json:"timestamp"`
-	SessionID string `json:"sessionId"`
-	AgentID   string `json:"agentId"`
-	CWD       string `json:"cwd"`
-	Effort    string `json:"effort"`
-	Message   struct {
+	Type          string `json:"type"`
+	Subtype       string `json:"subtype"`
+	Timestamp     string `json:"timestamp"`
+	SessionID     string `json:"sessionId"`
+	AgentID       string `json:"agentId"`
+	CWD           string `json:"cwd"`
+	Effort        string `json:"effort"`
+	PerTurnEffort string `json:"perTurnEffort"`
+	Message       struct {
 		ID         string          `json:"id"`
 		Model      string          `json:"model"`
 		StopReason string          `json:"stop_reason"`
@@ -46,7 +51,45 @@ type claudeUsage struct {
 	CacheCreationTokens int64 `json:"cache_creation_input_tokens"`
 	CacheReadTokens     int64 `json:"cache_read_input_tokens"`
 	OutputTokens        int64 `json:"output_tokens"`
+	OutputTokensDetails struct {
+		ThinkingTokens int64 `json:"thinking_tokens"`
+	} `json:"output_tokens_details"`
 }
+
+type claudeCostState struct {
+	TotalCostUSD      float64 `json:"totalCostUSD"`
+	TotalAPIDuration  int64   `json:"totalAPIDuration"`
+	TotalToolDuration int64   `json:"totalToolDuration"`
+}
+
+// claudeKnownRecordTypes are the record types Claude Code writes: those the
+// adapter reads and those it deliberately ignores. Most were observed in real
+// transcripts; summary and progress are written by other builds. Any other
+// type is counted as format drift.
+var claudeKnownRecordTypes = map[string]bool{
+	"progress": true, "summary": true,
+	"agent-name": true, "api-request": true, "api-request-blob": true,
+	"api-request-shape": true, "artifact-autoreact-ledger": true,
+	"artifact-comment-monitor": true, "assistant": true, "atis-latch": true,
+	"attachment": true, "bridge-session": true, "cost-state": true,
+	"custom-title": true, "file-history-delta": true,
+	"file-history-snapshot": true, "fork-context-ref": true, "frame-link": true,
+	"isolation-latch": true, "last-prompt": true, "mode": true, "pr-link": true,
+	"queue-operation": true, "relocated": true, "system": true,
+	"tools-used": true, "user": true, "worktree-state": true,
+}
+
+// Message content-block types: those observed in transcripts plus the
+// Messages API's server-tool, redacted-thinking, and document blocks. Text,
+// thinking, and documents are recognized but never decoded.
+var (
+	claudeKnownAssistantBlocks = map[string]bool{
+		"redacted_thinking": true, "server_tool_use": true, "text": true,
+		"thinking": true, "tool_use": true, "web_fetch_tool_result": true,
+		"web_search_tool_result": true,
+	}
+	claudeKnownUserBlocks = map[string]bool{"document": true, "image": true, "text": true, "tool_result": true}
+)
 
 type claudeContentBlock struct {
 	Type      string          `json:"type"`
@@ -80,6 +123,27 @@ func claudeRecordLineNeeded(line []byte) bool {
 		bytes.Contains(line, []byte(`"compact_boundary"`))
 }
 
+// claudeSkippedRecordType reads the type of a record the adapter does not
+// otherwise decode. Most such records lead with their type; large attachment
+// records are recognized by their type key without a full decode.
+func claudeSkippedRecordType(line []byte) (string, bool) {
+	if rest, ok := bytes.CutPrefix(line, []byte(`{"type":"`)); ok {
+		if end := bytes.IndexByte(rest, '"'); end >= 0 {
+			return string(rest[:end]), true
+		}
+	}
+	if bytes.Contains(line, []byte(`"type":"attachment"`)) {
+		return "attachment", true
+	}
+	var head struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(line, &head) != nil {
+		return "", false
+	}
+	return head.Type, true
+}
+
 func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -93,23 +157,53 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 	completed := map[string]bool{}
 	seenMessages := map[string]bool{}
 	models := map[string]int{}
+	efforts := map[string]int{}
 	var total claudeUsage
+	var cost normalizedProviderCost
+	var lastTimestamp time.Time
 	toolRound, sequence := 0, 0
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if !claudeRecordLineNeeded(line) {
+			recordType, ok := claudeSkippedRecordType(line)
+			if ok && !claudeKnownRecordTypes[recordType] {
+				session.UnrecognizedRecords++
+			}
+			if recordType != "cost-state" || lastTimestamp.IsZero() {
+				continue
+			}
+			var state claudeCostState
+			if json.Unmarshal(line, &state) != nil {
+				continue
+			}
+			next := normalizedProviderCost{
+				CostUSD:        state.TotalCostUSD,
+				APIDurationMs:  state.TotalAPIDuration,
+				ToolDurationMs: state.TotalToolDuration,
+			}
+			if next != cost {
+				cost = next
+				sequence++
+				session.Events = append(session.Events, normalizedSessionEvent{
+					Sequence: sequence, OccurredAt: lastTimestamp, Kind: sessionEventProviderCost, Cost: cost,
+				})
+			}
 			continue
 		}
 		var record claudeRecord
 		if json.Unmarshal(line, &record) != nil {
 			continue
 		}
+		if !claudeKnownRecordTypes[record.Type] {
+			session.UnrecognizedRecords++
+		}
 		timestamp, err := time.Parse(time.RFC3339Nano, record.Timestamp)
 		if err != nil {
 			continue
 		}
+		lastTimestamp = timestamp
 		applyClaudeRecordIdentity(&session, record)
 		switch {
 		case record.Type == "system" && record.Subtype == "compact_boundary":
@@ -121,11 +215,17 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 			messageID := record.Message.ID
 			if model := record.Message.Model; model != "" && model != "<synthetic>" && !seenMessages[messageID] {
 				models[model]++
+				if effort := claudeRecordEffort(record); effort != "" {
+					efforts[normalizedProviderLabel(effort)]++
+				}
 			}
 			seenMessages[messageID] = true
 			var blocks []claudeContentBlock
 			_ = json.Unmarshal(record.Message.Content, &blocks)
 			for _, block := range blocks {
+				if !claudeKnownAssistantBlocks[block.Type] {
+					session.UnrecognizedContentBlocks++
+				}
 				if block.Type != "tool_use" {
 					continue
 				}
@@ -138,14 +238,17 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 					calls[block.ID] = call
 				}
 			}
-			if messageID != "" && record.Message.Usage != (claudeUsage{}) {
+			if usage := record.Message.Usage; messageID != "" && claudeCountedUsage(usage) != (claudeUsage{}) {
 				previous := usageByMessage[messageID]
-				usageByMessage[messageID] = record.Message.Usage
-				if record.Message.Usage != previous {
-					total.InputTokens += record.Message.Usage.InputTokens - previous.InputTokens
-					total.CacheCreationTokens += record.Message.Usage.CacheCreationTokens - previous.CacheCreationTokens
-					total.CacheReadTokens += record.Message.Usage.CacheReadTokens - previous.CacheReadTokens
-					total.OutputTokens += record.Message.Usage.OutputTokens - previous.OutputTokens
+				usageByMessage[messageID] = usage
+				// A thinking-only change rides along with the next counted
+				// change, so it never adds a token event of its own.
+				total.OutputTokensDetails.ThinkingTokens += usage.OutputTokensDetails.ThinkingTokens - previous.OutputTokensDetails.ThinkingTokens
+				if claudeCountedUsage(usage) != claudeCountedUsage(previous) {
+					total.InputTokens += usage.InputTokens - previous.InputTokens
+					total.CacheCreationTokens += usage.CacheCreationTokens - previous.CacheCreationTokens
+					total.CacheReadTokens += usage.CacheReadTokens - previous.CacheReadTokens
+					total.OutputTokens += usage.OutputTokens - previous.OutputTokens
 					sequence++
 					session.Events = append(session.Events, normalizedSessionEvent{
 						Sequence: sequence, OccurredAt: timestamp, Kind: sessionEventToken,
@@ -160,15 +263,15 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 					Sequence: sequence, OccurredAt: timestamp, Kind: sessionEventComplete,
 				})
 			}
-			if session.ReasoningEffort == "" && record.Effort != "" {
-				session.ReasoningEffort = normalizedProviderLabel(record.Effort)
-			}
 		case record.Type == "user":
 			var blocks []claudeContentBlock
 			if json.Unmarshal(record.Message.Content, &blocks) != nil {
 				continue // a plain prompt: never decoded or retained
 			}
 			for _, block := range blocks {
+				if !claudeKnownUserBlocks[block.Type] {
+					session.UnrecognizedContentBlocks++
+				}
 				if block.Type != "tool_result" {
 					continue
 				}
@@ -180,7 +283,8 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 	if err := scanner.Err(); err != nil {
 		return normalizedSession{}, err
 	}
-	session.Model = claudeDominantModel(models)
+	session.Model = claudeDominantLabel(models)
+	session.ReasoningEffort = claudeDominantLabel(efforts)
 	return session, nil
 }
 
@@ -204,30 +308,50 @@ func applyClaudeRecordIdentity(session *normalizedSession, record claudeRecord) 
 	session.LineageKey = ownershipSelectorDigest("provider-thread", record.SessionID)
 }
 
+// claudeCountedUsage is the part of a message's usage whose change makes a
+// token event: input, cache, and output counts, without the thinking detail.
+func claudeCountedUsage(usage claudeUsage) claudeUsage {
+	usage.OutputTokensDetails.ThinkingTokens = 0
+	return usage
+}
+
+// claudeRecordEffort is the effort the turn ran at: perTurnEffort, or the
+// session effort when a record carries no per-turn value.
+func claudeRecordEffort(record claudeRecord) string {
+	if record.PerTurnEffort != "" {
+		return record.PerTurnEffort
+	}
+	return record.Effort
+}
+
 func claudeTokenUsage(total claudeUsage) normalizedTokenUsage {
 	usage := normalizedTokenUsage{
 		InputTokens:         total.InputTokens + total.CacheCreationTokens + total.CacheReadTokens,
 		CachedInputTokens:   total.CacheReadTokens,
 		UncachedInputTokens: total.InputTokens + total.CacheCreationTokens,
 		OutputTokens:        total.OutputTokens,
+		ReasoningTokens:     min(total.OutputTokensDetails.ThinkingTokens, total.OutputTokens),
 	}
 	usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	return usage
 }
 
-func claudeDominantModel(models map[string]int) string {
-	names := make([]string, 0, len(models))
-	for name := range models {
+// claudeDominantLabel returns the label counted on the most API messages, the
+// alphabetically first on a tie, or "" when it is neither a safe provider
+// label nor the "(unknown)" placeholder for an unsafe one.
+func claudeDominantLabel(counts map[string]int) string {
+	names := make([]string, 0, len(counts))
+	for name := range counts {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	best := ""
 	for _, name := range names {
-		if best == "" || models[name] > models[best] {
+		if best == "" || counts[name] > counts[best] {
 			best = name
 		}
 	}
-	if best == "" || !providerLabelPattern.MatchString(best) {
+	if best == "" || (best != "(unknown)" && !providerLabelPattern.MatchString(best)) {
 		return ""
 	}
 	return best

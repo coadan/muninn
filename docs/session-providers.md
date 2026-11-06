@@ -58,8 +58,34 @@ for format-specific edge cases.
 
 - Claude Code writes one record per content block and repeats the API
   message's usage on each; usage is counted once per message ID. Cached input is
-  cache reads; cache creation counts as fresh input. Reasoning tokens are not
-  exposed and stay zero.
+  cache reads; cache creation counts as fresh input. Reasoning tokens are
+  `usage.output_tokens_details.thinking_tokens`. Claude Code counts them inside
+  `output_tokens`, as Codex counts reasoning inside output, so output and total
+  tokens keep the same meaning for both providers. A reasoning count above
+  output is clamped to output. A repeated message whose usage differs only in
+  thinking tokens adds no token event; the change is carried by the next one.
+- The session model and effort are the values used on the most API messages.
+  Effort is each assistant record's `perTurnEffort`, or `effort` when that is
+  absent, because effort can change during a session. Ties go to the
+  alphabetically first label.
+- A root transcript's `cost-state` records hold the Claude Code process's
+  cumulative `totalCostUSD`, `totalAPIDuration`, and `totalToolDuration`. They
+  cover the session's subagents and also side requests that never appear as
+  transcript messages, so they can exceed what transcript usage would price.
+  Subagent transcripts carry none, so cost is never double counted. Each
+  changed cost-state becomes a `provider_cost` event. It has no timestamp, so
+  it is placed at the time of the preceding user, assistant, or compaction
+  record; one before any such record is skipped. `totalDuration` is process
+  wall time including idle time, and `modelUsage` repeats the totals per model,
+  so neither is used. `thinkingDurationMs` on assistant records is not used:
+  reasoning tokens already measure thinking, and the record's relation to API
+  time is not documented.
+- Record types and message content-block types outside the set the adapter
+  knows are counted per session as format drift. Only the counts are kept,
+  never the type names. The known set is the types seen in real transcripts
+  plus a few that Claude Code writes elsewhere (`summary` and `progress`
+  records, and the Messages API's redacted-thinking, server-tool, and document
+  blocks).
 - Tool names map onto the neutral vocabulary shared analysis already uses:
   `Bash` is `exec_command`; `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`
   are `apply_patch`; `Agent` (and the older `Task`) is `spawn_agent`; and
@@ -86,7 +112,15 @@ for format-specific edge cases.
 
 Every event has a provider-independent kind and timestamp. Tool calls and
 outputs share a tool round. Token events contain cumulative
-`normalizedTokenUsage` provider totals.
+`normalizedTokenUsage` provider totals. A provider that reports its own cost
+emits `provider_cost` events with a cumulative `normalizedProviderCost` (USD,
+API milliseconds, tool milliseconds); others emit none, and their reports omit
+provider cost. Cost events are bookkeeping, not activity: shared analysis
+handles them before turn, episode, and session-end accounting. An adapter may count records and content blocks of unknown
+types in `UnrecognizedRecords` and `UnrecognizedContentBlocks`, so format drift
+shows up as a number. Session-level fields (model, effort, agent kind, lineage
+keys, spawn status, and the drift counts) are stored with the session in the
+SQLite index.
 Completion and compaction events are explicit when the source exposes them.
 Candidates for commands and paths exist only during normalization and are
 reduced to privacy-safe ownership and repository-relative attribution before

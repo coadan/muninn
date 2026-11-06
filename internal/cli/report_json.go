@@ -5,22 +5,24 @@ import "sort"
 const compactInterventionLimit = 5
 
 type compactSessionSummary struct {
-	FilesScanned           int                  `json:"filesScanned"`
-	FilesUnreadable        int                  `json:"filesUnreadable"`
-	Sessions               int                  `json:"sessions"`
-	CompletedSessions      int                  `json:"completedSessions"`
-	IncompleteSessions     int                  `json:"incompleteSessions"`
-	DurationSeconds        int64                `json:"durationSeconds"`
-	Compactions            int                  `json:"compactions"`
-	SessionsWithCompaction int                  `json:"sessionsWithCompactions"`
-	Tokens                 normalizedTokenUsage `json:"tokens"`
-	FreshTokens            int64                `json:"freshTokens"`
-	ExcludedTokenStreams   int                  `json:"excludedTokenTelemetrySessions"`
-	ToolCalls              int                  `json:"toolCalls"`
-	FailedToolCalls        int                  `json:"failedToolCalls"`
-	TruncatedToolCalls     int                  `json:"truncatedToolCalls"`
-	ToolOutputBytes        int64                `json:"toolOutputBytes"`
-	ToolOutputTokens       int64                `json:"toolOutputTokens"`
+	FilesScanned           int                        `json:"filesScanned"`
+	FilesUnreadable        int                        `json:"filesUnreadable"`
+	Sessions               int                        `json:"sessions"`
+	CompletedSessions      int                        `json:"completedSessions"`
+	IncompleteSessions     int                        `json:"incompleteSessions"`
+	DurationSeconds        int64                      `json:"durationSeconds"`
+	Compactions            int                        `json:"compactions"`
+	SessionsWithCompaction int                        `json:"sessionsWithCompactions"`
+	Tokens                 normalizedTokenUsage       `json:"tokens"`
+	FreshTokens            int64                      `json:"freshTokens"`
+	ExcludedTokenStreams   int                        `json:"excludedTokenTelemetrySessions"`
+	ProviderCost           providerCostMetrics        `json:"providerCost,omitzero"`
+	ProviderFormatDrift    providerFormatDriftMetrics `json:"providerFormatDrift,omitzero"`
+	ToolCalls              int                        `json:"toolCalls"`
+	FailedToolCalls        int                        `json:"failedToolCalls"`
+	TruncatedToolCalls     int                        `json:"truncatedToolCalls"`
+	ToolOutputBytes        int64                      `json:"toolOutputBytes"`
+	ToolOutputTokens       int64                      `json:"toolOutputTokens"`
 }
 
 type compactOutcomeSummary struct {
@@ -168,6 +170,8 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 			Tokens:                 summary.Tokens,
 			FreshTokens:            summary.FreshTokens,
 			ExcludedTokenStreams:   summary.ExcludedTokenStreams,
+			ProviderCost:           summary.ProviderCost,
+			ProviderFormatDrift:    summary.ProviderFormatDrift,
 			ToolCalls:              summary.ToolCalls,
 			FailedToolCalls:        summary.FailedToolCalls,
 			TruncatedToolCalls:     summary.TruncatedToolCalls,

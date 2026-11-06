@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 37
+const sessionStoreSchemaVersion = 38
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionStore struct {
@@ -124,7 +124,15 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS sessions (
 			id INTEGER PRIMARY KEY,
 			source_id INTEGER NOT NULL UNIQUE REFERENCES sources(id) ON DELETE CASCADE,
-			cwd TEXT NOT NULL
+			cwd TEXT NOT NULL,
+			model TEXT NOT NULL DEFAULT '',
+			reasoning_effort TEXT NOT NULL DEFAULT '',
+			agent_kind TEXT NOT NULL DEFAULT '',
+			lineage_key TEXT NOT NULL DEFAULT '',
+			parent_lineage_key TEXT NOT NULL DEFAULT '',
+			spawn_status TEXT NOT NULL DEFAULT '',
+			unrecognized_records INTEGER NOT NULL DEFAULT 0,
+			unrecognized_content_blocks INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS events (
 			id INTEGER PRIMARY KEY,
@@ -151,6 +159,9 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			output_tokens INTEGER NOT NULL DEFAULT 0,
 			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
 			total_tokens INTEGER NOT NULL DEFAULT 0,
+			provider_cost_usd REAL NOT NULL DEFAULT 0,
+			provider_api_duration_ms INTEGER NOT NULL DEFAULT 0,
+			provider_tool_duration_ms INTEGER NOT NULL DEFAULT 0,
 			selector_digests TEXT NOT NULL DEFAULT '[]',
 			owned_operations TEXT NOT NULL DEFAULT '[]',
 			bypassed_operations TEXT NOT NULL DEFAULT '[]',

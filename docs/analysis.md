@@ -64,6 +64,26 @@ owned calls, matched associations, and unmatched calls separately. The
 `(unmatched)` row retains failure, truncation, and output totals so incomplete
 operation configuration cannot hide the evidence behind a tool-level finding.
 
+## Provider cost and format drift
+
+When a provider reports its own cost, the summary and each task carry
+`providerCost`: the number of sessions with attributed cost, `costUSD`,
+`apiDurationMs`, and `toolDurationMs`. Claude Code reports it; Codex does not,
+and the field is then omitted rather than reported as zero. The values are the
+provider's own cumulative counters, so they include requests that never appear
+as transcript messages. A Claude Code root session's cost includes its
+subagents.
+
+Providers update cost coarsely, often once per session. Each growth is split
+by the repository's share of the session's tokens since the previous update,
+and a lookback window counts only growth observed inside it, at the time the
+provider wrote it. Cost is not divided across individual completed tasks in
+`outcomes`.
+
+`providerFormatDrift` counts sessions, records, and message content blocks
+whose type the provider adapter does not recognize. A non-zero value after a
+provider update means some telemetry may be missing; it reports counts only.
+
 ## Inspect failure events
 
 `muninn failures` returns a bounded, privacy-safe event timeline for one

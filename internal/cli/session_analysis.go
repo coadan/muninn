@@ -172,6 +172,15 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	if record.TokenTelemetryExcluded {
 		target.ExcludedTokenStreams++
 	}
+	if record.ProviderCostReported {
+		target.ProviderCost.Sessions++
+		addNormalizedProviderCost(&target.ProviderCost.normalizedProviderCost, record.ProviderCost)
+	}
+	if record.UnrecognizedRecords > 0 || record.UnrecognizedContentBlocks > 0 {
+		target.ProviderFormatDrift.Sessions++
+		target.ProviderFormatDrift.UnrecognizedRecords += record.UnrecognizedRecords
+		target.ProviderFormatDrift.UnrecognizedContentBlocks += record.UnrecognizedContentBlocks
+	}
 	target.ToolCalls += record.ToolCalls
 	target.FailedToolCalls += record.FailedToolCalls
 	target.TruncatedToolCalls += record.TruncatedToolCalls
