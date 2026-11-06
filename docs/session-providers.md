@@ -49,6 +49,39 @@ contract test. It deliberately uses a non-JSONL filename and verifies both
 direct analysis and SQLite ingestion. Add parser fixtures beside the provider
 for format-specific edge cases.
 
+## Claude Code
+
+`--provider claude` reads Claude Code transcripts from
+`$CLAUDE_CONFIG_DIR/projects` (default `~/.claude/projects`), including the
+`subagents/` transcripts stored beside each session. The adapter lives in
+`internal/cli/claude_discovery.go` and `internal/cli/claude_normalizer.go`.
+
+- Claude Code writes one record per content block and repeats the API
+  message's usage on each; usage is counted once per message ID. Cached input is
+  cache reads; cache creation counts as fresh input. Reasoning tokens are not
+  exposed and stay zero.
+- Tool names map onto the neutral vocabulary shared analysis already uses:
+  `Bash` is `exec_command`; `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`
+  are `apply_patch`; `Agent` (and the older `Task`) is `spawn_agent`; and
+  `SendMessage` is `send_message`. `Read`, `Grep`, and `Glob` keep their names
+  and carry the `file reads` or `search` transition family, which shared
+  analysis counts as discovery. Other tool names are kept only when they match
+  a conservative identifier pattern.
+- A turn ends at an assistant `end_turn`; `compact_boundary` records are
+  compactions. A tool result the user or a permission rule declined is not
+  counted as a tool failure. Output saved to a tool-results file counts as
+  truncated.
+- A subagent transcript is a `subagent` session whose parent lineage is the
+  digested parent session ID. Session and agent IDs are digested immediately.
+- Claude Code's own task checkouts, `.claude/worktrees/<name>`, are treated as
+  task worktrees like `.worktrees/<name>`: they name the task and are skipped by
+  the repository instruction scan. This is a directory convention, not a
+  provider branch.
+- Only structure is decoded: prompts, assistant text, thinking, and
+  attachments are never parsed into the normalized model. Skill loads from the
+  `Skill` tool carry no size estimate, and Claude Code has no archive or
+  separate metadata store, so those adapter hooks are omitted.
+
 ## Normalization contract
 
 Every event has a provider-independent kind and timestamp. Tool calls and

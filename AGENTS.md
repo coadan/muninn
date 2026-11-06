@@ -12,8 +12,8 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
 - Keep provider ingestion behind an explicit adapter boundary. Shared
   analysis, storage, findings, and reporting must not depend on Codex rollout
   shapes.
-- Codex is implemented first. Leave clean seams for Claude Code and OpenCode
-  without speculatively implementing their adapters.
+- Codex and Claude Code are implemented. Leave clean seams for OpenCode
+  without speculatively implementing its adapter.
 - A command bundle inside one outer tool call is one roundtrip. Only adjacent
   substantive commands in separate outer calls count as cross-call
   transitions.

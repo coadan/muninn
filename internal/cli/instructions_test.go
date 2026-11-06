@@ -14,6 +14,7 @@ func TestInspectRepositoryInstructionsSeparatesRootAndScopedFiles(t *testing.T) 
 	writeInstructionFixture(t, filepath.Join(root, "CLAUDE.md"), "123456")
 	writeInstructionFixture(t, filepath.Join(root, "packages", "api", "AGENTS.md"), "12345")
 	writeInstructionFixture(t, filepath.Join(root, ".worktrees", "task", "AGENTS.md"), "ignored")
+	writeInstructionFixture(t, filepath.Join(root, ".claude", "worktrees", "task", "CLAUDE.md"), "ignored")
 	writeInstructionFixture(t, filepath.Join(root, ".midgard", "benchmark-worktrees", "task", "AGENTS.md"), "ignored")
 	writeInstructionFixture(t, filepath.Join(root, "README.md"), "not instructions")
 

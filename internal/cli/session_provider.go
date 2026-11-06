@@ -96,8 +96,15 @@ var codexSessionProvider = sessionProviderAdapter{
 	guidanceSizes: codexGuidanceArtifactSizes,
 }
 
+var claudeSessionProvider = sessionProviderAdapter{
+	name:      "claude",
+	discover:  discoverClaudeSessionSource,
+	normalize: parseClaudeNormalizedSession,
+}
+
 var sessionProviders = map[string]sessionProviderAdapter{
-	"codex": codexSessionProvider,
+	"claude": claudeSessionProvider,
+	"codex":  codexSessionProvider,
 }
 
 func resolveSessionSource(name string) (sessionProvider, error) {

@@ -134,7 +134,7 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	}
 	defer store.Close()
 	ctx := context.Background()
-	discovery, err := discoverCodexSessions([]string{sessionsDir})
+	discovery, err := discoverJSONLSessions("Codex", []string{sessionsDir})
 	if err != nil {
 		t.Fatal(err)
 	}

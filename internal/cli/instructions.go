@@ -38,7 +38,8 @@ func inspectRepositoryInstructions(root, provider string) repositoryInstructionF
 			return nil
 		}
 		if entry.IsDir() {
-			if path != root && ignoredInstructionDirectory(entry.Name()) {
+			if path != root && (ignoredInstructionDirectory(entry.Name()) ||
+				claudeWorktreesDirectory(filepath.Base(filepath.Dir(path)), entry.Name())) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -133,12 +134,20 @@ func inspectRepositoryInstructionsAt(
 }
 
 func ignoredInstructionPath(path string) bool {
+	parent := ""
 	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
-		if ignoredInstructionDirectory(part) {
+		if ignoredInstructionDirectory(part) || claudeWorktreesDirectory(parent, part) {
 			return true
 		}
+		parent = part
 	}
 	return false
+}
+
+// claudeWorktreesDirectory matches Claude Code's task checkouts. Only that
+// subdirectory is ignored: .claude/CLAUDE.md is a legitimate instruction file.
+func claudeWorktreesDirectory(parent, name string) bool {
+	return parent == ".claude" && name == "worktrees"
 }
 
 func repositoryInstructionFileName(name, provider string) bool {

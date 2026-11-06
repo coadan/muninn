@@ -16,7 +16,8 @@ show where the workflow is losing time, context, or money without retaining the
 prompts, messages, raw commands, raw output, paths, secrets, or provider session
 identifiers that produced it.
 
-> **Status:** Codex is the first supported session provider. The analysis,
+> **Status:** Codex and Claude Code are supported session providers
+> (`--provider codex`, the default, and `--provider claude`). The analysis,
 > storage, findings, and reporting model are provider-neutral so other harnesses
 > can add a discovery and normalization adapter without changing the core.
 
@@ -104,6 +105,14 @@ Then analyze the current repository's recent work:
 
 ```sh
 muninn analyze --repo . --since 24h
+```
+
+Analyze Claude Code sessions instead with `--provider claude`; Muninn reads
+`~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`) unless `--sessions-dir`
+says otherwise:
+
+```sh
+muninn analyze --provider claude --repo . --since 7d
 ```
 
 Use a day or week window when comparing an intervention with the immediately

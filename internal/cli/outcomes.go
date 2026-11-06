@@ -1283,6 +1283,13 @@ func discoveryOperation(event normalizedSessionEvent, operations []string) bool 
 	switch event.Family {
 	case "search", "file reads", "git inspect", "bounded task inspect":
 		return true
+	case "":
+		// A dedicated (non-shell) search or read tool carries only its
+		// transition family.
+		if event.FirstFamily == "search" || event.FirstFamily == "file reads" ||
+			event.LastFamily == "search" || event.LastFamily == "file reads" {
+			return true
+		}
 	}
 	for _, operation := range operations {
 		name := operation[strings.LastIndex(operation, "/")+1:]

@@ -689,3 +689,9 @@ func TestCodexToolContinuationReferencesIgnoreArbitraryCommandOutput(t *testing.
 		t.Fatal("session-returning wrapper marker was not recognized")
 	}
 }
+
+func TestCodexTaskNameRecognizesClaudeCodeWorktrees(t *testing.T) {
+	if got := codexTaskName("/repo", "/repo/.claude/worktrees/feature-x"); got != "feature-x" {
+		t.Fatalf("task=%q", got)
+	}
+}

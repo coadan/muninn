@@ -18,7 +18,7 @@ func analyzeCodexSessionsFilteredWithOwnership(sessionDirs []string, workspaceRo
 }
 
 func analyzeCodexSessionsFilteredWithMetadata(sessionDirs []string, workspaceRoot string, since, generatedAt time.Time, taskFilter string, ownership ownershipCatalog, metadata map[string]normalizedSessionMetadata) (codexSessionInsightsReport, error) {
-	discovery, err := discoverCodexSessions(sessionDirs)
+	discovery, err := discoverJSONLSessions("Codex", sessionDirs)
 	if err != nil {
 		return codexSessionInsightsReport{}, err
 	}

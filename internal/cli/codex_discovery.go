@@ -20,10 +20,12 @@ func discoverCodexSessionSource(explicit string, includeArchived bool) (sessionD
 			dirs = append(dirs, archivedDir)
 		}
 	}
-	return discoverCodexSessions(dirs)
+	return discoverJSONLSessions("Codex", dirs)
 }
 
-func discoverCodexSessions(sessionDirs []string) (sessionDiscovery, error) {
+// discoverJSONLSessions lists the .jsonl session files under sessionDirs for
+// providers that store one transcript per file.
+func discoverJSONLSessions(label string, sessionDirs []string) (sessionDiscovery, error) {
 	discovery := sessionDiscovery{Dirs: append([]string(nil), sessionDirs...)}
 	for _, sessionDir := range sessionDirs {
 		err := filepath.WalkDir(sessionDir, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -38,7 +40,7 @@ func discoverCodexSessions(sessionDirs []string) (sessionDiscovery, error) {
 			return nil
 		})
 		if err != nil {
-			return sessionDiscovery{}, fmt.Errorf("scan Codex sessions in %s: %w", sessionDir, err)
+			return sessionDiscovery{}, fmt.Errorf("scan %s sessions in %s: %w", label, sessionDir, err)
 		}
 	}
 	sort.Strings(discovery.Files)

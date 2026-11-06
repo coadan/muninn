@@ -74,6 +74,9 @@ func codexTaskName(workspaceRoot, cwd string) string {
 	if len(parts) >= 2 && parts[0] == ".worktrees" {
 		return parts[1]
 	}
+	if len(parts) >= 3 && parts[0] == ".claude" && parts[1] == "worktrees" {
+		return parts[2]
+	}
 	if len(parts) >= 3 && parts[0] == ".workbench" && parts[1] == "worktrees" {
 		return parts[2]
 	}

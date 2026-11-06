@@ -958,3 +958,24 @@ func TestSessionRecordSegmentsCompletionEpisodesAndCensoring(t *testing.T) {
 		t.Fatalf("second episode fresh-token delta=%d, want 15", fresh)
 	}
 }
+
+func TestDiscoveryOperationAcceptsDedicatedSearchAndReadTools(t *testing.T) {
+	for _, event := range []normalizedSessionEvent{
+		{ToolName: "Grep", FirstFamily: "search", LastFamily: "search"},
+		{ToolName: "Read", FirstFamily: "file reads", LastFamily: "file reads"},
+		{ToolName: "exec_command", Family: "search"},
+	} {
+		if !discoveryOperation(event, nil) {
+			t.Fatalf("%#v should count as discovery", event)
+		}
+	}
+	for _, event := range []normalizedSessionEvent{
+		{ToolName: "apply_patch"},
+		// A shell command's family decides; its transition families do not.
+		{ToolName: "exec_command", Family: "tests", FirstFamily: "search"},
+	} {
+		if discoveryOperation(event, nil) {
+			t.Fatalf("%#v should not count as discovery", event)
+		}
+	}
+}

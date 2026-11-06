@@ -23,7 +23,7 @@ func TestDiscoverCodexSessionsReturnsOnlySortedRollouts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	discovery, err := discoverCodexSessions([]string{root})
+	discovery, err := discoverJSONLSessions("Codex", []string{root})
 	if err != nil {
 		t.Fatal(err)
 	}
