@@ -5,11 +5,7 @@ package cli
 // original descriptor onto their output so later output, failures, and waits
 // remain attributable to the command that is still running.
 func withoutContinuationCallAttribution(event normalizedSessionEvent) normalizedSessionEvent {
-	if event.Kind != sessionEventToolCall ||
-		event.Family == "" ||
-		event.FirstFamily != "" ||
-		event.LastFamily != "" ||
-		(event.ToolName != "write_stdin" && event.ToolName != "wait" && event.ToolName != "exec") {
+	if !isContinuationToolCall(event) {
 		return event
 	}
 	event.Family = ""
@@ -17,6 +13,15 @@ func withoutContinuationCallAttribution(event normalizedSessionEvent) normalized
 	event.SelectorDigests = nil
 	event.CommandCandidates = nil
 	event.OwnedOperations = nil
+	event.BypassedOperations = nil
+	event.OwnedFlags = nil
+	event.OwnedFlagScopes = nil
 	event.OperationAttributionAmbiguous = false
 	return event
+}
+
+func isContinuationToolCall(event normalizedSessionEvent) bool {
+	return event.Kind == sessionEventToolCall && event.Family != "" &&
+		event.FirstFamily == "" && event.LastFamily == "" &&
+		(event.ToolName == "write_stdin" || event.ToolName == "wait" || event.ToolName == "exec")
 }

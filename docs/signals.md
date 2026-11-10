@@ -181,7 +181,10 @@ per affected session and at least five polls overall. Occasional early polling
 remains in the metrics without competing with concentrated wait/resume loops.
 The target is the owned operation when available; otherwise it is the
 privacy-safe continuation API, such as `write_stdin` or `wait`, rather than the
-unrelated command family being resumed.
+unrelated command family being resumed. For Claude Code, a backgrounded shell
+command yields, and a poll of its output or `TaskOutput` is a `wait`, so these
+findings and abandoned-continuation findings cover background work; see
+[session providers](session-providers.md#claude-code).
 
 Generic compaction findings require at least two compactions per affected
 session, a pattern spanning at least five sessions and 20% of the cohort, or a
@@ -249,6 +252,11 @@ Muninn distinguishes healthy demand from actionable file friction.
   50 outer tool roundtrips.
 - `review/rework`: at least two attributed review or follow-up corrections.
 - `downstream-risk`: at least two attributed downstream failures or reverts.
+
+A delivery is a successful delivery operation, such as `git push` or a
+configured `/pr` or `/worktree-land` operation, or a delivery event the provider
+records itself, such as a Claude Code pull request being opened. That event
+carries no URL, repository, or number.
 
 When deliveries fail a recurring downstream check without fresh
 pre-verification, the check is the intervention target—not merely the most

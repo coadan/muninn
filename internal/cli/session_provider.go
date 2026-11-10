@@ -97,9 +97,10 @@ var codexSessionProvider = sessionProviderAdapter{
 }
 
 var claudeSessionProvider = sessionProviderAdapter{
-	name:      "claude",
-	discover:  discoverClaudeSessionSource,
-	normalize: parseClaudeNormalizedSession,
+	name:          "claude",
+	discover:      discoverClaudeSessionSource,
+	normalize:     parseClaudeNormalizedSession,
+	guidanceSizes: claudeGuidanceArtifactSizes,
 }
 
 var sessionProviders = map[string]sessionProviderAdapter{

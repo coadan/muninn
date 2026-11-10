@@ -14,6 +14,9 @@ const (
 	// sessionEventProviderCost carries a provider's cumulative cost. It is
 	// telemetry, not task activity: it never opens, extends, or ends a turn.
 	sessionEventProviderCost = "provider_cost"
+	// sessionEventDelivery is a delivery the provider recorded outside a tool
+	// call, such as a pull request being opened. It carries no identifiers.
+	sessionEventDelivery = "delivery"
 )
 
 // normalizedSession is the provider-neutral boundary between ingestion and

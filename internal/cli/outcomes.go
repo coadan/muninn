@@ -175,6 +175,10 @@ func (tracker *downstreamQualityTracker) observe(event normalizedSessionEvent, o
 		tracker.observeEdit(event)
 		return
 	}
+	if event.Kind == sessionEventDelivery {
+		tracker.observeDelivery(event)
+		return
+	}
 	if event.Kind != sessionEventToolOutput || event.OperationContinues {
 		return
 	}
@@ -450,8 +454,7 @@ func (tracker *deliveryReworkTracker) observe(event normalizedSessionEvent, oper
 			tracker.reviewAfterLatestEdit = true
 		}
 	}
-	if event.Kind == sessionEventToolOutput && !event.Failed && !event.OperationContinues &&
-		deliveryOperation(event, operations) {
+	if completedDelivery(event, operations) {
 		tracker.observeDelivery()
 		return
 	}
@@ -912,6 +915,16 @@ func reworkTargetScope(target string) string {
 	return "(root)"
 }
 
+// completedDelivery reports a delivery that finished: a successful delivery
+// operation, or a delivery the provider recorded directly.
+func completedDelivery(event normalizedSessionEvent, operations []string) bool {
+	if event.Kind == sessionEventDelivery {
+		return true
+	}
+	return event.Kind == sessionEventToolOutput && !event.Failed && !event.OperationContinues &&
+		deliveryOperation(event, operations)
+}
+
 func deliveryOperation(event normalizedSessionEvent, operations []string) bool {
 	if event.Family == "delivery" {
 		return true
@@ -1175,6 +1188,9 @@ func (episode *codexTaskEpisode) observePhase(
 	if event.Kind == sessionEventToolOutput {
 		phase = episode.phaseForToolOutput(event, operations)
 	}
+	if event.Kind == sessionEventDelivery {
+		phase = "delivery"
+	}
 	metrics := episode.Phases[phase]
 	switch event.Kind {
 	case sessionEventToken:
@@ -1191,13 +1207,13 @@ func (episode *codexTaskEpisode) observePhase(
 			len(downstreamCheckIDs(event, operations)) > 0 {
 			episode.reworkActive = true
 		}
-		if !event.Failed && !event.OperationContinues && deliveryOperation(event, operations) {
-			episode.delivered = true
-			episode.reworkActive = false
-			episode.editSinceDelivery = false
-		}
 	case sessionEventCompaction:
 		metrics.Compactions++
+	}
+	if completedDelivery(event, operations) {
+		episode.delivered = true
+		episode.reworkActive = false
+		episode.editSinceDelivery = false
 	}
 	episode.Phases[phase] = metrics
 }

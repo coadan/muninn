@@ -95,10 +95,7 @@ func normalizedSessionTouchesRepository(session normalizedSession, repositoryRoo
 	}
 	inRepositoryScope := inside
 	for _, event := range session.Events {
-		if eventInside, explicit := eventRepositoryScope(event, session.CWD, repositoryRoot); explicit {
-			inRepositoryScope = eventInside
-		}
-		if inRepositoryScope {
+		if repositoryScopeForEvent(event, session.CWD, repositoryRoot, &inRepositoryScope) {
 			return true
 		}
 	}
@@ -112,11 +109,23 @@ func markRepositoryEventScope(session *normalizedSession, repositoryRoot string)
 	}
 	for index := range session.Events {
 		event := &session.Events[index]
-		if eventInside, explicit := eventRepositoryScope(*event, session.CWD, repositoryRoot); explicit {
-			inside = eventInside
-		}
-		event.InRepositoryScope = inside
+		event.InRepositoryScope = repositoryScopeForEvent(*event, session.CWD, repositoryRoot, &inside)
 	}
+}
+
+// A result belongs to its originating call's repository. A late result does
+// not move the active context away from the latest foreground activity.
+func repositoryScopeForEvent(event normalizedSessionEvent, sessionCWD, repositoryRoot string, contextScope *bool) bool {
+	inside := *contextScope
+	if event.RepositoryScopeKnown {
+		inside = event.InRepositoryScope
+	} else if eventInside, explicit := eventRepositoryScope(event, sessionCWD, repositoryRoot); explicit {
+		inside = eventInside
+	}
+	if event.Kind != sessionEventToolOutput && event.Kind != sessionEventDelivery && !isContinuationToolCall(event) {
+		*contextScope = inside
+	}
+	return inside
 }
 
 func eventRepositoryWorkingDirectory(

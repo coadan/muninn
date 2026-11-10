@@ -55,15 +55,11 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
 	var activeDiagnostic *diagnosticFailureEpisode
 	pendingContinuations := map[string]int{}
-	inRepositoryScope := inside
+	contextInRepositoryScope := inside
 	lastEventKind := ""
 	for _, event := range session.Events {
+		inRepositoryScope := repositoryScopeForEvent(event, session.CWD, workspaceRoot, &contextInRepositoryScope)
 		event = withoutContinuationCallAttribution(event)
-		if event.RepositoryScopeKnown {
-			inRepositoryScope = event.InRepositoryScope
-		} else if inside, explicit := eventRepositoryScope(event, session.CWD, workspaceRoot); explicit {
-			inRepositoryScope = inside
-		}
 		if event.Kind == sessionEventProviderCost {
 			// Cost is handled before turn and episode accounting so a
 			// provider's bookkeeping record never looks like task activity.
@@ -103,6 +99,18 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 		if !inRepositoryScope {
 			continue
+		}
+		if event.Kind == sessionEventDelivery {
+			// Provider links can bind existing deliveries. Only consume a
+			// link when this task still has edits to deliver; configured
+			// delivery operations and pushes already consume those edits.
+			event.OperationTask = repositoryTaskForWorkingDirectory(
+				eventRepositoryWorkingDirectory(event, session.CWD, workspaceRoot), workspaceRoot,
+			)
+			tracker := deliveryTrackers[ownedOperationTask(event, ownership, record.Task)]
+			if tracker == nil || len(tracker.pendingEditCohorts) == 0 {
+				continue
+			}
 		}
 		if event.Kind == sessionEventToken && !record.TokenTelemetryExcluded {
 			addNormalizedTokenUsage(&record.Tokens, tokenIncrement)
@@ -208,7 +216,8 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			eventCWD := eventRepositoryWorkingDirectory(event, session.CWD, workspaceRoot)
 			event.OperationTask = repositoryTaskForWorkingDirectory(eventCWD, workspaceRoot)
 		}
-		if event.Kind != sessionEventToolOutput {
+		if event.Kind != sessionEventToolOutput &&
+			(event.Kind != sessionEventDelivery || !episode.StartedAt.IsZero()) {
 			episodeTokens := tokenIncrement
 			if record.TokenTelemetryExcluded && event.Kind == sessionEventToken {
 				episodeTokens = normalizedTokenUsage{}

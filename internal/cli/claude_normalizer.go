@@ -18,28 +18,37 @@ import (
 // the process's cumulative provider cost and API and tool time, subagents
 // included; they become provider_cost events. The normalizer reads
 // only structure: tool names, tool results' size and status, usage, cost
-// totals, and timestamps. Prompt and assistant text, thinking, and attachments
-// are never decoded.
+// totals, and timestamps. Assistant text and thinking are never decoded.
+// User strings and queued attachments are decoded only when they open with
+// the harness's task-notification tag; only task ID and status are read.
 //
 // Tool names are mapped onto the provider-neutral vocabulary the shared
 // analysis already understands: shell commands are "exec_command", file edits
 // are "apply_patch", and subagent launch and messaging are "spawn_agent" and
 // "send_message". MCP tools become "mcp:<digest>" (see normalizedToolName).
-// Other tools keep their (validated) names.
+// Other tools keep their (validated) names. Background tasks
+// map onto continuations (claude_background_tasks.go) and pull-request creation
+// onto delivery events (claude_delivery.go).
 
 var claudeToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 
 var claudePreToolHookPattern = regexp.MustCompile(`^PreToolUse:[A-Za-z0-9_.:-]+ hook error`)
 
 type claudeRecord struct {
-	Type            string `json:"type"`
-	Subtype         string `json:"subtype"`
-	Timestamp       string `json:"timestamp"`
-	SessionID       string `json:"sessionId"`
-	AgentID         string `json:"agentId"`
-	CWD             string `json:"cwd"`
-	Effort          string `json:"effort"`
-	PerTurnEffort   string `json:"perTurnEffort"`
+	Type          string          `json:"type"`
+	Subtype       string          `json:"subtype"`
+	Timestamp     string          `json:"timestamp"`
+	SessionID     string          `json:"sessionId"`
+	AgentID       string          `json:"agentId"`
+	CWD           string          `json:"cwd"`
+	Effort        string          `json:"effort"`
+	PerTurnEffort string          `json:"perTurnEffort"`
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	// Attachment is read only for a queued task notification.
+	Attachment struct {
+		Type   string          `json:"type"`
+		Prompt json.RawMessage `json:"prompt"`
+	} `json:"attachment"`
 	CompactMetadata struct {
 		Trigger   string `json:"trigger"`
 		PreTokens int64  `json:"preTokens"`
@@ -117,6 +126,9 @@ type claudeToolInput struct {
 
 type claudeCall struct {
 	codexToolCallDescriptor
+	TaskOutput         bool
+	OriginalToolName   string
+	PRCreate           bool
 	OccurredAt         time.Time
 	ToolRound          int
 	SelectorDigests    []string
@@ -127,7 +139,9 @@ type claudeCall struct {
 func claudeRecordLineNeeded(line []byte) bool {
 	return bytes.Contains(line, []byte(`"type":"assistant"`)) ||
 		bytes.Contains(line, []byte(`"type":"user"`)) ||
-		bytes.Contains(line, []byte(`"compact_boundary"`))
+		bytes.Contains(line, []byte(`"compact_boundary"`)) ||
+		bytes.Contains(line, []byte(`"type":"pr-link"`)) ||
+		bytes.Contains(line, []byte(`"type":"attachment"`)) && bytes.Contains(line, []byte(`task-notification`))
 }
 
 // claudeSkippedRecordType reads the type of a record the adapter does not
@@ -170,6 +184,13 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 	var cost normalizedProviderCost
 	var lastTimestamp time.Time
 	toolRound, sequence := 0, 0
+	background := newClaudeBackgroundTasks()
+	emit := func(event normalizedSessionEvent) {
+		sequence++
+		event.Sequence = sequence
+		session.Events = append(session.Events, event)
+	}
+	delivery := claudeDeliveryState{}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	for scanner.Scan() {
@@ -241,6 +262,7 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 				}
 				toolRound++
 				call, event := claudeToolCallEvent(block, record.CWD, timestamp, toolRound)
+				background.rewriteCall(block, &call, &event)
 				sequence++
 				event.Sequence = sequence
 				session.Events = append(session.Events, event)
@@ -285,7 +307,15 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 					Sequence: sequence, OccurredAt: timestamp, Kind: sessionEventComplete,
 				})
 			}
+		case record.Type == "attachment" && record.Attachment.Type == "queued_command":
+			if event, ok := background.notificationEvent(record.Attachment.Prompt, timestamp); ok {
+				emit(event)
+			}
 		case record.Type == "user":
+			if event, ok := background.notificationEvent(record.Message.Content, timestamp); ok {
+				emit(event)
+				continue
+			}
 			var blocks []claudeContentBlock
 			if json.Unmarshal(record.Message.Content, &blocks) != nil {
 				continue // a plain prompt: never decoded or retained
@@ -298,7 +328,13 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 					continue
 				}
 				sequence++
-				session.Events = append(session.Events, claudeToolOutputEvent(block, calls[block.ToolUseID], timestamp, sequence))
+				call := calls[block.ToolUseID]
+				event := claudeToolOutputEvent(block, call, timestamp, sequence)
+				background.observeOutput(block, record.ToolUseResult, call, &event)
+				session.Events = append(session.Events, event)
+				if deliveryEvent, ok := delivery.observeOutput(block, call, event); ok {
+					emit(deliveryEvent)
+				}
 			}
 		}
 	}
@@ -391,6 +427,7 @@ func claudeToolCallEvent(block claudeContentBlock, cwd string, at time.Time, rou
 	event := normalizedSessionEvent{OccurredAt: at, Kind: sessionEventToolCall, ToolRound: round}
 	switch name {
 	case "Bash":
+		call.PRCreate = claudeStandalonePRCreate(input.Command)
 		name = "exec_command"
 		arguments, _ := json.Marshal(map[string]string{"cmd": input.Command})
 		argumentText := string(arguments)

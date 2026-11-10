@@ -54,7 +54,9 @@ for format-specific edge cases.
 `--provider claude` reads Claude Code transcripts from
 `$CLAUDE_CONFIG_DIR/projects` (default `~/.claude/projects`), including the
 `subagents/` transcripts stored beside each session. The adapter lives in
-`internal/cli/claude_discovery.go` and `internal/cli/claude_normalizer.go`.
+`internal/cli/claude_discovery.go` and `internal/cli/claude_normalizer.go`, with
+background tasks in `claude_background_tasks.go`, pull-request delivery in
+`claude_delivery.go`, and skill sizes in `claude_guidance.go`.
 
 - Claude Code writes one record per content block and repeats the API
   message's usage on each; usage is counted once per message ID. Cached input is
@@ -112,10 +114,47 @@ for format-specific edge cases.
   `.claude/worktrees/<name>/pkg/...`), so reports never show the prefix and one
   file is one target across task checkouts. This is a directory convention,
   not a provider branch.
-- Only structure is decoded: prompts, assistant text, thinking, and
-  attachments are never parsed into the normalized model. Skill loads from the
-  `Skill` tool carry no size estimate, and Claude Code has no archive or
-  separate metadata store, so those adapter hooks are omitted.
+- Background shells are continuations. A `Bash` result that reports a
+  background task ID (`run_in_background`, or a command moved to the background
+  after its timeout) yields the command (`OperationContinues`). Until the task
+  ends, a `Bash` or `Read` call that references its ID, such as a poll of its
+  output file, is a `wait` that inherits the command's attribution. A failed
+  poll or stop preserves its failure and leaves the task running. Legacy
+  `TaskOutput` on a shell task is `wait`; a terminal status in its result
+  header resolves the task, including a failure when the status is `failed`.
+  `TaskStop` on one is `write_stdin`, the shared interrupt of a running
+  command, which ends it as `interrupted process`, not a successful test or
+  delivery. The harness's `<task-notification>` for the task ends
+  it too, as a terminal `wait` output that is failed when the status is
+  `failed` (or interrupted when `stopped`) and that times no wait, since the
+  agent was not blocked. A task ends once; repeated notifications add nothing.
+  Outstanding physical poll/stop results after that settlement retain their
+  size and status without settling the operation again. A task that never ends counts
+  as an abandoned continuation.
+- `TaskOutput` and `TaskStop` on a background subagent are `wait_agent` and
+  `interrupt_agent`. A task ID the session has not started keeps the tool's own
+  name.
+- A successful standalone foreground `gh pr create` returning only one PR URL
+  emits a fixed `delivery` at the result's position, using the creation call's
+  working directory. The URL is used transiently to suppress duplicates and is
+  never stored. Shell bundles, background creation, or outputs with extra text
+  provide no creation evidence. `pr-link` bindings add nothing, including
+  delayed bindings after later edits. Shared accounting counts creation only
+  when the task has pending edits; a successful `git push` or
+  configured delivery operation already consumes those edits.
+- Skill sizes come from the current `SKILL.md`: a bare skill ID from the
+  repository's `.claude/skills/<id>` or `$CLAUDE_CONFIG_DIR/skills/<id>` (the
+  repository wins), and a `plugin:skill` ID from `skills/<skill>` under each
+  install path that `plugins/installed_plugins.json` lists for the plugin.
+  Duplicate plugin names use the largest installed artifact deterministically.
+  Organization-synced skills, whose namespace no file names, and nested
+  directory-scoped skills stay unsized.
+- Assistant text and thinking are never decoded. A user string or a
+  `queued_command` attachment's prompt is decoded only when it opens with
+  `<task-notification>`, and then only its task ID and status are read.
+  Other prompts and attachment contents are never parsed into the normalized
+  model. Claude Code has no archive or separate metadata store, so that
+  adapter hook is omitted.
 
 ## Normalization contract
 
@@ -144,6 +183,9 @@ digest. A tool output that never ran carries a fixed `Refusal` label
 (`declined-by-user`, `denied-by-permission`, or `blocked-by-hook`) instead of
 `Failed`; `internal/cli/tool_refusals.go` owns the labels, accounting, and
 finding. Codex does not yet map its approval rejections onto these labels.
+A `delivery` event marks a delivery the provider records outside any tool call,
+such as a pull request being opened; shared session accounting counts it like a
+successful delivery operation only when the task has pending edits.
 Candidates for commands and paths exist only during normalization and are
 reduced to privacy-safe ownership and repository-relative attribution before
 storage.
@@ -158,7 +200,9 @@ on the provider wire format.
 A provider may resolve current guidance sizes for validated logical IDs after
 cached analysis. Codex searches only its current user, system, plugin, and
 repository-local skill roots and returns the largest matching artifact when a
-logical ID is duplicated. Shared analysis overlays token estimates on summary
+logical ID is duplicated. Claude Code uses project-before-user precedence for
+bare IDs and the largest installed artifact for duplicate plugin IDs (see
+above). Shared analysis overlays token estimates on summary
 and task metrics; historical load and reload counts remain unchanged. Paths
 used for resolution are transient and are never stored or reported. If the
 provider cannot resolve an ID, the stored ingestion-time estimate remains.
