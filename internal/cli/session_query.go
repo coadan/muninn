@@ -22,7 +22,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		sessions.unrecognized_records, sessions.unrecognized_content_blocks,
 		events.sequence,
 		events.occurred_at_ns, events.kind, events.tool_name, events.family,
-		events.shape, events.nested_tool_context, events.first_family,
+		events.shape, events.read_search, events.nested_tool_context, events.first_family,
 		events.last_family, events.tool_round,
 		events.call_occurred_at_ns, events.failed, events.refusal, events.truncated,
 		events.output_bytes, events.failure_reason, events.failure_context,
@@ -70,6 +70,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			occurredAtNS                  int64
 			callOccurredAtNS              int64
 			failed                        int
+			readSearch                    int
 			truncated                     int
 			selectorDigests               string
 			ownedOperations               string
@@ -106,6 +107,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&event.ToolName,
 			&event.Family,
 			&event.Shape,
+			&readSearch,
 			&event.NestedToolContext,
 			&event.FirstFamily,
 			&event.LastFamily,
@@ -165,6 +167,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			event.CallOccurredAt = time.Unix(0, callOccurredAtNS).UTC()
 		}
 		event.Failed = failed != 0
+		event.ReadSearch = readSearch != 0
 		event.GuidanceReadSucceeded = guidanceReadSucceeded != 0
 		event.Truncated = truncated != 0
 		event.OperationAttributionAmbiguous = operationAttributionAmbiguous != 0
@@ -225,7 +228,10 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 
 func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int64, since time.Time) ([]normalizedSessionEvent, error) {
 	bySequence := map[int]normalizedSessionEvent{}
-	selection := `SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
+	// Family fields let a restored call be recognized as a continuation
+	// (isContinuationToolCall), which never moves the foreground scope.
+	selection := `SELECT sequence, occurred_at_ns, kind, tool_name, family, first_family, last_family,
+		input_tokens, cached_input_tokens,
 		uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
 		context_tokens, context_window_tokens, compaction_trigger,
 		provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
@@ -254,9 +260,19 @@ func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int
 		 ORDER BY sequence DESC LIMIT 1`,
 		selection + `WHERE session_id = ? AND kind = 'compaction' AND occurred_at_ns < ?
 		 ORDER BY sequence DESC LIMIT 1`,
+		// Episode censoring reads the last in-repository event before the
+		// window: a completion there means the first window task starts fresh.
+		selection + `WHERE session_id = ? AND in_repository_scope = 1 AND occurred_at_ns < ?
+		   AND kind <> 'provider_cost'
+		 ORDER BY sequence DESC LIMIT 1`,
 		// A later re-entry alone cannot establish context continuity. Retain
-		// the last outside event so an older sample cannot bridge a scope gap.
+		// the last foreground exit so an older sample cannot bridge a scope
+		// gap. Results, deliveries and continuation calls never move the
+		// foreground (repositoryScopeForEvent), so they are no exit.
 		selection + `WHERE session_id = ? AND in_repository_scope = 0 AND occurred_at_ns < ?
+		   AND kind NOT IN ('tool_output', 'delivery')
+		   AND NOT (kind = 'tool_call' AND family <> '' AND first_family = '' AND last_family = ''
+		     AND tool_name IN ('write_stdin', 'wait', 'exec'))
 		 ORDER BY sequence DESC LIMIT 1`,
 	}
 	for _, query := range queries {
@@ -269,6 +285,9 @@ func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int
 			&occurredAtNS,
 			&event.Kind,
 			&event.ToolName,
+			&event.Family,
+			&event.FirstFamily,
+			&event.LastFamily,
 			&event.Tokens.InputTokens,
 			&event.Tokens.CachedInputTokens,
 			&event.Tokens.UncachedInputTokens,

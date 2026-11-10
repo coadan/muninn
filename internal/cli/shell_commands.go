@@ -493,3 +493,18 @@ func codexGitSubcommand(tokens []string) string {
 	}
 	return ""
 }
+
+// codexShellCommandReadsOrSearches reports whether any step of a shell call
+// reads files or searches, independent of the bounded Shape label.
+func codexShellCommandReadsOrSearches(toolName, arguments, input string) bool {
+	for _, command := range codexShellCommands(toolName, arguments, input) {
+		for _, segment := range codexShellCommandSegments(command) {
+			for _, family := range codexShellSegmentFamilySequence(segment) {
+				if family == "search" || family == "file reads" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}

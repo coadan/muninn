@@ -132,7 +132,8 @@ evidence-backed changes.
 
 ## How Muninn fits into your workflow
 
-- It builds a disposable local SQLite index per repository and keeps provider
+- It keeps a disposable local SQLite index, shared by all repositories and
+  scoped per repository inside it, and keeps provider
   ingestion behind an explicit adapter boundary.
 - It distinguishes owned operations from generic shell activity so a finding
   targets the tool or workflow that can actually be improved.

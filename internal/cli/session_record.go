@@ -34,7 +34,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	}
 	record.Task = codexTaskName(workspaceRoot, record.CWD)
 	record.TokenTelemetryExcluded = hasImplausibleTokenTelemetry(session.Events, since, generatedAt)
-	record.ContextProfile = profileSessionContext(session, workspaceRoot, since, generatedAt)
+	record.ContextProfile = profileSessionContext(contextProfileSession(session, record.TokenTelemetryExcluded), workspaceRoot, since, generatedAt)
 
 	previousCommandRound := 0
 	previousCommand := normalizedSessionEvent{}
@@ -56,6 +56,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
 	var activeDiagnostic *diagnosticFailureEpisode
 	pendingContinuations := map[string]int{}
+	refusedEdits := refusedEditCalls(session.Events, generatedAt)
 	contextInRepositoryScope := inside
 	lastEventKind := ""
 	for _, event := range session.Events {
@@ -184,17 +185,20 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 		lastEventKind = event.Kind
 		if event.Kind == sessionEventToolCall && len(event.Targets) == 0 {
+			// Relative targets resolve against the call's own working
+			// directory, as the index does.
+			eventCWD := eventRepositoryWorkingDirectory(event, session.CWD, workspaceRoot)
 			if event.ToolName == "apply_patch" {
 				if event.OperationTask == "" {
 					event.OperationTask = repositoryTaskForTargetCandidates(
 						event.TargetCandidates,
-						session.CWD,
+						eventCWD,
 						workspaceRoot,
 					)
 				}
-				event.Targets = normalizeRepositoryEditTargets(event.TargetCandidates, session.CWD, workspaceRoot)
+				event.Targets = normalizeRepositoryEditTargets(event.TargetCandidates, eventCWD, workspaceRoot)
 			} else {
-				event.Targets = normalizeRepositoryTargets(event.TargetCandidates, session.CWD, workspaceRoot)
+				event.Targets = normalizeRepositoryTargets(event.TargetCandidates, eventCWD, workspaceRoot)
 			}
 		}
 		eventOperations := event.OwnedOperations
@@ -267,8 +271,10 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		downstreamFailures := downstreamTracker.metrics.DeliveriesWithFailure
 		downstreamRecoveries := downstreamTracker.metrics.RecoveredDeliveries
 		downstreamReverts := downstreamTracker.metrics.Reverts
-		deliveryTracker.observe(event, eventOperations)
-		downstreamTracker.observe(event, eventOperations)
+		if !refusedEdits.consume(event) {
+			deliveryTracker.observe(event, eventOperations)
+			downstreamTracker.observe(event, eventOperations)
+		}
 		if deliveryTracker.metrics.PostDeliveryEditCalls > postDeliveryEdits {
 			touchSessionActivity(record.Activity, "delivery-rework", "", event.OccurredAt)
 		}
@@ -898,4 +904,59 @@ func recordOwnedOperationTask(
 		metrics.EstimatedOutputTokens = estimatedTokens(metrics.OutputBytes)
 	}
 	target[operation][task] = metrics
+}
+
+type refusedEditCallKey struct {
+	round int
+	at    time.Time
+}
+
+// refusedEditCallSet holds apply_patch calls whose result was a refusal. The
+// call precedes its result, so the edit trackers need this before the call.
+type refusedEditCallSet map[refusedEditCallKey]int
+
+// Only results up to the report cutoff count, as the index sees no later ones.
+func refusedEditCalls(events []normalizedSessionEvent, until time.Time) refusedEditCallSet {
+	refused := refusedEditCallSet{}
+	for _, event := range events {
+		if event.OccurredAt.After(until) {
+			continue
+		}
+		if event.Kind == sessionEventToolOutput && event.ToolName == "apply_patch" &&
+			knownToolRefusal(event.Refusal) != "" && !event.CallOccurredAt.IsZero() {
+			refused[refusedEditCallKey{event.ToolRound, event.CallOccurredAt}]++
+		}
+	}
+	return refused
+}
+
+// ponytail: parallel edits in one round share a key, so a refusal may skip a
+// sibling edit's targets instead of its own; pair by call identity if the
+// normalized model ever carries one.
+func (refused refusedEditCallSet) consume(event normalizedSessionEvent) bool {
+	if event.Kind != sessionEventToolCall || event.ToolName != "apply_patch" {
+		return false
+	}
+	key := refusedEditCallKey{event.ToolRound, event.OccurredAt}
+	if refused[key] == 0 {
+		return false
+	}
+	refused[key]--
+	return true
+}
+
+// contextProfileSession drops request-context samples from a token stream the
+// rest of the accounting rejects, so the profile never measures it either.
+func contextProfileSession(session normalizedSession, telemetryExcluded bool) normalizedSession {
+	if !telemetryExcluded {
+		return session
+	}
+	events := append([]normalizedSessionEvent(nil), session.Events...)
+	for index := range events {
+		if events[index].Kind == sessionEventToken {
+			events[index].ContextTokens, events[index].ContextWindowTokens = 0, 0
+		}
+	}
+	session.Events = events
+	return session
 }

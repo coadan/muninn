@@ -95,7 +95,8 @@ func TestParseClaudeSessionMapsBackgroundShellPollsAndCompletion(t *testing.T) {
 		"tool_call:exec_command/tests",
 		"tool_output:exec_command/tests+continues",
 		"tool_call:wait/tests",
-		"tool_output:wait/tests+continues+failed",
+		// A poll that fails to read the output is no failure of the command.
+		"tool_output:wait/tests+continues",
 		"tool_call:wait/tests",
 		"tool_output:wait/tests+continues",
 		"tool_output:wait/tests",

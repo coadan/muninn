@@ -46,7 +46,11 @@ func (state *skillUsageState) observe(event normalizedSessionEvent, tokens norma
 		state.finish(false)
 	case sessionEventToken, sessionEventToolCall, sessionEventToolOutput:
 		for id := range state.active {
-			state.task[id] = true
+			// A result alone opens no turn: one can arrive after end_turn, such
+			// as a background task's notification, with no new agent work.
+			if event.Kind != sessionEventToolOutput {
+				state.task[id] = true
+			}
 			metrics := state.metrics[id]
 			switch event.Kind {
 			case sessionEventToken:

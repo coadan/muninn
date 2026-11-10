@@ -629,3 +629,19 @@ func TestSkillUsageLifecycleMatchesIndexedAnalysis(t *testing.T) {
 		})
 	}
 }
+
+// A result after end_turn, such as a background task's notification, is no
+// new turn of work, so it must not leave an incomplete turn behind.
+func TestSkillUsageLateResultAfterEndTurnOpensNoTurn(t *testing.T) {
+	state := newSkillUsageState()
+	state.observe(skillUsageCall(1, "alpha"), normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1, GuidanceReadSucceeded: true}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "exec_command", ToolRound: 2}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolName: "exec_command", ToolRound: 2, OperationContinues: true}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventComplete}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolName: "wait", ToolRound: 2}, normalizedTokenUsage{})
+	state.finish(false)
+	if got := state.metrics["alpha"]; got.CompletedTurns != 1 || got.IncompleteTurns != 0 {
+		t.Fatalf("turns=%d completed, %d incomplete; want 1 and 0", got.CompletedTurns, got.IncompleteTurns)
+	}
+}

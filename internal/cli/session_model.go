@@ -47,6 +47,7 @@ type normalizedSessionEvent struct {
 	ToolName                      string
 	Family                        string
 	Shape                         string
+	ReadSearch                    bool // The call's own command reads or searches at any step.
 	NestedToolContext             string
 	FirstFamily                   string
 	LastFamily                    string

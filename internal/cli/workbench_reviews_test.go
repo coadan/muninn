@@ -80,8 +80,13 @@ func TestWorkbenchReviewsExposePartialCoverageAndRejectUnsafeInputs(t *testing.T
 		t.Fatal(err)
 	}
 	writeWorkbenchFixture(t, root, "task", "receipt.json", `{"tree":"tree"} trailing-data`)
+	// A symlinked task folder is not followed and counts as unreadable.
+	outside := writeWorkbenchFixture(t, t.TempDir(), "elsewhere", "reviews/code.json", valid)
+	if err := os.Symlink(filepath.Dir(filepath.Dir(outside)), filepath.Join(root, ".workbench", "tasks", "linked-task")); err != nil {
+		t.Fatal(err)
+	}
 	got := inspectWorkbenchReviews(root, time.Time{}, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC))
-	if got.Results != 1 || got.SkippedResults != 7 || got.ReceiptUnavailableResults != 1 {
+	if got.Results != 1 || got.SkippedResults != 7 || got.ReceiptUnavailableResults != 1 || got.UnreadableTasks != 1 {
 		t.Fatalf("partial coverage=%+v", got)
 	}
 	if inspectWorkbenchReviews(t.TempDir(), time.Time{}, time.Now()) != nil {
@@ -134,5 +139,19 @@ func TestWorkbenchReviewsUsePrimaryCheckoutFromLinkedWorktree(t *testing.T) {
 	got := inspectWorkbenchReviews(linked, time.Time{}, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC))
 	if got == nil || got.Results != 1 {
 		t.Fatalf("linked checkout=%+v", got)
+	}
+}
+
+// A separate git directory is not the primary checkout's ".git", so the
+// analysed checkout itself must own the task folder.
+func TestWorkbenchReviewsKeepCheckoutWithSeparateGitDir(t *testing.T) {
+	root, gitDir := t.TempDir(), filepath.Join(t.TempDir(), "store.git")
+	if out, err := exec.Command("git", "-C", root, "init", "-q", "--separate-git-dir", gitDir).CombinedOutput(); err != nil {
+		t.Fatalf("git: %v %s", err, out)
+	}
+	writeWorkbenchFixture(t, root, "task", "reviews/code.json", `{"ok":true,"verdict":"pass","ms":50,"at":"2026-11-09T01:00:00Z","tree":"tree"}`)
+	got := inspectWorkbenchReviews(root, time.Time{}, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC))
+	if got == nil || got.Results != 1 {
+		t.Fatalf("separate git dir checkout=%+v", got)
 	}
 }

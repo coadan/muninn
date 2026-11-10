@@ -57,8 +57,12 @@ var workbenchResultNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*\.json$`
 
 func inspectWorkbenchReviews(root string, since, until time.Time) *workbenchReviewSummary {
 	// Match Workbench's primary checkout ownership, including linked worktrees.
+	// Only a ".git" common directory sits inside its primary checkout; a bare
+	// or separate git directory says nothing about where tasks live.
 	if common, err := exec.Command("git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
-		root = filepath.Dir(strings.TrimSpace(string(common)))
+		if common := filepath.Clean(strings.TrimSpace(string(common))); filepath.Base(common) == ".git" {
+			root = filepath.Dir(common)
+		}
 	}
 	tasksPath := filepath.Join(root, ".workbench", "tasks")
 	if _, err := os.Lstat(tasksPath); os.IsNotExist(err) {
@@ -78,7 +82,11 @@ func inspectWorkbenchReviews(root string, since, until time.Time) *workbenchRevi
 		return summary
 	}
 	for _, task := range tasks {
-		if !task.IsDir() || task.Type()&os.ModeSymlink != 0 {
+		if task.Type()&os.ModeSymlink != 0 {
+			summary.UnreadableTasks++
+			continue
+		}
+		if !task.IsDir() {
 			continue
 		}
 		taskPath := filepath.Join(tasksPath, task.Name())

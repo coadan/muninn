@@ -68,7 +68,8 @@ func normalizedCompactionTrigger(trigger string) string {
 
 func profileSessionContext(session normalizedSession, root string, since, until time.Time) sessionContextProfile {
 	var profile sessionContextProfile
-	inside, _ := pathInsideRoot(root, session.CWD)
+	contextScope, _ := pathInsideRoot(root, session.CWD)
+	inside := contextScope
 	firstSeen := false
 	var previousInput, segmentFirst, segmentPeak int64
 	segmentSamples := 0
@@ -84,17 +85,17 @@ func profileSessionContext(session normalizedSession, root string, since, until 
 		if event.OccurredAt.After(until) {
 			continue
 		}
-		if event.RepositoryScopeKnown {
-			inside = event.InRepositoryScope
-		} else if scope, explicit := eventRepositoryScope(event, session.CWD, root); explicit {
-			inside = scope
-		}
+		inside = repositoryScopeForEvent(event, session.CWD, root, &contextScope)
 		isSample := event.Kind == sessionEventToken && event.ContextTokens > 0
 		isFirst := isSample && !firstSeen
 		firstSeen = firstSeen || isSample
 		if !inside {
-			finishSegment()
-			previousInput, recovery = 0, nil
+			// Only leaving the foreground repository ends a segment; a late
+			// result from elsewhere is skipped without breaking continuity.
+			if !contextScope {
+				finishSegment()
+				previousInput, recovery = 0, nil
+			}
 			continue
 		}
 		if event.OccurredAt.Before(since) {
@@ -146,8 +147,7 @@ func profileSessionContext(session normalizedSession, root string, since, until 
 			if recovery != nil {
 				recovery.ToolCalls++
 				recoveryCalls[event.ToolRound] = true
-				if event.FirstFamily == "search" || event.LastFamily == "search" ||
-					event.FirstFamily == "file reads" || event.LastFamily == "file reads" {
+				if callIncludesReadSearch(event) {
 					recovery.ReadSearch++
 				}
 			}
@@ -242,4 +242,19 @@ func analyzeContextProfiles(records []codexSessionRecord) contextProfileAnalysis
 	metrics.FailedCallsToCompletion = summarizeOutcomeDistribution(failures)
 	metrics.ElapsedSecondsToCompletion = summarizeOutcomeDistribution(elapsed)
 	return profile
+}
+
+// callIncludesReadSearch counts an outer call once when its own command reads
+// or searches at any step. A continuation call starts no command and carries
+// neither flag nor endpoints, so the family it inherits does not count.
+func callIncludesReadSearch(event normalizedSessionEvent) bool {
+	if event.ReadSearch {
+		return true
+	}
+	for _, family := range []string{event.FirstFamily, event.LastFamily} {
+		if family == "search" || family == "file reads" {
+			return true
+		}
+	}
+	return false
 }

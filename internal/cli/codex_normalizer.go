@@ -31,6 +31,7 @@ type codexRolloutPayload struct {
 	CWD            string `json:"cwd"`
 	CallID         string `json:"call_id"`
 	Name           string `json:"name"`
+	Namespace      string `json:"namespace"`
 	Arguments      string `json:"arguments"`
 	Input          string `json:"input"`
 	Info           struct {
@@ -162,6 +163,14 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 			case "function_call", "custom_tool_call":
 				toolRound++
 				rawName := strings.TrimSpace(payload.Name)
+				// Codex sends an MCP tool's server as "namespace": "mcp__<server>"
+				// beside a plain name; join them into the shared MCP form so the
+				// name is digested and cannot pass for a built-in tool. Any other
+				// namespace is ignored, so it can never reach a stored name.
+				if namespace := strings.TrimSpace(payload.Namespace); rawName != "" &&
+					strings.HasPrefix(strings.ToLower(namespace), "mcp__") {
+					rawName = strings.TrimSuffix(namespace, "__") + "__" + rawName
+				}
 				if rawName == "" {
 					rawName = "(unknown)"
 				}
@@ -203,8 +212,10 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					descriptor.First = ""
 					descriptor.Last = ""
 				}
+				readSearch := false
 				if descriptor.Family == "" {
 					descriptor.Family, descriptor.Shape, descriptor.First, descriptor.Last = codexShellCommandDetails(name, payload.Arguments, payload.Input)
+					readSearch = codexShellCommandReadsOrSearches(name, payload.Arguments, payload.Input)
 				}
 				if descriptor.Family == "" {
 					if continuationType, continuationID := codexContinuationID(name, payload.Arguments); continuationID != "" {
@@ -228,6 +239,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					ToolName:                      name,
 					Family:                        descriptor.Family,
 					Shape:                         descriptor.Shape,
+					ReadSearch:                    readSearch && !continuation,
 					NestedToolContext:             descriptor.NestedToolContext,
 					FirstFamily:                   descriptor.First,
 					LastFamily:                    descriptor.Last,

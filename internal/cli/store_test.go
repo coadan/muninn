@@ -72,8 +72,8 @@ func TestSessionStoreRebuildsIncompatibleDerivedSchema(t *testing.T) {
 	if err := migrated.db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version: %v", err)
 	}
-	if version != fmt.Sprint(sessionStoreSchemaVersion) {
-		t.Fatalf("expected schema version %d, got %q", sessionStoreSchemaVersion, version)
+	if version != sessionStoreSchemaKey {
+		t.Fatalf("expected schema key %q, got %q", sessionStoreSchemaKey, version)
 	}
 	var continuationColumn int
 	if err := migrated.db.QueryRow(
@@ -179,5 +179,41 @@ func TestSessionStoreWaitsForConcurrentWriter(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("second writer did not resume after the lock was released")
+	}
+}
+
+// A build that changes the events table without bumping the version number
+// must still rebuild an index another build created at that number.
+func TestSessionStoreRebuildsChangedTablesAtSameVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "muninn.db")
+	store, err := openSessionStore(path)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	for _, statement := range []string{
+		`DROP TABLE events`,
+		`CREATE TABLE events (id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL, sequence INTEGER NOT NULL)`,
+		fmt.Sprintf(`UPDATE metadata SET value = '%d' WHERE key = 'schema_version'`, sessionStoreSchemaVersion),
+	} {
+		if _, err := store.db.Exec(statement); err != nil {
+			t.Fatalf("simulate other build: %v", err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	reopened, err := openSessionStore(path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer reopened.Close()
+	var columns int
+	if err := reopened.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'context_tokens'`,
+	).Scan(&columns); err != nil {
+		t.Fatalf("inspect events: %v", err)
+	}
+	if columns != 1 {
+		t.Fatalf("expected the events table to be rebuilt with context_tokens, got %d", columns)
 	}
 }

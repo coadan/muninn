@@ -140,7 +140,6 @@ func claudeRecordLineNeeded(line []byte) bool {
 	return bytes.Contains(line, []byte(`"type":"assistant"`)) ||
 		bytes.Contains(line, []byte(`"type":"user"`)) ||
 		bytes.Contains(line, []byte(`"compact_boundary"`)) ||
-		bytes.Contains(line, []byte(`"type":"pr-link"`)) ||
 		bytes.Contains(line, []byte(`"type":"attachment"`)) && bytes.Contains(line, []byte(`task-notification`))
 }
 
@@ -435,6 +434,7 @@ func claudeToolCallEvent(block claudeContentBlock, cwd string, at time.Time, rou
 		arguments, _ := json.Marshal(map[string]string{"cmd": input.Command})
 		argumentText := string(arguments)
 		call.Family, call.Shape, call.First, call.Last = codexShellCommandDetails(name, argumentText, "")
+		event.ReadSearch = codexShellCommandReadsOrSearches(name, argumentText, "")
 		call.SelectorDigests = codexSelectorDigests(name, argumentText, "")
 		call.CommandCandidates = codexCommandInvocations(name, argumentText, "")
 		if strings.TrimSpace(cwd) != "" {

@@ -118,8 +118,10 @@ background tasks in `claude_background_tasks.go`, pull-request delivery in
   background task ID (`run_in_background`, or a command moved to the background
   after its timeout) yields the command (`OperationContinues`). Until the task
   ends, a `Bash` or `Read` call that references its ID, such as a poll of its
-  output file, is a `wait` that inherits the command's attribution. A failed
-  poll or stop preserves its failure and leaves the task running. Legacy
+  output file, is a `wait` that inherits the command's attribution. A poll that
+  fails to read the output (too large, missing, past its end) leaves the task
+  running and is no failure of the command; a failed stop keeps its failure
+  and also leaves the task running. Legacy
   `TaskOutput` on a shell task is `wait`; a terminal status in its result
   header resolves the task, including a failure when the status is `failed`.
   `TaskStop` on one is `write_stdin`, the shared interrupt of a running

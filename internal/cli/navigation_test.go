@@ -296,3 +296,17 @@ func TestClaudeWorktreeTargetsReachReportsAsRepositoryPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalRepositoryTargetStripsNestedTaskWorktree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".workbench", "repos", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(".workbench", "repos", "lib", ".claude", "worktrees", "task", "pkg", "a.go")
+	if got, want := canonicalRepositoryTarget(root, nested), ".workbench/repos/lib/pkg/a.go"; got != want {
+		t.Fatalf("nested task worktree kept its prefix: got=%q want=%q", got, want)
+	}
+	if got, want := canonicalRepositoryTarget(root, filepath.Join(".claude", "worktrees", "task", "pkg", "a.go")), "pkg/a.go"; got != want {
+		t.Fatalf("root task worktree: got=%q want=%q", got, want)
+	}
+}

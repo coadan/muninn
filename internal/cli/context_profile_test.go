@@ -194,3 +194,154 @@ func TestContextProfileDoesNotReuseContextAcrossHistoricalScopeGap(t *testing.T)
 		t.Fatalf("stale context from before a scope gap was reused: %+v", r)
 	}
 }
+
+// A late result from another repository is not a foreground exit, so it must
+// not censor a recovery or split a growth segment, in either analysis path.
+func TestContextProfileIgnoresLateResultFromOtherRepository(t *testing.T) {
+	root, sources := t.TempDir(), t.TempDir()
+	start := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+	events := []normalizedSessionEvent{
+		{Kind: sessionEventToken, ContextTokens: 100, Tokens: normalizedTokenUsage{InputTokens: 100, TotalTokens: 100}},
+		{Kind: sessionEventCompaction},
+		{Kind: sessionEventToken, ContextTokens: 30, Tokens: normalizedTokenUsage{InputTokens: 130, TotalTokens: 130}},
+		{Kind: sessionEventToolCall, ToolName: "exec_command", ToolRound: 1},
+		{Kind: sessionEventToolOutput, ToolName: "exec_command", ToolRound: 1, WorkingDirectories: []string{filepath.Dir(root)}},
+		{Kind: sessionEventToken, ContextTokens: 45, Tokens: normalizedTokenUsage{InputTokens: 175, TotalTokens: 175}},
+		{Kind: sessionEventComplete},
+	}
+	for i := range events {
+		events[i].Sequence = i + 1
+		events[i].OccurredAt = start.Add(time.Duration(i) * time.Second)
+	}
+	session := normalizedSession{Provider: "codex", CWD: root, SourcePath: filepath.Join(sources, "late.jsonl"), Events: events}
+	direct := profileSessionContext(session, root, start, start.Add(time.Minute))
+	if len(direct.Recoveries) != 1 || !direct.Recoveries[0].Completed || len(direct.Growth) != 1 || direct.Growth[0] != 15 {
+		t.Fatalf("late outside result broke continuity: %+v", direct)
+	}
+	markRepositoryEventScope(&session, root)
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.replaceSession(context.Background(), repositoryStoreScopeKey(root, ownershipCatalog{}), session, 1, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := store.analyze(context.Background(), "codex", []string{sources}, root, start, start.Add(time.Minute), "", ownershipCatalog{}, sessionRefreshStats{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := indexed.ContextProfile.CompactionRecovery; r.CompletedWindows != 1 || r.CensoredWindows != 0 {
+		t.Fatalf("indexed recovery censored by a late outside result: %+v", r)
+	}
+}
+
+// A token stream the accounting rejects as implausible must not feed request
+// context measurements either, in direct or indexed analysis.
+func TestContextProfileSkipsRejectedTokenStream(t *testing.T) {
+	root, sources := t.TempDir(), t.TempDir()
+	start := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+	var events []normalizedSessionEvent
+	for index := 0; index <= minTokenTelemetrySnapshots; index++ {
+		tokens := int64(index+1) * 1_000_000
+		events = append(events, normalizedSessionEvent{
+			Kind: sessionEventToken, OccurredAt: start.Add(time.Duration(index) * 2 * time.Millisecond),
+			ContextTokens: 5000 + int64(index), ContextWindowTokens: 200_000,
+			Tokens: normalizedTokenUsage{InputTokens: tokens, UncachedInputTokens: tokens, OutputTokens: 200_000, TotalTokens: tokens + 200_000},
+		})
+	}
+	events = append(events, normalizedSessionEvent{Kind: sessionEventComplete, OccurredAt: start.Add(3 * time.Second)})
+	for i := range events {
+		events[i].Sequence = i + 1
+	}
+	session := normalizedSession{Provider: "codex", CWD: root, SourcePath: filepath.Join(sources, "x.jsonl"), Events: events}
+	until := start.Add(time.Minute)
+	direct, err := sessionRecordFromNormalized(session, root, start.Add(-time.Minute), until, ownershipCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !direct.TokenTelemetryExcluded {
+		t.Fatal("fixture stream was not rejected")
+	}
+	want := analyzeContextProfiles([]codexSessionRecord{direct})
+	if want.ObservedInputTokens.Count != 0 || want.ReportedWindowTokens.Count != 0 {
+		t.Fatalf("rejected stream reached the context profile: %+v", want.ObservedInputTokens)
+	}
+	if got := indexAndAnalyzeForTest(t, session, root, start.Add(-time.Minute), until).ContextProfile; !reflect.DeepEqual(got, want) {
+		t.Fatalf("indexed=%+v direct=%+v", got.ObservedInputTokens, want.ObservedInputTokens)
+	}
+}
+
+// A read in the middle of a bundled command, including one past the bounded
+// Shape label, still makes the call a read/search attempt, counted once.
+func TestRecoveryCountsReadInsideBundledCommand(t *testing.T) {
+	for _, command := range []string{
+		"git status --short && cat main.go && git diff --stat",
+		"git status; go test ./...; git diff; go build ./...; printf ready; cat README.md; git diff",
+	} {
+		assertRecoveryCountsOneReadSearch(t, command)
+	}
+}
+
+func assertRecoveryCountsOneReadSearch(t *testing.T, command string) {
+	t.Helper()
+	dir := t.TempDir()
+	arguments, _ := json.Marshal(map[string]string{"cmd": command})
+	path := writeCodexSessionFixture(t, dir, "bundle", []any{
+		map[string]any{"timestamp": "2026-07-29T08:00:00Z", "type": "session_meta", "payload": map[string]any{"cwd": dir}},
+		map[string]any{"timestamp": "2026-07-29T08:00:01Z", "type": "event_msg", "payload": map[string]any{"type": "context_compacted"}},
+		map[string]any{"timestamp": "2026-07-29T08:00:02Z", "type": "response_item", "payload": map[string]any{
+			"type": "function_call", "call_id": "c1", "name": "exec_command",
+			"arguments": string(arguments),
+		}},
+		map[string]any{"timestamp": "2026-07-29T08:00:03Z", "type": "response_item", "payload": map[string]any{"type": "function_call_output", "call_id": "c1", "output": "ok"}},
+		map[string]any{"timestamp": "2026-07-29T08:00:04Z", "type": "event_msg", "payload": map[string]any{"type": "task_complete"}},
+	})
+	session, err := parseCodexNormalizedSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 7, 29, 7, 0, 0, 0, time.UTC)
+	p := profileSessionContext(session, dir, start, start.Add(2*time.Hour))
+	if len(p.Recoveries) != 1 || p.Recoveries[0].ToolCalls != 1 || p.Recoveries[0].ReadSearch != 1 {
+		t.Fatalf("recoveries=%+v", p.Recoveries)
+	}
+}
+
+// A poll of a yielded search after compaction starts no search, so it adds a
+// tool call but no read/search attempt, in direct and indexed analysis.
+func TestRecoveryIgnoresInheritedSearchOnContinuation(t *testing.T) {
+	root, sources := t.TempDir(), t.TempDir()
+	start := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+	events := []normalizedSessionEvent{
+		{Kind: sessionEventToolCall, ToolName: "exec_command", ToolRound: 1, Family: "search", FirstFamily: "search", LastFamily: "search", ReadSearch: true},
+		{Kind: sessionEventToolOutput, ToolName: "exec_command", ToolRound: 1, Family: "search", OperationContinues: true},
+		{Kind: sessionEventToken, ContextTokens: 100, Tokens: normalizedTokenUsage{InputTokens: 100, TotalTokens: 100}},
+		{Kind: sessionEventCompaction},
+		{Kind: sessionEventToken, ContextTokens: 40, Tokens: normalizedTokenUsage{InputTokens: 140, TotalTokens: 140}},
+		{Kind: sessionEventToolCall, ToolName: "write_stdin", ToolRound: 2, Family: "search"},
+		{Kind: sessionEventToolOutput, ToolName: "write_stdin", ToolRound: 2, Family: "search"},
+		{Kind: sessionEventComplete},
+	}
+	for i := range events {
+		events[i].Sequence = i + 1
+		events[i].OccurredAt = start.Add(time.Duration(i) * time.Second)
+		if events[i].Kind == sessionEventToolOutput {
+			events[i].CallOccurredAt = events[i-1].OccurredAt
+		}
+	}
+	session := normalizedSession{Provider: "codex", CWD: root, SourcePath: filepath.Join(sources, "poll.jsonl"), Events: events}
+	until := start.Add(time.Minute)
+	direct, err := sessionRecordFromNormalized(session, root, start.Add(-time.Minute), until, ownershipCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := analyzeContextProfiles([]codexSessionRecord{direct})
+	r := want.CompactionRecovery
+	if r.CompletedWindows != 1 || r.ToolCallsToCompletion.Max != 1 || r.ReadSearchCallsToCompletion.Max != 0 {
+		t.Fatalf("continuation counted as a search: %+v", r)
+	}
+	if got := indexAndAnalyzeForTest(t, session, root, start.Add(-time.Minute), until).ContextProfile; !reflect.DeepEqual(got, want) {
+		t.Fatalf("indexed=%+v direct=%+v", got.CompactionRecovery, r)
+	}
+}

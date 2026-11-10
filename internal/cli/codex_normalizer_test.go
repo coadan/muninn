@@ -225,12 +225,54 @@ func TestParseCodexSessionPreservesNestedContinuationTool(t *testing.T) {
 }
 
 func TestParseCodexSessionDropsMCPServerNameButKeepsOwnershipSelector(t *testing.T) {
-	const tool = "mcp__SECRET-MCP-SERVER__lookup"
+	for _, call := range []struct {
+		tool    string
+		payload map[string]any
+	}{
+		{"mcp__SECRET-MCP-SERVER__lookup", map[string]any{"name": "mcp__SECRET-MCP-SERVER__lookup"}},
+		// Current Codex rollouts carry the server in a separate namespace, and
+		// an MCP tool may share a built-in tool's name.
+		{"mcp__SECRET-MCP-SERVER__exec_command", map[string]any{"namespace": "mcp__SECRET-MCP-SERVER", "name": "exec_command"}},
+	} {
+		assertCodexMCPNameDropped(t, call.tool, call.payload)
+	}
+}
+
+// Only an MCP namespace joins the tool name; any other value is ignored so it
+// can never reach the index or a report.
+func TestParseCodexSessionIgnoresNonMCPNamespace(t *testing.T) {
+	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "ns", []any{
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:00Z",
+			"type":      "response_item",
+			"payload":   map[string]any{"type": "function_call", "call_id": "c1", "namespace": "/private/SECRET", "name": "exec_command", "arguments": `{"cmd":"true"}`},
+		},
+	})
+	session, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(session.Events) == 0 || session.Events[0].ToolName != "exec_command" {
+		t.Fatalf("events=%#v", session.Events)
+	}
+	for _, event := range session.Events {
+		if strings.Contains(event.ToolName+event.FailureContext+event.NestedToolContext, "SECRET") {
+			t.Fatalf("namespace leaked into stored names: %#v", event)
+		}
+	}
+}
+
+func assertCodexMCPNameDropped(t *testing.T, tool string, call map[string]any) {
+	t.Helper()
+	payload := map[string]any{"type": "function_call", "call_id": "c1", "arguments": `{}`}
+	for key, value := range call {
+		payload[key] = value
+	}
 	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "mcp", []any{
 		map[string]any{
 			"timestamp": "2026-07-29T08:00:00Z",
 			"type":      "response_item",
-			"payload":   map[string]any{"type": "function_call", "call_id": "c1", "name": tool, "arguments": `{}`},
+			"payload":   payload,
 		},
 		map[string]any{
 			"timestamp": "2026-07-29T08:00:01Z",

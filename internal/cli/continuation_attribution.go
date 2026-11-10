@@ -20,6 +20,7 @@ func withoutContinuationCallAttribution(event normalizedSessionEvent) normalized
 	return event
 }
 
+// session_query.go mirrors this rule in SQL to find the last foreground exit.
 func isContinuationToolCall(event normalizedSessionEvent) bool {
 	return event.Kind == sessionEventToolCall && event.Family != "" &&
 		event.FirstFamily == "" && event.LastFamily == "" &&

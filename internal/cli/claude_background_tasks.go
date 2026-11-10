@@ -173,8 +173,13 @@ func (tasks *claudeBackgroundTasks) observeOutput(block claudeContentBlock, rawR
 			return
 		}
 		event.ToolRound = task.call.ToolRound
+		if event.Failed && event.Refusal == "" && call.Name == "wait" {
+			// A poll that fails to read the task's output (too large, missing,
+			// past its end) says nothing about the command, which keeps running.
+			event.Failed, event.FailureReason, event.FailureContext = false, "", ""
+		}
 		if event.Refusal != "" || event.Failed {
-			event.OperationContinues = !task.resolved
+			event.OperationContinues = true
 			return
 		}
 		if call.Name == "write_stdin" {

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -13,7 +14,97 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 44
+const sessionStoreSchemaVersion = 45
+
+// The stored key binds the version to the table definitions, so an index built
+// from different DDL is rebuilt even when a change forgets the version bump.
+var sessionStoreSchemaKey = func() string {
+	digest := sha256.Sum256([]byte(strings.Join(sessionStoreTableStatements, "\n")))
+	return fmt.Sprintf("%d:%x", sessionStoreSchemaVersion, digest[:6])
+}()
+
+var sessionStoreTableStatements = []string{
+	`CREATE TABLE IF NOT EXISTS sources (
+		id INTEGER PRIMARY KEY,
+		provider TEXT NOT NULL,
+		scope_key TEXT NOT NULL,
+		source_path TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL,
+		mtime_ns INTEGER NOT NULL,
+		indexed_at_ns INTEGER NOT NULL,
+		UNIQUE(provider, scope_key, source_path)
+	)`,
+	`CREATE TABLE IF NOT EXISTS sessions (
+		id INTEGER PRIMARY KEY,
+		source_id INTEGER NOT NULL UNIQUE REFERENCES sources(id) ON DELETE CASCADE,
+		cwd TEXT NOT NULL,
+		model TEXT NOT NULL DEFAULT '',
+		reasoning_effort TEXT NOT NULL DEFAULT '',
+		agent_kind TEXT NOT NULL DEFAULT '',
+		lineage_key TEXT NOT NULL DEFAULT '',
+		parent_lineage_key TEXT NOT NULL DEFAULT '',
+		spawn_status TEXT NOT NULL DEFAULT '',
+		unrecognized_records INTEGER NOT NULL DEFAULT 0,
+		unrecognized_content_blocks INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE TABLE IF NOT EXISTS events (
+		id INTEGER PRIMARY KEY,
+		session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+		sequence INTEGER NOT NULL,
+		occurred_at_ns INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		tool_name TEXT NOT NULL DEFAULT '',
+		family TEXT NOT NULL DEFAULT '',
+		shape TEXT NOT NULL DEFAULT '',
+		read_search INTEGER NOT NULL DEFAULT 0,
+		nested_tool_context TEXT NOT NULL DEFAULT '',
+		first_family TEXT NOT NULL DEFAULT '',
+		last_family TEXT NOT NULL DEFAULT '',
+		tool_round INTEGER NOT NULL DEFAULT 0,
+		call_occurred_at_ns INTEGER NOT NULL DEFAULT 0,
+		failed INTEGER NOT NULL DEFAULT 0,
+		guidance_read_succeeded INTEGER NOT NULL DEFAULT 0,
+		refusal TEXT NOT NULL DEFAULT '',
+		truncated INTEGER NOT NULL DEFAULT 0,
+		output_bytes INTEGER NOT NULL DEFAULT 0,
+		failure_reason TEXT NOT NULL DEFAULT '',
+		failure_context TEXT NOT NULL DEFAULT '',
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+		uncached_input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		context_tokens INTEGER NOT NULL DEFAULT 0,
+		context_window_tokens INTEGER NOT NULL DEFAULT 0,
+		compaction_trigger TEXT NOT NULL DEFAULT '',
+		provider_cost_usd REAL NOT NULL DEFAULT 0,
+		provider_api_duration_ms INTEGER NOT NULL DEFAULT 0,
+		provider_tool_duration_ms INTEGER NOT NULL DEFAULT 0,
+		selector_digests TEXT NOT NULL DEFAULT '[]',
+		owned_operations TEXT NOT NULL DEFAULT '[]',
+		bypassed_operations TEXT NOT NULL DEFAULT '[]',
+		owned_flags TEXT NOT NULL DEFAULT '[]',
+		owned_flag_tools TEXT NOT NULL DEFAULT '[]',
+		operation_task TEXT NOT NULL DEFAULT '',
+		operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0,
+		operation_continues INTEGER NOT NULL DEFAULT 0,
+		targets TEXT NOT NULL DEFAULT '[]',
+		guidance_artifacts TEXT NOT NULL DEFAULT '[]',
+		inline_bytes INTEGER NOT NULL DEFAULT 0,
+		concurrent_batch INTEGER NOT NULL DEFAULT 0,
+		concurrent_batch_size INTEGER NOT NULL DEFAULT 0,
+		diagnostic_json TEXT NOT NULL DEFAULT '',
+		working_directories TEXT NOT NULL DEFAULT '[]',
+		in_repository_scope INTEGER NOT NULL DEFAULT 0,
+		UNIQUE(session_id, sequence)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_sources_provider_scope_path ON sources(provider, scope_key, source_path)`,
+	`CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd)`,
+	`CREATE INDEX IF NOT EXISTS idx_events_session_time ON events(session_id, occurred_at_ns, sequence)`,
+	`CREATE INDEX IF NOT EXISTS idx_events_time_kind ON events(occurred_at_ns, kind)`,
+}
+
 const sessionStoreBusyTimeout = 30 * time.Second
 
 type sessionStore struct {
@@ -85,7 +176,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read Muninn store schema version: %w", err)
 	}
-	if storedVersion != "" && storedVersion != fmt.Sprint(sessionStoreSchemaVersion) {
+	if storedVersion != "" && storedVersion != sessionStoreSchemaKey {
 		for _, statement := range []string{
 			`DROP TABLE IF EXISTS events`,
 			`DROP TABLE IF EXISTS sessions`,
@@ -98,7 +189,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 		if _, err := store.db.ExecContext(
 			ctx,
 			`UPDATE metadata SET value = ? WHERE key = 'schema_version'`,
-			fmt.Sprint(sessionStoreSchemaVersion),
+			sessionStoreSchemaKey,
 		); err != nil {
 			return fmt.Errorf("reset Muninn store schema version: %w", err)
 		}
@@ -111,85 +202,8 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		)`,
-		`CREATE TABLE IF NOT EXISTS sources (
-			id INTEGER PRIMARY KEY,
-			provider TEXT NOT NULL,
-			scope_key TEXT NOT NULL,
-			source_path TEXT NOT NULL,
-			size_bytes INTEGER NOT NULL,
-			mtime_ns INTEGER NOT NULL,
-			indexed_at_ns INTEGER NOT NULL,
-			UNIQUE(provider, scope_key, source_path)
-		)`,
-		`CREATE TABLE IF NOT EXISTS sessions (
-			id INTEGER PRIMARY KEY,
-			source_id INTEGER NOT NULL UNIQUE REFERENCES sources(id) ON DELETE CASCADE,
-			cwd TEXT NOT NULL,
-			model TEXT NOT NULL DEFAULT '',
-			reasoning_effort TEXT NOT NULL DEFAULT '',
-			agent_kind TEXT NOT NULL DEFAULT '',
-			lineage_key TEXT NOT NULL DEFAULT '',
-			parent_lineage_key TEXT NOT NULL DEFAULT '',
-			spawn_status TEXT NOT NULL DEFAULT '',
-			unrecognized_records INTEGER NOT NULL DEFAULT 0,
-			unrecognized_content_blocks INTEGER NOT NULL DEFAULT 0
-		)`,
-		`CREATE TABLE IF NOT EXISTS events (
-			id INTEGER PRIMARY KEY,
-			session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-			sequence INTEGER NOT NULL,
-			occurred_at_ns INTEGER NOT NULL,
-			kind TEXT NOT NULL,
-			tool_name TEXT NOT NULL DEFAULT '',
-			family TEXT NOT NULL DEFAULT '',
-			shape TEXT NOT NULL DEFAULT '',
-			nested_tool_context TEXT NOT NULL DEFAULT '',
-			first_family TEXT NOT NULL DEFAULT '',
-			last_family TEXT NOT NULL DEFAULT '',
-			tool_round INTEGER NOT NULL DEFAULT 0,
-			call_occurred_at_ns INTEGER NOT NULL DEFAULT 0,
-			failed INTEGER NOT NULL DEFAULT 0,
-			guidance_read_succeeded INTEGER NOT NULL DEFAULT 0,
-			refusal TEXT NOT NULL DEFAULT '',
-			truncated INTEGER NOT NULL DEFAULT 0,
-			output_bytes INTEGER NOT NULL DEFAULT 0,
-			failure_reason TEXT NOT NULL DEFAULT '',
-			failure_context TEXT NOT NULL DEFAULT '',
-			input_tokens INTEGER NOT NULL DEFAULT 0,
-			cached_input_tokens INTEGER NOT NULL DEFAULT 0,
-			uncached_input_tokens INTEGER NOT NULL DEFAULT 0,
-			output_tokens INTEGER NOT NULL DEFAULT 0,
-			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
-			total_tokens INTEGER NOT NULL DEFAULT 0,
-			context_tokens INTEGER NOT NULL DEFAULT 0,
-			context_window_tokens INTEGER NOT NULL DEFAULT 0,
-			compaction_trigger TEXT NOT NULL DEFAULT '',
-			provider_cost_usd REAL NOT NULL DEFAULT 0,
-			provider_api_duration_ms INTEGER NOT NULL DEFAULT 0,
-			provider_tool_duration_ms INTEGER NOT NULL DEFAULT 0,
-			selector_digests TEXT NOT NULL DEFAULT '[]',
-			owned_operations TEXT NOT NULL DEFAULT '[]',
-			bypassed_operations TEXT NOT NULL DEFAULT '[]',
-			owned_flags TEXT NOT NULL DEFAULT '[]',
-			owned_flag_tools TEXT NOT NULL DEFAULT '[]',
-			operation_task TEXT NOT NULL DEFAULT '',
-			operation_attribution_ambiguous INTEGER NOT NULL DEFAULT 0,
-			operation_continues INTEGER NOT NULL DEFAULT 0,
-			targets TEXT NOT NULL DEFAULT '[]',
-			guidance_artifacts TEXT NOT NULL DEFAULT '[]',
-			inline_bytes INTEGER NOT NULL DEFAULT 0,
-			concurrent_batch INTEGER NOT NULL DEFAULT 0,
-			concurrent_batch_size INTEGER NOT NULL DEFAULT 0,
-			diagnostic_json TEXT NOT NULL DEFAULT '',
-			working_directories TEXT NOT NULL DEFAULT '[]',
-			in_repository_scope INTEGER NOT NULL DEFAULT 0,
-			UNIQUE(session_id, sequence)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_sources_provider_scope_path ON sources(provider, scope_key, source_path)`,
-		`CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd)`,
-		`CREATE INDEX IF NOT EXISTS idx_events_session_time ON events(session_id, occurred_at_ns, sequence)`,
-		`CREATE INDEX IF NOT EXISTS idx_events_time_kind ON events(occurred_at_ns, kind)`,
 	}
+	statements = append(statements, sessionStoreTableStatements...)
 	for _, statement := range statements {
 		if _, err := store.db.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("initialize Muninn SQLite store: %w", err)
@@ -200,7 +214,7 @@ func (store *sessionStore) initialize(ctx context.Context) error {
 	}
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO metadata(key, value)
 		VALUES('schema_version', ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, fmt.Sprint(sessionStoreSchemaVersion)); err != nil {
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, sessionStoreSchemaKey); err != nil {
 		return fmt.Errorf("write Muninn store schema version: %w", err)
 	}
 	return nil

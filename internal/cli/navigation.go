@@ -302,11 +302,18 @@ func regularFileExists(path string) bool {
 // canonicalRepositoryTarget maps a repository-relative path to the one target
 // every task checkout of that file shares. A Claude Code task worktree
 // (.claude/worktrees/<task>) is a checkout of the repository itself, so its
-// prefix always strips to the in-repository path.
+// prefix always strips to the in-repository path, also inside a nested
+// checkout such as a cached repository's own task worktree.
 func canonicalRepositoryTarget(repositoryRoot, relative string) string {
 	parts := strings.Split(filepath.ToSlash(filepath.Clean(relative)), "/")
-	if len(parts) >= 4 && parts[0] == ".claude" && parts[1] == "worktrees" {
-		return strings.Join(parts[3:], "/")
+	for index := 0; index+3 < len(parts); index++ {
+		if parts[index] == ".claude" && parts[index+1] == "worktrees" {
+			parts = append(parts[:index:index], parts[index+3:]...)
+			break
+		}
+	}
+	if len(parts) > 0 && parts[0] != ".worktrees" && parts[0] != ".workbench" {
+		return strings.Join(parts, "/")
 	}
 	repo := ""
 	remainder := []string(nil)

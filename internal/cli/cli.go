@@ -94,8 +94,8 @@ Available Commands:
   analyze   Analyze agent-session cost and friction for a repository
   failures  Inspect bounded failure events for one owned operation
 
-Codex is the first session provider. The provider boundary is explicit so
-Claude Code and OpenCode adapters can be added later without changing the
+Codex and Claude Code sessions are supported (--provider). The provider boundary
+is explicit so an OpenCode adapter can be added later without changing the
 analysis/reporting core.
 
 Muninn skips prompts and messages. It scans tool calls locally for fixed,
