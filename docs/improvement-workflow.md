@@ -51,6 +51,22 @@ credit weighting is available. Treat both matched and unmatched rolling trends
 as observational: matching reduces task and model mix bias, but does not prove
 that an intervention caused the change.
 
+## Shorten a skill workflow
+
+In a detailed report, inspect `summary.skillLoads[<skill>].usageAfterLoad` beside
+the estimated loaded and redundant tokens. Large recorded usage with repeated
+review-to-edit cycles is a lead to inspect the workflow's sequence, without
+reading review comments or source changes. A review cycle can be necessary;
+its count alone is not a waste finding.
+
+Choose one repeated step to simplify, preserve its required check or output,
+and use the existing matched-period comparison plus the repository's behavior
+checks. Keep the change when outcomes stay stable or improve. Token use after
+a skill load overlaps other active skills and later work in that context;
+it is observational evidence, not the cost caused by the skill. Child-session
+cost is not attributed to the parent's skill, and a completed turn does not
+prove a finished deliverable.
+
 ## Interpreting structure findings
 
 Repeated reads or searches can suggest that ownership is hard to discover, but

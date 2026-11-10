@@ -50,6 +50,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	taskSkillLoads := map[string]int{}
 	taskSkillReloads := map[string]bool{}
 	contextSkillLoads := map[string]int{}
+	skillUsage := newSkillUsageState()
 	deliveryTrackers := map[string]*deliveryReworkTracker{}
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
 	var activeDiagnostic *diagnosticFailureEpisode
@@ -99,6 +100,11 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			previousTokens = event.Tokens
 			hasPreviousTokens = true
 			costShare.addTokens(tokenIncrement.TotalTokens, inRepositoryScope)
+		}
+		if event.Kind == sessionEventCompaction || event.Kind == sessionEventComplete {
+			// Context boundaries apply even while activity is outside this
+			// repository; returning cannot restore a compacted skill.
+			skillUsage.observe(event, normalizedTokenUsage{})
 		}
 		if !inRepositoryScope {
 			continue
@@ -213,6 +219,15 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				episodeTokens = normalizedTokenUsage{}
 			}
 			episode.observe(event, episodeTokens, eventOperations)
+		}
+		skillTokens := tokenIncrement
+		if record.TokenTelemetryExcluded {
+			skillTokens = normalizedTokenUsage{}
+		}
+		skillEvent := event
+		skillEvent.OwnedOperations = eventOperations
+		if event.Kind != sessionEventCompaction && event.Kind != sessionEventComplete {
+			skillUsage.observe(skillEvent, skillTokens)
 		}
 		// A refused call never ran, so its output is no result: record the
 		// refusal but keep it out of every outcome tracker, which would read a
@@ -463,6 +478,8 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		}
 	}
 	finishSkillLoadTask(&record, taskSkillLoads, taskSkillReloads)
+	skillUsage.finish(false)
+	record.SkillUsageAfterLoad = skillUsage.metrics
 	if !episode.StartedAt.IsZero() {
 		record.TaskEpisodes = append(record.TaskEpisodes, episode)
 	}

@@ -1,0 +1,283 @@
+package cli
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+	"time"
+)
+
+func skillUsageCall(round int, id string) normalizedSessionEvent {
+	return normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "Skill", ToolRound: round,
+		GuidanceArtifacts: []normalizedGuidanceArtifact{{Kind: "skill", ID: id}}}
+}
+
+func TestSkillUsageStartsAfterSuccessAndDoesNotMultiplyReloads(t *testing.T) {
+	state := newSkillUsageState()
+	call := func(round int, id string) { state.observe(skillUsageCall(round, id), normalizedTokenUsage{}) }
+	result := func(round int) {
+		state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: round}, normalizedTokenUsage{})
+	}
+	tokens := func(usage normalizedTokenUsage) {
+		state.observe(normalizedSessionEvent{Kind: sessionEventToken}, usage)
+	}
+	call(1, "alpha")
+	// This API request emitted the skill invocation, before the result.
+	tokens(normalizedTokenUsage{InputTokens: 100, CachedInputTokens: 20, UncachedInputTokens: 80, OutputTokens: 10, ReasoningTokens: 2, TotalTokens: 110})
+	result(1)
+	tokens(normalizedTokenUsage{InputTokens: 60, CachedInputTokens: 20, UncachedInputTokens: 40, OutputTokens: 10, ReasoningTokens: 3, TotalTokens: 70})
+	call(2, "alpha")
+	result(2)
+	tokens(normalizedTokenUsage{InputTokens: 80, CachedInputTokens: 30, UncachedInputTokens: 50, OutputTokens: 15, ReasoningTokens: 3, TotalTokens: 95})
+	call(3, "beta")
+	result(3)
+	tokens(normalizedTokenUsage{InputTokens: 110, CachedInputTokens: 40, UncachedInputTokens: 70, OutputTokens: 20, ReasoningTokens: 4, TotalTokens: 130})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToolCall, ToolRound: 4}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 4, Failed: true}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventComplete}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventCompaction}, normalizedTokenUsage{})
+	tokens(normalizedTokenUsage{InputTokens: 999, TotalTokens: 999})
+	state.finish(false)
+	var alpha, beta skillUsageMetrics
+	addSkillUsageMetrics(&alpha, state.metrics["alpha"])
+	addSkillUsageMetrics(&beta, state.metrics["beta"])
+	// Worked input deltas above: 60+80+110 input and 10+15+20 output.
+	if alpha.Tokens != (normalizedTokenUsage{InputTokens: 250, CachedInputTokens: 90, UncachedInputTokens: 160, OutputTokens: 45, ReasoningTokens: 10, TotalTokens: 295}) || alpha.FreshTokens != 205 {
+		t.Fatalf("alpha token usage=%#v", alpha)
+	}
+	if beta.Tokens != (normalizedTokenUsage{InputTokens: 110, CachedInputTokens: 40, UncachedInputTokens: 70, OutputTokens: 20, ReasoningTokens: 4, TotalTokens: 130}) || beta.FreshTokens != 90 {
+		t.Fatalf("beta token usage=%#v", beta)
+	}
+	if alpha.SuccessfulLoads != 2 || alpha.ToolCalls != 3 || alpha.FailedToolCalls != 1 || alpha.CompletedTurns != 1 || alpha.IncompleteTurns != 0 {
+		t.Fatalf("alpha outcomes=%#v", alpha)
+	}
+	if beta.SuccessfulLoads != 1 || beta.ToolCalls != 1 || beta.FailedToolCalls != 1 || beta.CompletedTurns != 1 {
+		t.Fatalf("beta outcomes=%#v", beta)
+	}
+}
+
+func TestSkillUsageRejectsUnsuccessfulLoadsAndStopsAtCompaction(t *testing.T) {
+	state := newSkillUsageState()
+	for _, result := range []normalizedSessionEvent{
+		{Kind: sessionEventToolOutput, ToolRound: 1, Failed: true},
+		{Kind: sessionEventToolOutput, ToolRound: 1, Refusal: "denied-by-permission"},
+	} {
+		state.observe(skillUsageCall(1, "failed"), normalizedTokenUsage{})
+		state.observe(result, normalizedTokenUsage{})
+	}
+	state.observe(normalizedSessionEvent{Kind: sessionEventToken}, normalizedTokenUsage{TotalTokens: 100})
+	if len(state.metrics) != 0 {
+		t.Fatalf("unsuccessful load activated a skill: %#v", state.metrics)
+	}
+	state.observe(skillUsageCall(2, "alpha"), normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 2}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToken}, normalizedTokenUsage{TotalTokens: 20})
+	state.observe(normalizedSessionEvent{Kind: sessionEventCompaction}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToken}, normalizedTokenUsage{TotalTokens: 300})
+	state.observe(normalizedSessionEvent{Kind: sessionEventComplete}, normalizedTokenUsage{})
+	state.finish(false)
+	if got := state.metrics["alpha"]; got.Tokens.TotalTokens != 20 || got.IncompleteTurns != 1 || got.CompletedTurns != 0 {
+		t.Fatalf("compacted usage=%#v", got)
+	}
+}
+
+func TestSkillUsageInSessionIsLimitedToAnalysisWindow(t *testing.T) {
+	at := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
+	events := []normalizedSessionEvent{
+		skillUsageCall(1, "outside"),
+		{Kind: sessionEventToolOutput, ToolRound: 1},
+		{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 100, UncachedInputTokens: 100, TotalTokens: 100}},
+		skillUsageCall(2, "inside"),
+		{Kind: sessionEventToolOutput, ToolRound: 2},
+		{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 120, UncachedInputTokens: 120, OutputTokens: 5, TotalTokens: 125}},
+		{Kind: sessionEventComplete},
+	}
+	for i := range events {
+		events[i].OccurredAt = at.Add(time.Duration(i) * time.Second)
+		events[i].CallOccurredAt = events[i].OccurredAt
+	}
+	record, err := sessionRecordFromNormalized(normalizedSession{CWD: "/workspace/app", Events: events}, "/workspace/app", at.Add(2*time.Second), at.Add(6*time.Second), ownershipCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := record.SkillUsageAfterLoad["outside"]; ok {
+		t.Fatal("load outside analysis window attributed")
+	}
+	got := record.SkillUsageAfterLoad["inside"]
+	if got.Tokens.TotalTokens != 25 || got.CompletedTurns != 1 {
+		t.Fatalf("window usage=%#v", got)
+	}
+}
+
+func TestSkillUsageCountsReviewEditCyclesAcrossTurns(t *testing.T) {
+	state := newSkillUsageState()
+	for _, event := range []normalizedSessionEvent{
+		skillUsageCall(1, "workflow"),
+		{Kind: sessionEventToolOutput, ToolRound: 1},
+		{Kind: sessionEventToolCall, ToolRound: 2, OwnedOperations: []string{"workflow/review"}},
+		{Kind: sessionEventComplete},
+		{Kind: sessionEventToolCall, ToolRound: 3, ToolName: "apply_patch"},
+		{Kind: sessionEventToolCall, ToolRound: 4, ToolName: "apply_patch"},
+		{Kind: sessionEventToolCall, ToolRound: 5, ToolName: "wait", Family: "review"},
+		{Kind: sessionEventToolCall, ToolRound: 6, Family: "review"},
+		{Kind: sessionEventToolCall, ToolRound: 7, ToolName: "apply_patch"},
+		{Kind: sessionEventComplete},
+	} {
+		state.observe(event, normalizedTokenUsage{})
+	}
+	state.finish(false)
+	got := state.metrics["workflow"]
+	if got.ReviewCalls != 2 || got.ReviewEditCycles != 2 || got.CompletedTurns != 2 || got.IncompleteTurns != 0 {
+		t.Fatalf("workflow loop=%#v", got)
+	}
+}
+
+func TestClaudeSkillUsageMatchesIndexedAnalysis(t *testing.T) {
+	root, sessionsDir := t.TempDir(), t.TempDir()
+	records := []any{
+		claudeFixtureAssistant(1, "m1", "tool_use", map[string]any{"input_tokens": 100, "output_tokens": 10}, claudeFixtureToolUse("s1", "Skill", map[string]any{"skill": "workflow"})),
+		claudeFixtureToolResult(2, "s1", false, "Launching skill: workflow"),
+		claudeFixtureAssistant(3, "m2", "tool_use", map[string]any{"input_tokens": 200, "output_tokens": 20, "output_tokens_details": map[string]any{"thinking_tokens": 5}}, claudeFixtureToolUse("t1", "Bash", map[string]any{"command": "go test ./..."})),
+		claudeFixtureToolResult(4, "t1", true, "tests failed"),
+		claudeFixtureAssistant(5, "m3", "end_turn", map[string]any{"input_tokens": 50, "output_tokens": 5}),
+	}
+	for _, raw := range records {
+		raw.(map[string]any)["cwd"] = root
+	}
+	writeClaudeSessionFixture(t, sessionsDir, "skill", records)
+	provider, err := resolveSessionSource("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := provider.Discover(sessionsDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC)
+	direct, err := analyzeProviderSessions(provider, discovery, root, at.Add(-time.Hour), at, "", ownershipCatalog{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	stats, err := store.refresh(t.Context(), provider.Name(), discovery, root, provider, ownershipCatalog{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, root, at.Add(-time.Hour), at, "", ownershipCatalog{}, stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := direct.Summary.SkillLoads["workflow"].UsageAfterLoad
+	want := skillUsageMetrics{SuccessfulLoads: 1, Tokens: normalizedTokenUsage{InputTokens: 250, UncachedInputTokens: 250, OutputTokens: 25, ReasoningTokens: 5, TotalTokens: 275}, FreshTokens: 275, ToolCalls: 1, FailedToolCalls: 1, CompletedTurns: 1}
+	if got != want {
+		t.Fatalf("direct usage=%#v, want %#v", got, want)
+	}
+	if !reflect.DeepEqual(direct.Summary.SkillLoads, indexed.Summary.SkillLoads) {
+		t.Fatalf("indexed skill metrics differ: direct=%#v indexed=%#v", direct.Summary.SkillLoads, indexed.Summary.SkillLoads)
+	}
+}
+
+func TestSkillUsageDoesNotReintroduceExcludedTokenTelemetry(t *testing.T) {
+	at := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
+	events := []normalizedSessionEvent{skillUsageCall(1, "workflow"), {Kind: sessionEventToolOutput, ToolRound: 1}}
+	for i := 1; i <= 2_001; i++ {
+		input := int64(i) * 1_000_000_000
+		events = append(events, normalizedSessionEvent{Kind: sessionEventToken,
+			OccurredAt: at.Add(time.Duration(i) * time.Millisecond),
+			Tokens: normalizedTokenUsage{InputTokens: input, UncachedInputTokens: input,
+				OutputTokens: 1_000_000_000, TotalTokens: input + 1_000_000_000}})
+	}
+	events[0].OccurredAt, events[1].OccurredAt = at, at
+	events[1].CallOccurredAt = at
+	record, err := sessionRecordFromNormalized(normalizedSession{CWD: "/workspace/app", Events: events},
+		"/workspace/app", at, at.Add(time.Hour), ownershipCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.TokenTelemetryExcluded {
+		t.Fatal("fixture did not exercise excluded telemetry")
+	}
+	metrics := record.SkillUsageAfterLoad["workflow"]
+	if metrics.SuccessfulLoads != 1 || metrics.Tokens != (normalizedTokenUsage{}) {
+		t.Fatalf("excluded stream leaked into skill usage: %#v", metrics)
+	}
+}
+
+func TestSkillUsageLifecycleMatchesIndexedAnalysis(t *testing.T) {
+	for _, name := range []string{"yielded load", "compaction outside repository", "duplicate snapshot after completion"} {
+		t.Run(name, func(t *testing.T) {
+			root, outside, sources := t.TempDir(), t.TempDir(), t.TempDir()
+			events := []normalizedSessionEvent{skillUsageCall(1, "workflow")}
+			wantTokens, wantCompleted, wantIncomplete := int64(40), 1, 0
+			if name == "yielded load" {
+				events = append(events,
+					normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1, OperationContinues: true},
+					normalizedSessionEvent{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 100, UncachedInputTokens: 100, TotalTokens: 100}},
+					normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "wait", ToolRound: 1},
+					normalizedSessionEvent{Kind: sessionEventToolOutput, ToolName: "wait", ToolRound: 1},
+				)
+			} else if name == "duplicate snapshot after completion" {
+				wantTokens = 140
+				events = append(events, normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1})
+			} else {
+				wantTokens, wantCompleted, wantIncomplete = 100, 0, 1
+				events = append(events,
+					normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1},
+					normalizedSessionEvent{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 100, UncachedInputTokens: 100, TotalTokens: 100}},
+					normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "exec_command", WorkingDirectories: []string{outside}},
+					normalizedSessionEvent{Kind: sessionEventCompaction},
+					normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "exec_command", WorkingDirectories: []string{root}},
+				)
+			}
+			events = append(events,
+				normalizedSessionEvent{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 140, UncachedInputTokens: 140, TotalTokens: 140}},
+				normalizedSessionEvent{Kind: sessionEventComplete},
+			)
+			if name == "duplicate snapshot after completion" {
+				events = append(events, normalizedSessionEvent{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 140, UncachedInputTokens: 140, TotalTokens: 140}})
+			}
+			at := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
+			for i := range events {
+				events[i].Sequence = i + 1
+				events[i].OccurredAt = at.Add(time.Duration(i) * time.Second)
+				events[i].CallOccurredAt = events[i].OccurredAt
+			}
+			path := filepath.Join(sources, "session.jsonl")
+			if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			provider := sessionProviderAdapter{name: "fixture", normalize: func(string) (normalizedSession, error) {
+				return normalizedSession{Provider: "fixture", SourcePath: path, CWD: root, Events: events}, nil
+			}}
+			discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+			direct, err := analyzeProviderSessions(provider, discovery, root, at.Add(-time.Second), at.Add(time.Hour), "", ownershipCatalog{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { store.Close() })
+			stats, err := store.refresh(t.Context(), provider.Name(), discovery, root, provider, ownershipCatalog{}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, root, at.Add(-time.Second), at.Add(time.Hour), "", ownershipCatalog{}, stats)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, report := range []codexSessionInsightsReport{direct, indexed} {
+				got := report.Summary.SkillLoads["workflow"].UsageAfterLoad
+				if got.SuccessfulLoads != 1 || got.Tokens.TotalTokens != wantTokens || got.CompletedTurns != wantCompleted || got.IncompleteTurns != wantIncomplete {
+					t.Fatalf("lifecycle usage=%#v, want tokens=%d completed=%d incomplete=%d", got, wantTokens, wantCompleted, wantIncomplete)
+				}
+			}
+		})
+	}
+}

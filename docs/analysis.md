@@ -133,6 +133,42 @@ roots. Editing an installed `SKILL.md` therefore updates footprint and
 decretion evidence without `--refresh`. When no current installed artifact can
 be resolved, Muninn retains the ingestion-time estimate rather than guessing.
 
+## Skill cost and workflow loops
+
+Use `muninn analyze --provider claude --repo . --since 7d --details` and inspect
+`summary.skillLoads` (also present per task). Each skill separates:
+
+- `estimatedTokens`, `estimatedLoadedTokens`, and `estimatedRedundantTokens`:
+  loading overhead estimated from the current skill file, not historical
+  tokenizer measurements or a billing amount.
+- `usageAfterLoad`: recorded token increments, fresh tokens, tool calls,
+  failed tool calls, review calls, review-to-edit cycles, and completed or
+  incomplete turn counts after a successful load.
+
+Usage starts at the successful load result, excluding the request that invoked
+it, and stops at compaction or session end. Skills stay active across turn-end
+markers, including user feedback and retakes in a multi-turn workflow.
+Reloading an active skill does not
+multiply its usage. Only loads observed in the selected repository and time
+window qualify. Implausible token streams contribute no measured tokens.
+Child sessions are not charged to their parent's skill.
+
+Several active skills can observe the same subsequent work, so their counters
+overlap and must not be added together. Later unrelated work in the same
+context can also contribute: metadata cannot identify the semantic end of a
+workflow. A completed turn is the provider's turn-end marker; it does not prove
+the task met its acceptance criteria. A review-to-edit
+cycle records sequence, not whether a review finding justified the edit.
+Review calls use the existing command-family and configured-operation rules.
+The standard `node <path>/workbench.mjs review` command is recognized directly;
+configured operations ending in `/review` also count.
+
+These are investigation leads: costly repeated review/edit cycles can identify
+a process worth shortening without retaining review comments. Compare the same
+skill before and after one small change, alongside repository checks and the
+existing delivery-quality comparison. A lower token count alone is not proof
+that the process improved.
+
 ## Error contract
 
 Successful analysis and failure timelines emit JSON to stdout. Command errors
