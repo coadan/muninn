@@ -290,6 +290,54 @@ func codexShellCommandSegments(command string) [][]string {
 	return segments
 }
 
+// standaloneForegroundCommandTokens rejects executable shell expressions while
+// retaining punctuation and newlines inside literal quoted arguments.
+func standaloneForegroundCommandTokens(command string) []string {
+	command = strings.TrimSpace(command)
+	var quote byte
+	escaped := false
+	for i := 0; i < len(command); i++ {
+		current := command[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quote == '\'' {
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '\\' {
+			escaped = true
+			continue
+		}
+		if current == '`' || current == '$' && i+1 < len(command) && command[i+1] == '(' {
+			return nil
+		}
+		if quote == '"' {
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if strings.ContainsRune(";&|\n\r<>()", rune(current)) {
+			return nil
+		}
+		if current == '\'' || current == '"' {
+			quote = current
+		}
+	}
+	if quote != 0 || escaped {
+		return nil
+	}
+	segments := codexShellCommandSegments(command)
+	if len(segments) != 1 {
+		return nil
+	}
+	return segments[0]
+}
+
 func codexShellSegmentFamily(tokens []string) string {
 	for len(tokens) > 0 && codexShellAssignment(tokens[0]) {
 		tokens = tokens[1:]

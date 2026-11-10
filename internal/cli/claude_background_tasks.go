@@ -169,9 +169,7 @@ func (tasks *claudeBackgroundTasks) observeOutput(block claudeContentBlock, rawR
 			// A notification or another outstanding continuation already
 			// settled this task. Keep this physical result without another
 			// terminal result attributed to the background command.
-			physical := claudeCall{codexToolCallDescriptor: codexToolCallDescriptor{Name: call.OriginalToolName},
-				OccurredAt: call.OccurredAt, ToolRound: call.ToolRound, WorkingDirectories: call.WorkingDirectories}
-			*event = claudeToolOutputEvent(block, physical, event.OccurredAt, event.Sequence)
+			*event = claudePhysicalOutputEvent(block, call, *event)
 			return
 		}
 		if event.Refusal != "" || event.Failed {
@@ -229,9 +227,23 @@ func (tasks *claudeBackgroundTasks) observeOutput(block claudeContentBlock, rawR
 		if taskID == "" {
 			return
 		}
+		if prior := tasks.shells[taskID]; prior != nil && prior.call.ToolRound == call.ToolRound {
+			*event = claudePhysicalOutputEvent(block, call, *event)
+			return
+		}
 		tasks.shells[taskID] = &claudeBackgroundTask{call: call}
 		event.OperationContinues = true
 	}
+}
+
+func claudePhysicalOutputEvent(block claudeContentBlock, call claudeCall, event normalizedSessionEvent) normalizedSessionEvent {
+	name := call.OriginalToolName
+	if name == "" {
+		name = call.Name
+	}
+	physical := claudeCall{codexToolCallDescriptor: codexToolCallDescriptor{Name: name},
+		OccurredAt: call.OccurredAt, ToolRound: call.ToolRound, WorkingDirectories: call.WorkingDirectories}
+	return claudeToolOutputEvent(block, physical, event.OccurredAt, event.Sequence)
 }
 
 // notificationEvent resolves the shell task a <task-notification> reports as

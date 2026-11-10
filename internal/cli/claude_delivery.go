@@ -39,47 +39,6 @@ func (state *claudeDeliveryState) observeOutput(block claudeContentBlock, call c
 // ponytail: only standalone foreground creation with one returned URL is
 // evidence. Broaden this only when a provider exposes explicit creation status.
 func claudeStandalonePRCreate(command string) bool {
-	var quote byte
-	escaped := false
-	for i := 0; i < len(command); i++ {
-		current := command[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if quote == '\'' {
-			if current == quote {
-				quote = 0
-			}
-			continue
-		}
-		if current == '\\' {
-			escaped = true
-			continue
-		}
-		if current == '`' || current == '$' && i+1 < len(command) && command[i+1] == '(' {
-			return false
-		}
-		if quote == '"' {
-			if current == quote {
-				quote = 0
-			}
-			continue
-		}
-		if strings.ContainsRune(";&|\n\r<>()", rune(current)) {
-			return false
-		}
-		if current == '\'' || current == '"' {
-			quote = current
-		}
-	}
-	if quote != 0 || escaped {
-		return false
-	}
-	segments := codexShellCommandSegments(command)
-	if len(segments) != 1 {
-		return false
-	}
-	tokens := segments[0]
+	tokens := standaloneForegroundCommandTokens(command)
 	return len(tokens) >= 3 && filepath.Base(tokens[0]) == "gh" && tokens[1] == "pr" && tokens[2] == "create"
 }

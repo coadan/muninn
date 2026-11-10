@@ -221,6 +221,7 @@ func TestClaudePRCreationRequiresUnambiguousSuccessfulCommand(t *testing.T) {
 
 func TestClaudeStandalonePRCreateRespectsQuotedArguments(t *testing.T) {
 	for _, command := range []string{
+		"\n gh pr create --fill\n",
 		"gh pr create --body 'Handle empty input; add coverage & tests | checks'",
 		"gh pr create --body 'First line\nSecond line'",
 		"gh pr create --body 'Literal $(example) and `example`'",
@@ -230,9 +231,14 @@ func TestClaudeStandalonePRCreateRespectsQuotedArguments(t *testing.T) {
 		if !claudeStandalonePRCreate(command) {
 			t.Errorf("standalone command rejected: %q", command)
 		}
+		records := claudeFixtureDeliveryConversation("/workspace/app", false)
+		records[4] = claudeFixtureAssistant(7, "m4", "tool_use", map[string]any{"input_tokens": 1, "output_tokens": 1}, claudeFixtureToolUse("p1", "Bash", map[string]any{"command": command}))
+		if got := claudeBackgroundRecord(t, records).DeliveryRework.Deliveries; got != 1 {
+			t.Errorf("standalone delivery=%d command=%q", got, command)
+		}
 	}
 	for _, command := range []string{
-		"gh pr create --fill &", "gh pr create --fill;", "gh pr create --fill\n",
+		"gh pr create --fill &", "gh pr create --fill;",
 		"gh pr create --body $(echo example)", "gh pr create --body \"$(echo example)\"",
 		"gh pr create --body `echo example`", "gh pr create --body 'unterminated",
 		"gh pr create --body <(echo example)",
