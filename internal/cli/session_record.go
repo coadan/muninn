@@ -222,6 +222,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				recordToolRefusal(&record, event)
 				helpEffectiveness.observeRefusal(&record, event, eventOperations, ownership)
 				verificationEscalation.observeRefusal(event)
+				operationRetry.observeRefusal(event)
 			}
 			continue
 		}

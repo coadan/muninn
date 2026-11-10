@@ -103,3 +103,43 @@ func TestRefusedOutputsAreNotOutcomes(t *testing.T) {
 		t.Fatalf("control push was not a delivery: %#v", record.DeliveryRework)
 	}
 }
+
+func TestRefusedRetryLeavesTheFailurePendingForTheRealRetry(t *testing.T) {
+	root := t.TempDir()
+	start := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "repo",
+		Executables: []string{"repo"},
+		Operations:  []ownedOperationConfig{{ID: "test", Args: []string{"test"}}},
+	}})
+	sequence := 0
+	var events []normalizedSessionEvent
+	run := func(round int, failed bool, refusal string) {
+		sequence += 2
+		events = append(events,
+			normalizedSessionEvent{
+				Sequence: sequence - 1, OccurredAt: start.Add(time.Duration(sequence-1) * time.Second),
+				Kind: sessionEventToolCall, ToolName: "exec_command", ToolRound: round,
+				OwnedOperations: []string{"repo/test"},
+			},
+			normalizedSessionEvent{
+				Sequence: sequence, OccurredAt: start.Add(time.Duration(sequence) * time.Second),
+				CallOccurredAt: start.Add(time.Duration(sequence-1) * time.Second),
+				Kind:           sessionEventToolOutput, ToolName: "exec_command", ToolRound: round,
+				OwnedOperations: []string{"repo/test"}, Failed: failed, Refusal: refusal,
+			})
+	}
+	run(1, true, "")
+	run(2, false, toolRefusalBlockedByHook)
+	run(3, false, "")
+	record, err := sessionRecordFromNormalized(
+		normalizedSession{Provider: "codex", CWD: root, Events: events},
+		root, start.Add(-time.Hour), start.Add(time.Hour), catalog,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := record.OwnedOperationRetries["repo/test"]; got.Attempts != 1 || got.SuccessfulRetries != 1 || got.RepeatedFailures != 0 {
+		t.Fatalf("retries=%#v", got)
+	}
+}

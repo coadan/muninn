@@ -39,6 +39,18 @@ func (state *ownedOperationRetryState) observeCall(
 	state.lastCallRound = event.ToolRound
 }
 
+// observeRefusal treats a refused retry as a call that never ran: the failure
+// stays pending, so the next real call of the same operation is its retry.
+func (state *ownedOperationRetryState) observeRefusal(event normalizedSessionEvent) {
+	if state.retryOperation == "" || state.retryRound != event.ToolRound {
+		return
+	}
+	state.failedOperation = state.retryOperation
+	state.failedRound = event.ToolRound
+	state.retryOperation = ""
+	state.retryRound = 0
+}
+
 func (state *ownedOperationRetryState) observeOutput(
 	record *codexSessionRecord,
 	event normalizedSessionEvent,

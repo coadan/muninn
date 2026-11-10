@@ -139,14 +139,15 @@ Tool-refusal findings count tool calls that never ran, keyed by a fixed label
 and the normalized tool name: `declined-by-user`, `denied-by-permission`, or
 `blocked-by-hook`. A refused call never ran, so its output is no result: it is
 not a tool failure and never counts as a delivery, test run, retry, help
-outcome, or verification escalation. A refused edit call still counts as an
-edit, because the refusal is only known from its output. A finding requires at
-least three refusals of the same tool with the same label across two sessions. A
-recurring hook block targets tooling: the hook's rule belongs where the agent
-decides, and its message should name the allowed alternative. A recurring
-permission denial targets instructions or the permission rules. A recurring user
-decline stays low confidence, because a decline can be a one-off judgement. The
-refusal message is never retained.
+outcome, or verification escalation. Call-side accounting still sees a refused
+call, because the refusal is only known from its output: a refused edit counts
+as an edit, and a refused read or search counts as a read target or a
+search-burst step. A finding requires at least three refusals of the same tool
+with the same label across two sessions. A recurring hook block targets tooling:
+the hook's rule belongs where the agent decides, and its message should name the
+allowed alternative. A recurring permission denial targets instructions or the
+permission rules. A recurring user decline stays low confidence, because a
+decline can be a one-off judgement. The refusal message is never retained.
 
 Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned
