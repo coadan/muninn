@@ -194,6 +194,7 @@ func cmdAnalyze(root string, args []string) error {
 		Focus:           normalizeTrendFocus(*focus),
 	}
 	report.Instructions = inspectRepositoryInstructions(resolvedRepoRoot, source.Name())
+	report.WorkbenchReviews = inspectWorkbenchReviews(resolvedRepoRoot, since, now)
 	report.Decretion = buildDecretionCandidates(report)
 	report.Findings = buildSessionFindings(report, config)
 	report.Findings, err = filterSessionFindings(report.Findings, *focus)
