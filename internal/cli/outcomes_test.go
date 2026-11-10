@@ -979,3 +979,83 @@ func TestDiscoveryOperationAcceptsDedicatedSearchAndReadTools(t *testing.T) {
 		}
 	}
 }
+
+// A provider-recorded delivery event counts like a successful delivery
+// operation in every delivery owner, without any tool or command identity.
+func TestDeliveryEventCountsAsCompletedDelivery(t *testing.T) {
+	target := "packages/runtime/src/runtime.go"
+	edit := normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "apply_patch", Targets: []string{target}}
+	tests := normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "tests"}
+	delivery := normalizedSessionEvent{Kind: sessionEventDelivery}
+
+	rework := deliveryReworkTracker{}
+	downstream := downstreamQualityTracker{}
+	for _, event := range []normalizedSessionEvent{edit, tests, delivery} {
+		rework.observe(event, nil)
+		downstream.observe(event, nil)
+	}
+	if rework.metrics.Deliveries != 1 || rework.metrics.DeliveriesWithPreTests != 1 {
+		t.Fatalf("delivery rework=%#v", rework.metrics)
+	}
+	if downstream.metrics.Deliveries != 1 || downstream.metrics.DeliveriesWithPreTests != 1 {
+		t.Fatalf("downstream quality=%#v", downstream.metrics)
+	}
+
+	episode := codexTaskEpisode{}
+	for _, event := range []normalizedSessionEvent{edit, tests, delivery} {
+		episode.observe(event, normalizedTokenUsage{}, nil)
+	}
+	if !episode.delivered {
+		t.Fatal("episode did not record the delivery")
+	}
+	if _, ok := episode.Phases["delivery"]; !ok {
+		t.Fatalf("delivery event was not attributed to the delivery phase: %#v", episode.Phases)
+	}
+
+	for _, unfinished := range []normalizedSessionEvent{
+		{Kind: sessionEventToolOutput, Family: "delivery", Failed: true},
+		{Kind: sessionEventToolOutput, Family: "delivery", OperationContinues: true},
+		{Kind: sessionEventToolCall, Family: "delivery"},
+	} {
+		if completedDelivery(unfinished, nil) {
+			t.Fatalf("unfinished delivery counted as completed: %#v", unfinished)
+		}
+	}
+}
+
+func TestProviderDeliveryRequiresPendingEdits(t *testing.T) {
+	edit := normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "apply_patch", Targets: []string{"main.go"}}
+	link := normalizedSessionEvent{Kind: sessionEventDelivery}
+	push := normalizedSessionEvent{Kind: sessionEventToolOutput, Family: "delivery"}
+	owned := normalizedSessionEvent{Kind: sessionEventToolOutput, OwnedOperations: []string{"wrapper/pr"}}
+	complete := normalizedSessionEvent{Kind: sessionEventComplete}
+	for _, tc := range []struct {
+		name       string
+		events     []normalizedSessionEvent
+		deliveries int
+	}{
+		{"existing PR", []normalizedSessionEvent{link, complete}, 0},
+		{"push confirmation", []normalizedSessionEvent{edit, push, link, complete, link}, 1},
+		{"configured delivery confirmation", []normalizedSessionEvent{edit, owned, link, complete}, 1},
+		{"new edits after delivery", []normalizedSessionEvent{edit, push, edit, link, complete}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			at := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+			for i := range tc.events {
+				tc.events[i].OccurredAt = at.Add(time.Duration(i+1) * time.Second)
+				tc.events[i].CallOccurredAt = tc.events[i].OccurredAt
+			}
+			record, err := sessionRecordFromNormalized(normalizedSession{CWD: "/workspace/app", Events: tc.events},
+				"/workspace/app", at, at.Add(time.Hour), ownershipCatalog{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.DeliveryRework.Deliveries != tc.deliveries || record.DownstreamQuality.Deliveries != tc.deliveries {
+				t.Fatalf("deliveries rework=%d downstream=%d, want %d", record.DeliveryRework.Deliveries, record.DownstreamQuality.Deliveries, tc.deliveries)
+			}
+			if len(record.TaskEpisodes) != 1 {
+				t.Fatalf("a link must not open a new episode: %#v", record.TaskEpisodes)
+			}
+		})
+	}
+}
