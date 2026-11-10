@@ -62,6 +62,56 @@ func TestClaudeLatePhysicalResultKeepsItsRepositoryInDirectAndIndexedAnalysis(t 
 	}
 }
 
+func TestClaudeContinuationDoesNotRepeatIndexedFlagsOrBypasses(t *testing.T) {
+	root, sources := t.TempDir(), t.TempDir()
+	usage := map[string]any{"input_tokens": 1, "output_tokens": 1}
+	records := []any{
+		claudeFixtureAssistant(1, "m1", "tool_use", usage, claudeFixtureToolUse("b1", "Bash", map[string]any{"command": "runner build --json", "run_in_background": true})),
+		claudeFixtureBackgroundResult(2, "b1", "bgtask016", true),
+		claudeFixtureAssistant(3, "m2", "tool_use", usage, claudeFixtureToolUse("p1", "Read", map[string]any{"file_path": "/tmp/bgtask016.output"})),
+		claudeFixtureToolResult(4, "p1", false, "running"),
+		claudeFixtureAssistant(5, "m3", "tool_use", usage, claudeFixtureToolUse("p2", "TaskOutput", map[string]any{"task_id": "bgtask016"})),
+		claudeFixtureToolResult(6, "p2", false, "<retrieval_status>success</retrieval_status>\n<status>completed</status>\n<output>done</output>"),
+		claudeFixtureAssistant(7, "m4", "end_turn", usage),
+	}
+	for _, raw := range records {
+		raw.(map[string]any)["cwd"] = root
+	}
+	path := writeClaudeSessionFixture(t, sources, "continuation-flags", records)
+	catalog := newOwnershipCatalog([]ownedToolConfig{
+		{ID: "runner", Executables: []string{"runner"}, Operations: []ownedOperationConfig{{ID: "build", Args: []string{"build"}}}},
+		{ID: "workflow", Executables: []string{"workflow"}, Operations: []ownedOperationConfig{{ID: "verify", Args: []string{"verify"}, BypassPatterns: []ownedBypassPatternConfig{{Executable: "runner", Args: []string{"build", "**"}}}}}},
+	})
+	provider, err := resolveSessionSource("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+	at := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+	direct, err := analyzeProviderSessions(provider, discovery, root, at, at.Add(time.Hour), "", catalog, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	stats, err := store.refresh(t.Context(), provider.Name(), discovery, root, provider, catalog, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, root, at, at.Add(time.Hour), "", catalog, stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, report := range []codexSessionInsightsReport{direct, indexed} {
+		if report.Summary.OwnedFlags["runner/build/json"].Count != 1 || report.Summary.OwnedFlagEligibleCalls["runner/build"].Count != 1 || report.Summary.ToolingBypasses["workflow/verify"].Count != 1 || report.Summary.OwnedOperations["runner/build"].Calls != 1 {
+			t.Fatalf("continuation duplicates command metadata: flags=%#v scopes=%#v bypasses=%#v operations=%#v", report.Summary.OwnedFlags, report.Summary.OwnedFlagEligibleCalls, report.Summary.ToolingBypasses, report.Summary.OwnedOperations)
+		}
+	}
+}
+
 func claudeBackgroundRecord(t *testing.T, records []any) codexSessionRecord {
 	t.Helper()
 	path := writeClaudeSessionFixture(t, t.TempDir(), "outcomes", records)

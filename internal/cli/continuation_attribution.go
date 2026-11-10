@@ -17,6 +17,9 @@ func withoutContinuationCallAttribution(event normalizedSessionEvent) normalized
 	event.SelectorDigests = nil
 	event.CommandCandidates = nil
 	event.OwnedOperations = nil
+	event.BypassedOperations = nil
+	event.OwnedFlags = nil
+	event.OwnedFlagScopes = nil
 	event.OperationAttributionAmbiguous = false
 	return event
 }
