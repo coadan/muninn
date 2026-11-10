@@ -253,7 +253,7 @@ func TestClaudeSkillUsageMatchesIndexedAnalysis(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := direct.Summary.SkillLoads["workflow"].UsageAfterLoad
-	want := skillUsageMetrics{SuccessfulLoads: 1, Tokens: normalizedTokenUsage{InputTokens: 250, UncachedInputTokens: 250, OutputTokens: 25, ReasoningTokens: 5, TotalTokens: 275}, FreshTokens: 275, ToolCalls: 1, FailedToolCalls: 1, CompletedTurns: 1}
+	want := skillUsageMetrics{TokenBasis: "telemetry-after-load-result", SuccessfulLoads: 1, Tokens: normalizedTokenUsage{InputTokens: 250, UncachedInputTokens: 250, OutputTokens: 25, ReasoningTokens: 5, TotalTokens: 275}, FreshTokens: 275, ToolCalls: 1, FailedToolCalls: 1, CompletedTurns: 1}
 	if got != want {
 		t.Fatalf("direct usage=%#v, want %#v", got, want)
 	}
