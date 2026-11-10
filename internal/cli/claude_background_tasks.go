@@ -170,7 +170,7 @@ func (tasks *claudeBackgroundTasks) observeOutput(block claudeContentBlock, rawR
 			// settled this task. Keep this physical result without another
 			// terminal result attributed to the background command.
 			physical := claudeCall{codexToolCallDescriptor: codexToolCallDescriptor{Name: call.OriginalToolName},
-				OccurredAt: call.OccurredAt, ToolRound: call.ToolRound}
+				OccurredAt: call.OccurredAt, ToolRound: call.ToolRound, WorkingDirectories: call.WorkingDirectories}
 			*event = claudeToolOutputEvent(block, physical, event.OccurredAt, event.Sequence)
 			return
 		}

@@ -1,9 +1,66 @@
 package cli
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestClaudeLatePhysicalResultKeepsItsRepositoryInDirectAndIndexedAnalysis(t *testing.T) {
+	root, other, sources := t.TempDir(), t.TempDir(), t.TempDir()
+	usage := map[string]any{"input_tokens": 1, "output_tokens": 1}
+	records := []any{
+		claudeFixtureAssistant(1, "m1", "tool_use", usage, claudeFixtureToolUse("b1", "Bash", map[string]any{"command": "go test ./...", "run_in_background": true})),
+		claudeFixtureBackgroundResult(2, "b1", "bgtask015", true),
+		claudeFixtureAssistant(3, "m2", "tool_use", usage, claudeFixtureToolUse("p1", "TaskOutput", map[string]any{"task_id": "bgtask015"})),
+		claudeFixtureNotification(4, "bgtask015", "completed"),
+		claudeFixtureAssistant(5, "m3", "tool_use", usage, claudeFixtureToolUse("a1", "Bash", map[string]any{"command": "printf ready"})),
+		claudeFixtureToolResult(6, "a1", false, "ready"),
+		claudeFixtureToolResult(7, "p1", true, "unexpected output"),
+	}
+	for i, raw := range records {
+		cwd := root
+		if i >= 4 {
+			cwd = other
+		}
+		raw.(map[string]any)["cwd"] = cwd
+	}
+	path := writeClaudeSessionFixture(t, sources, "late-scope", records)
+	provider, err := resolveSessionSource("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, repository := range []string{root, other} {
+		at := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+		direct, err := analyzeProviderSessions(provider, discovery, repository, at, at.Add(time.Hour), "", ownershipCatalog{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stats, err := store.refresh(t.Context(), provider.Name(), discovery, repository, provider, ownershipCatalog{}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, repository, at, at.Add(time.Hour), "", ownershipCatalog{}, stats)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 0
+		if repository == root {
+			want = 1
+		}
+		for _, report := range []codexSessionInsightsReport{direct, indexed} {
+			if report.Summary.FailedToolCalls != want {
+				t.Fatalf("repository=%s failures=%d want=%d", repository, report.Summary.FailedToolCalls, want)
+			}
+		}
+	}
+}
 
 func claudeBackgroundRecord(t *testing.T, records []any) codexSessionRecord {
 	t.Helper()
