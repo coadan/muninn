@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	record.LineageKey = session.LineageKey
 	record.ParentLineageKey = session.ParentLineageKey
 	record.SpawnStatus = session.SpawnStatus
+	record.UnrecognizedRecords = session.UnrecognizedRecords
+	record.UnrecognizedContentBlocks = session.UnrecognizedContentBlocks
 	if record.CWD == "" {
 		return codexSessionRecord{}, nil
 	}
@@ -36,6 +39,8 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	previousCommand := normalizedSessionEvent{}
 	previousTokens := normalizedTokenUsage{}
 	hasPreviousTokens := false
+	previousCost := normalizedProviderCost{}
+	costShare := providerCostShare{}
 	operationChain := ownedOperationChainState{}
 	operationRetry := ownedOperationRetryState{}
 	helpEffectiveness := helpEffectivenessState{}
@@ -58,6 +63,23 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 		} else if inside, explicit := eventRepositoryScope(event, session.CWD, workspaceRoot); explicit {
 			inRepositoryScope = inside
 		}
+		if event.Kind == sessionEventProviderCost {
+			// Cost is handled before turn and episode accounting so a
+			// provider's bookkeeping record never looks like task activity.
+			if event.OccurredAt.After(generatedAt) {
+				continue
+			}
+			increment := normalizedProviderCostIncrement(event.Cost, previousCost)
+			previousCost = event.Cost
+			if event.OccurredAt.Before(since) {
+				continue
+			}
+			if attributed, ok := costShare.attribute(increment, inRepositoryScope); ok {
+				record.ProviderCostReported = true
+				addNormalizedProviderCost(&record.ProviderCost, attributed)
+			}
+			continue
+		}
 		if event.OccurredAt.Before(since) {
 			if event.Kind == sessionEventToken {
 				previousTokens = event.Tokens
@@ -76,6 +98,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			tokenIncrement = normalizedTokenUsageIncrement(event.Tokens, previousTokens, hasPreviousTokens)
 			previousTokens = event.Tokens
 			hasPreviousTokens = true
+			costShare.addTokens(tokenIncrement.TotalTokens, inRepositoryScope)
 		}
 		if !inRepositoryScope {
 			continue
@@ -518,6 +541,66 @@ func normalizedTokenUsageIncrement(current, previous normalizedTokenUsage, hasPr
 		ReasoningTokens:     max(int64(0), current.ReasoningTokens-previous.ReasoningTokens),
 		TotalTokens:         max(int64(0), current.TotalTokens-previous.TotalTokens),
 	}
+}
+
+// normalizedProviderCostIncrement returns the growth of a cumulative provider
+// cost counter. A counter that went backwards restarted, so its current value
+// is the increment.
+func normalizedProviderCostIncrement(current, previous normalizedProviderCost) normalizedProviderCost {
+	if current.CostUSD < previous.CostUSD ||
+		current.APIDurationMs < previous.APIDurationMs ||
+		current.ToolDurationMs < previous.ToolDurationMs {
+		return current
+	}
+	return normalizedProviderCost{
+		CostUSD:        current.CostUSD - previous.CostUSD,
+		APIDurationMs:  current.APIDurationMs - previous.APIDurationMs,
+		ToolDurationMs: current.ToolDurationMs - previous.ToolDurationMs,
+	}
+}
+
+// providerCostShare attributes provider cost to the repository. Providers
+// report cost as a coarse session-wide counter, so each observed growth is
+// split by the repository's share of the tokens used since the previous
+// observation. With no tokens in between, the current scope decides.
+type providerCostShare struct {
+	tokens        int64
+	inScopeTokens int64
+}
+
+func (share *providerCostShare) addTokens(tokens int64, inScope bool) {
+	share.tokens += tokens
+	if inScope {
+		share.inScopeTokens += tokens
+	}
+}
+
+func (share *providerCostShare) attribute(increment normalizedProviderCost, inScope bool) (normalizedProviderCost, bool) {
+	if increment == (normalizedProviderCost{}) {
+		return normalizedProviderCost{}, false
+	}
+	fraction := 0.0
+	switch {
+	case share.tokens > 0:
+		fraction = float64(share.inScopeTokens) / float64(share.tokens)
+	case inScope:
+		fraction = 1
+	}
+	*share = providerCostShare{}
+	if fraction == 0 {
+		return normalizedProviderCost{}, false
+	}
+	return normalizedProviderCost{
+		CostUSD:        increment.CostUSD * fraction,
+		APIDurationMs:  int64(math.Round(float64(increment.APIDurationMs) * fraction)),
+		ToolDurationMs: int64(math.Round(float64(increment.ToolDurationMs) * fraction)),
+	}, true
+}
+
+func addNormalizedProviderCost(total *normalizedProviderCost, cost normalizedProviderCost) {
+	total.CostUSD += cost.CostUSD
+	total.APIDurationMs += cost.APIDurationMs
+	total.ToolDurationMs += cost.ToolDurationMs
 }
 
 const (

@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 114
+const codexSessionInsightsSchemaVersion = 115
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -11,6 +11,30 @@ type normalizedTokenUsage struct {
 	OutputTokens        int64 `json:"outputTokens"`
 	ReasoningTokens     int64 `json:"reasoningTokens"`
 	TotalTokens         int64 `json:"totalTokens"`
+}
+
+// normalizedProviderCost is a provider-reported cumulative counter carried by
+// provider_cost events: the cost and model and tool wall time the provider
+// itself accounted for. Providers that report none emit no such events.
+type normalizedProviderCost struct {
+	CostUSD        float64 `json:"costUSD"`
+	APIDurationMs  int64   `json:"apiDurationMs"`
+	ToolDurationMs int64   `json:"toolDurationMs"`
+}
+
+// providerCostMetrics aggregates provider-reported cost over the sessions that
+// report it. Sessions without provider cost are not counted as zero cost.
+type providerCostMetrics struct {
+	Sessions int `json:"sessions"`
+	normalizedProviderCost
+}
+
+// providerFormatDriftMetrics counts source records and content blocks of types
+// the provider adapter does not recognize.
+type providerFormatDriftMetrics struct {
+	Sessions                  int `json:"sessions"`
+	UnrecognizedRecords       int `json:"unrecognizedRecords"`
+	UnrecognizedContentBlocks int `json:"unrecognizedContentBlocks"`
 }
 
 type codexTaskInsights struct {
@@ -28,6 +52,8 @@ type codexAggregateMetrics struct {
 	Tokens                       normalizedTokenUsage                         `json:"tokens"`
 	FreshTokens                  int64                                        `json:"freshTokens"`
 	ExcludedTokenStreams         int                                          `json:"excludedTokenTelemetrySessions"`
+	ProviderCost                 providerCostMetrics                          `json:"providerCost,omitzero"`
+	ProviderFormatDrift          providerFormatDriftMetrics                   `json:"providerFormatDrift,omitzero"`
 	ToolCalls                    int                                          `json:"toolCalls"`
 	FailedToolCalls              int                                          `json:"failedToolCalls"`
 	TruncatedToolCalls           int                                          `json:"truncatedToolCalls"`
@@ -241,6 +267,10 @@ type codexSessionRecord struct {
 	Compactions                  int
 	Tokens                       normalizedTokenUsage
 	TokenTelemetryExcluded       bool
+	ProviderCost                 normalizedProviderCost
+	ProviderCostReported         bool
+	UnrecognizedRecords          int
+	UnrecognizedContentBlocks    int
 	ToolCalls                    int
 	FailedToolCalls              int
 	TruncatedToolCalls           int

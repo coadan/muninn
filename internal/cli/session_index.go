@@ -228,7 +228,16 @@ func (store *sessionStore) replaceSession(
 		}
 		return nil
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO sessions(source_id, cwd) VALUES(?, ?)`, sourceID, session.CWD)
+	result, err := tx.ExecContext(ctx, `INSERT INTO sessions(
+		source_id, cwd, model, reasoning_effort, agent_kind, lineage_key,
+		parent_lineage_key, spawn_status, unrecognized_records,
+		unrecognized_content_blocks
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sourceID, session.CWD, session.Model, session.ReasoningEffort,
+		session.AgentKind, session.LineageKey, session.ParentLineageKey,
+		session.SpawnStatus, session.UnrecognizedRecords,
+		session.UnrecognizedContentBlocks,
+	)
 	if err != nil {
 		return fmt.Errorf("insert indexed session: %w", err)
 	}
@@ -242,13 +251,15 @@ func (store *sessionStore) replaceSession(
 		first_family, last_family, tool_round, call_occurred_at_ns, failed,
 		refusal, truncated, output_bytes, failure_reason, failure_context, input_tokens,
 		cached_input_tokens, uncached_input_tokens, output_tokens,
-		reasoning_tokens, total_tokens, selector_digests, owned_operations,
+		reasoning_tokens, total_tokens, provider_cost_usd,
+		provider_api_duration_ms, provider_tool_duration_ms, selector_digests,
+		owned_operations,
 		bypassed_operations, owned_flags, owned_flag_tools, operation_task,
 		operation_attribution_ambiguous,
 		operation_continues, targets, guidance_artifacts, inline_bytes, concurrent_batch,
 		concurrent_batch_size,
 		diagnostic_json, working_directories, in_repository_scope
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -324,6 +335,9 @@ func (store *sessionStore) replaceSession(
 			event.Tokens.OutputTokens,
 			event.Tokens.ReasoningTokens,
 			event.Tokens.TotalTokens,
+			event.Cost.CostUSD,
+			event.Cost.APIDurationMs,
+			event.Cost.ToolDurationMs,
 			string(selectorDigests),
 			string(ownedOperations),
 			string(bypassedOperations),

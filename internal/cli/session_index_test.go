@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -193,6 +194,15 @@ func TestSessionStoreReusesUnchangedSourcesAndMatchesDirectAnalysis(t *testing.T
 	directProfilesJSON, _ := json.Marshal(direct.Profiles)
 	if string(indexedProfilesJSON) != string(directProfilesJSON) {
 		t.Fatalf("indexed and direct profiles differ:\nindexed=%s\ndirect=%s", indexedProfilesJSON, directProfilesJSON)
+	}
+	// Codex reports no provider cost or format drift, so neither appears.
+	for _, report := range []codexSessionInsightsReport{indexed, direct} {
+		for _, detailed := range []bool{true, false} {
+			raw, _ := json.Marshal(analysisJSONPayload(report, detailed))
+			if strings.Contains(string(raw), "providerCost") || strings.Contains(string(raw), "providerFormatDrift") {
+				t.Fatalf("Codex report (detailed=%v) reports provider telemetry: %s", detailed, raw)
+			}
+		}
 	}
 	if got := indexed.Summary.DownstreamQuality; got.Deliveries != 1 ||
 		got.DeliveriesWithFailure != 1 || got.FailureRuns != 1 {
