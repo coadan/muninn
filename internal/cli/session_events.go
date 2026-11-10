@@ -9,6 +9,25 @@ import (
 )
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
+var successfulReadExitCodePattern = regexp.MustCompile(`(?im)^(?:process exited with code|exit code:)\s*0[ \t]*$`)
+
+func codexGuidanceReadSucceeded(raw json.RawMessage, statusText, toolName string) bool {
+	if toolName != "exec_command" && toolName != "write_stdin" && toolName != "wait" {
+		return false
+	}
+	var result struct {
+		ExitCode *int `json:"exit_code"`
+	}
+	if json.Unmarshal(raw, &result) == nil && result.ExitCode != nil {
+		return *result.ExitCode == 0
+	}
+	header, _, _ := strings.Cut(strings.TrimSpace(statusText), "\nOutput:")
+	if json.Unmarshal([]byte(header), &result) == nil && result.ExitCode != nil {
+		return *result.ExitCode == 0
+	}
+	return successfulReadExitCodePattern.MatchString(header)
+}
+
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
 var nonZeroProcessExitCodePattern = regexp.MustCompile(`(?i)process exited with code\s+[1-9][0-9]*`)
 var searchMissExitCodePattern = regexp.MustCompile(`(?im)(?:"exit_code"\s*:\s*1(?:[^0-9]|$)|^exit code:\s*1(?:[^0-9]|$)|process exited with code\s+1(?:[^0-9]|$))`)

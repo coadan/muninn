@@ -167,6 +167,11 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 				}
 				guidanceDirectories := append(append([]string{}, descriptor.WorkingDirectories...), session.CWD)
 				guidanceArtifacts := codexGuidanceArtifacts(readTargetCandidates, guidanceDirectories...)
+				if len(guidanceArtifacts) > 0 && guidanceReadStatusUnconfirmed(name, payload.Arguments, payload.Input) {
+					for i := range guidanceArtifacts {
+						guidanceArtifacts[i].OutcomeUnconfirmed = true
+					}
+				}
 				descriptor.OperationAttributionAmbiguous = len(descriptor.CommandCandidates) > 1
 				continuation := false
 				if reference, ok := codexNestedContinuationReference(name, payload.Input); ok {
@@ -271,6 +276,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					ToolRound:                     descriptor.ToolRound,
 					CallOccurredAt:                descriptor.OccurredAt,
 					Failed:                        failed,
+					GuidanceReadSucceeded:         !failed && codexGuidanceReadSucceeded(payload.Output, statusText, descriptor.Name),
 					Truncated:                     codexToolOutputTruncated(text),
 					OutputBytes:                   byteCount,
 					FailureReason:                 reason,

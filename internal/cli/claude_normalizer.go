@@ -312,6 +312,9 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 				call := calls[block.ToolUseID]
 				event := claudeToolOutputEvent(block, call, timestamp, sequence)
 				background.observeOutput(block, record.ToolUseResult, call, &event)
+				if event.Failed || event.Refusal != "" || event.OperationContinues {
+					event.GuidanceReadSucceeded = false
+				}
 				session.Events = append(session.Events, event)
 				if deliveryEvent, ok := delivery.observeOutput(block, call, event); ok {
 					emit(deliveryEvent)
@@ -420,6 +423,11 @@ func claudeToolCallEvent(block claudeContentBlock, cwd string, at time.Time, rou
 		}
 		event.TargetCandidates = codexReadTargetCandidates(name, argumentText, "")
 		event.GuidanceArtifacts = codexGuidanceArtifacts(event.TargetCandidates, call.WorkingDirectories...)
+		if len(event.GuidanceArtifacts) > 0 && guidanceReadStatusUnconfirmed(name, argumentText, "") {
+			for i := range event.GuidanceArtifacts {
+				event.GuidanceArtifacts[i].OutcomeUnconfirmed = true
+			}
+		}
 		event.InlineBytes = codexInlineOrchestrationBytes(name, argumentText, "")
 	case "Edit", "MultiEdit", "Write", "NotebookEdit":
 		name = "apply_patch"
@@ -471,6 +479,7 @@ func claudeToolOutputEvent(block claudeContentBlock, call claudeCall, at time.Ti
 		refusal = claudeToolRefusal(text)
 	}
 	failed := block.IsError && refusal == ""
+	content := bytes.TrimSpace(block.Content)
 	event := normalizedSessionEvent{
 		Sequence:                      sequence,
 		OccurredAt:                    at,
@@ -481,6 +490,7 @@ func claudeToolOutputEvent(block claudeContentBlock, call claudeCall, at time.Ti
 		ToolRound:                     call.ToolRound,
 		CallOccurredAt:                call.OccurredAt,
 		Failed:                        failed,
+		GuidanceReadSucceeded:         !block.IsError && len(content) > 0 && (content[0] == '"' || content[0] == '['),
 		Refusal:                       refusal,
 		Truncated:                     codexToolOutputTruncated(text) || strings.Contains(text, "<persisted-output>"),
 		OutputBytes:                   int64(len(text)),

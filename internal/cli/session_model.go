@@ -53,6 +53,7 @@ type normalizedSessionEvent struct {
 	ToolRound                     int
 	CallOccurredAt                time.Time
 	Failed                        bool
+	GuidanceReadSucceeded         bool // Positive adapter evidence, not merely absence of failure.
 	Refusal                       string
 	Truncated                     bool
 	OutputBytes                   int64
@@ -87,6 +88,8 @@ type normalizedGuidanceArtifact struct {
 	Kind            string `json:"kind"`
 	ID              string `json:"id"`
 	EstimatedTokens int64  `json:"estimatedTokens,omitempty"`
+	// Tool success does not establish that this artifact was read successfully.
+	OutcomeUnconfirmed bool `json:"outcomeUnconfirmed,omitempty"`
 }
 
 // normalizedToolName is the privacy-safe tool name every adapter stores. Claude

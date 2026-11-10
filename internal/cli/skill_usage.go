@@ -6,16 +6,17 @@ package cli
 // are not attributed to a parent's skills.
 // Tokens follow telemetry order; delayed invocation telemetry can be included.
 type skillUsageMetrics struct {
-	TokenBasis       string               `json:"tokenBasis"`
-	SuccessfulLoads  int                  `json:"successfulLoads"`
-	Tokens           normalizedTokenUsage `json:"tokens"`
-	FreshTokens      int64                `json:"freshTokens"`
-	ToolCalls        int                  `json:"toolCalls"`
-	FailedToolCalls  int                  `json:"failedToolCalls"`
-	ReviewCalls      int                  `json:"reviewCalls"`
-	ReviewEditCycles int                  `json:"reviewEditCycles"`
-	CompletedTurns   int                  `json:"completedTurns"`
-	IncompleteTurns  int                  `json:"incompleteTurns"`
+	TokenBasis              string               `json:"tokenBasis,omitempty"`
+	UnconfirmedLoadAttempts int                  `json:"unconfirmedLoadAttempts"`
+	SuccessfulLoads         int                  `json:"successfulLoads"`
+	Tokens                  normalizedTokenUsage `json:"tokens"`
+	FreshTokens             int64                `json:"freshTokens"`
+	ToolCalls               int                  `json:"toolCalls"`
+	FailedToolCalls         int                  `json:"failedToolCalls"`
+	ReviewCalls             int                  `json:"reviewCalls"`
+	ReviewEditCycles        int                  `json:"reviewEditCycles"`
+	CompletedTurns          int                  `json:"completedTurns"`
+	IncompleteTurns         int                  `json:"incompleteTurns"`
 }
 
 type skillUsageState struct {
@@ -70,6 +71,12 @@ func (state *skillUsageState) observe(event normalizedSessionEvent, tokens norma
 		if event.Kind == sessionEventToolCall {
 			for _, artifact := range event.GuidanceArtifacts {
 				if artifact.Kind == "skill" && guidanceArtifactIDPattern.MatchString(artifact.ID) {
+					if artifact.OutcomeUnconfirmed {
+						metrics := state.metrics[artifact.ID]
+						metrics.UnconfirmedLoadAttempts++
+						state.metrics[artifact.ID] = metrics
+						continue
+					}
 					state.pending[event.ToolRound] = appendUniqueString(state.pending[event.ToolRound], artifact.ID)
 				}
 			}
@@ -80,6 +87,12 @@ func (state *skillUsageState) observe(event normalizedSessionEvent, tokens norma
 			}
 			for _, id := range state.pending[event.ToolRound] {
 				if event.Failed || event.Refusal != "" {
+					continue
+				}
+				if !event.GuidanceReadSucceeded {
+					metrics := state.metrics[id]
+					metrics.UnconfirmedLoadAttempts++
+					state.metrics[id] = metrics
 					continue
 				}
 				state.active[id], state.task[id] = true, true
@@ -109,6 +122,13 @@ func (state *skillUsageState) finish(completed bool) {
 		return
 	}
 	clear(state.active)
+	for _, ids := range state.pending {
+		for _, id := range ids {
+			metrics := state.metrics[id]
+			metrics.UnconfirmedLoadAttempts++
+			state.metrics[id] = metrics
+		}
+	}
 	clear(state.pending)
 	clear(state.reviewAwaitingEdit)
 }
@@ -118,6 +138,7 @@ func addSkillUsageMetrics(total *skillUsageMetrics, addition skillUsageMetrics) 
 		total.TokenBasis = "telemetry-after-load-result"
 	}
 	total.SuccessfulLoads += addition.SuccessfulLoads
+	total.UnconfirmedLoadAttempts += addition.UnconfirmedLoadAttempts
 	addNormalizedTokenUsage(&total.Tokens, addition.Tokens)
 	total.FreshTokens = total.Tokens.UncachedInputTokens + total.Tokens.OutputTokens
 	total.ToolCalls += addition.ToolCalls

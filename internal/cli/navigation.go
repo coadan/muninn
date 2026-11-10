@@ -58,6 +58,32 @@ func codexGuidanceArtifacts(candidates []string, workingDirectories ...string) [
 	return artifacts
 }
 
+// ponytail: nested or compound shell reads stay unconfirmed until adapters can
+// provide per-operation results. Outer success cannot prove an inner read.
+func guidanceReadStatusUnconfirmed(toolName, arguments, input string) bool {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	if name != "exec" && name != "exec_command" {
+		return false
+	}
+	if name == "exec" && len(codexNestedCommands(input)) > 0 {
+		return true
+	}
+	commands := codexShellCommands(name, arguments, input)
+	if len(commands) != 1 {
+		return true
+	}
+	tokens := standaloneForegroundCommandTokens(commands[0])
+	if len(tokens) == 0 {
+		return true
+	}
+	switch filepath.Base(tokens[0]) {
+	case "cat", "sed", "head", "tail", "bat", "less", "more":
+		return false
+	default:
+		return true
+	}
+}
+
 func guidanceArtifactEstimatedTokens(candidate string, workingDirectories []string) int64 {
 	paths := []string{candidate}
 	if !filepath.IsAbs(candidate) {

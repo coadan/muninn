@@ -172,6 +172,7 @@ func (tasks *claudeBackgroundTasks) observeOutput(block claudeContentBlock, rawR
 			*event = claudePhysicalOutputEvent(block, call, *event)
 			return
 		}
+		event.ToolRound = task.call.ToolRound
 		if event.Refusal != "" || event.Failed {
 			event.OperationContinues = !task.resolved
 			return
@@ -279,12 +280,13 @@ func (tasks *claudeBackgroundTasks) notificationEvent(content json.RawMessage, a
 	task.resolved = true
 	shell := task.call
 	event := normalizedSessionEvent{
-		OccurredAt: at,
-		Kind:       sessionEventToolOutput,
-		ToolName:   "wait",
-		Family:     shell.Family,
-		Shape:      shell.Shape,
-		ToolRound:  shell.ToolRound,
+		OccurredAt:            at,
+		Kind:                  sessionEventToolOutput,
+		ToolName:              "wait",
+		Family:                shell.Family,
+		Shape:                 shell.Shape,
+		ToolRound:             shell.ToolRound,
+		GuidanceReadSucceeded: statusMatch[1] == "completed",
 		// The agent was not blocked on this result, so no wait is timed.
 		CallOccurredAt:                at,
 		SelectorDigests:               shell.SelectorDigests,

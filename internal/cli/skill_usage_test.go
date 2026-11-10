@@ -63,6 +63,182 @@ func TestCodexSkillUsageReportsTelemetryOrderIncludingDelayedInvocation(t *testi
 	}
 }
 
+func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name                              string
+		wrapped, compound, failed, claude bool
+		outputMode                        string
+		loads, unconfirmed                int
+	}{
+		{name: "wrapped failure", wrapped: true, failed: true, unconfirmed: 1},
+		{name: "wrapped success is unproven", wrapped: true, unconfirmed: 1},
+		{name: "compound read", compound: true, unconfirmed: 1},
+		{name: "Claude compound read", compound: true, claude: true, unconfirmed: 1},
+		{name: "direct success", loads: 1},
+		{name: "direct failure", failed: true},
+		{name: "missing output", outputMode: "missing", unconfirmed: 1},
+		{name: "null output", outputMode: "null", unconfirmed: 1},
+		{name: "empty output", outputMode: "empty", unconfirmed: 1},
+		{name: "unknown status", outputMode: "unknown", unconfirmed: 1},
+		{name: "Claude missing content", claude: true, outputMode: "missing", unconfirmed: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, sources := t.TempDir(), t.TempDir()
+			at := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+			command := "cat .codex/skills/browser-qa/SKILL.md"
+			if tc.compound {
+				command += " || true"
+			}
+			arguments := string(mustJSON(t, map[string]any{"cmd": command}))
+			call := map[string]any{"type": "function_call", "name": "exec_command", "call_id": "s1", "arguments": arguments}
+			status := "Process exited with code 0"
+			if tc.failed {
+				status = "Process exited with code 1"
+			}
+			var output any = status
+			outputType := "function_call_output"
+			if tc.wrapped {
+				call = map[string]any{"type": "custom_tool_call", "name": "exec", "call_id": "s1", "input": "text(await tools.exec_command(" + arguments + "));"}
+				outputType = "custom_tool_call_output"
+				output = []any{map[string]any{"type": "input_text", "text": "Script completed\nWall time 0.1 seconds"}, map[string]any{"type": "input_text", "text": status}}
+			}
+			row := func(second int, kind string, payload map[string]any) any {
+				return map[string]any{"timestamp": at.Add(time.Duration(second) * time.Second).Format(time.RFC3339), "type": kind, "payload": payload}
+			}
+			providerName := "codex"
+			result := map[string]any{"type": outputType, "call_id": "s1", "output": output}
+			switch tc.outputMode {
+			case "missing":
+				delete(result, "output")
+			case "null":
+				result["output"] = nil
+			case "empty":
+				result["output"] = ""
+			case "unknown":
+				result["output"] = "No terminal process status available"
+			}
+			path := writeCodexSessionFixture(t, sources, "read-status", []any{
+				row(0, "session_meta", map[string]any{"cwd": root}), row(1, "response_item", call),
+				row(2, "response_item", result),
+				row(3, "event_msg", map[string]any{"type": "token_count", "info": map[string]any{"total_token_usage": map[string]any{"input_tokens": 80, "total_tokens": 80}}}),
+				row(4, "event_msg", map[string]any{"type": "task_complete"}),
+			})
+			if tc.claude {
+				providerName = "claude"
+				at = time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+				records := []any{claudeFixtureAssistant(1, "m1", "tool_use", nil, claudeFixtureToolUse("s1", "Bash", map[string]any{"command": command})), claudeFixtureToolResult(2, "s1", false, "ok"), claudeFixtureAssistant(3, "m2", "end_turn", map[string]any{"input_tokens": 80})}
+				if tc.outputMode == "missing" {
+					message := records[1].(map[string]any)["message"].(map[string]any)
+					delete(message["content"].([]any)[0].(map[string]any), "content")
+				}
+				for _, raw := range records {
+					raw.(map[string]any)["cwd"] = root
+				}
+				path = writeClaudeSessionFixture(t, sources, "claude-read-status", records)
+			}
+			provider, err := resolveSessionSource(providerName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+			direct, err := analyzeProviderSessions(provider, discovery, root, at, at.Add(time.Hour), "", ownershipCatalog{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			stats, err := store.refresh(t.Context(), provider.Name(), discovery, root, provider, ownershipCatalog{}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, root, at, at.Add(time.Hour), "", ownershipCatalog{}, stats)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, report := range []codexSessionInsightsReport{direct, indexed} {
+				got := report.Summary.SkillLoads["browser-qa"].UsageAfterLoad
+				wantTokens := int64(0)
+				if tc.loads == 1 {
+					wantTokens = 80
+				}
+				if got.SuccessfulLoads != tc.loads || got.UnconfirmedLoadAttempts != tc.unconfirmed || got.Tokens.TotalTokens != wantTokens {
+					t.Fatalf("load confirmation=%#v want loads=%d unconfirmed=%d tokens=%d", got, tc.loads, tc.unconfirmed, wantTokens)
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeYieldedSkillReadRequiresSuccessfulTerminalResult(t *testing.T) {
+	for _, completion := range []string{"poll completed", "notification completed", "poll failed", "cancelled", "still running"} {
+		t.Run(completion, func(t *testing.T) {
+			root, sources := t.TempDir(), t.TempDir()
+			records := []any{
+				claudeFixtureAssistant(1, "m1", "tool_use", nil, claudeFixtureToolUse("s1", "Bash", map[string]any{"command": "cat .claude/skills/planning/SKILL.md", "run_in_background": true})),
+				claudeFixtureBackgroundResult(2, "s1", "bgtask019", true),
+			}
+			if completion == "notification completed" {
+				records = append(records, claudeFixtureNotification(4, "bgtask019", "completed"))
+			} else {
+				tool, status := "TaskOutput", "completed"
+				if completion == "cancelled" {
+					tool = "TaskStop"
+				} else if completion == "poll failed" {
+					status = "failed"
+				} else if completion == "still running" {
+					status = "running"
+				}
+				records = append(records,
+					claudeFixtureAssistant(3, "m2", "tool_use", nil, claudeFixtureToolUse("p1", tool, map[string]any{"task_id": "bgtask019"})),
+					claudeFixtureToolResult(4, "p1", false, "<retrieval_status>success</retrieval_status>\n<status>"+status+"</status>\n<output>skill instructions</output>"))
+			}
+			records = append(records, claudeFixtureAssistant(5, "m3", "end_turn", map[string]any{"input_tokens": 80}))
+			for _, raw := range records {
+				raw.(map[string]any)["cwd"] = root
+			}
+			path := writeClaudeSessionFixture(t, sources, "yielded-read", records)
+			provider, err := resolveSessionSource("claude")
+			if err != nil {
+				t.Fatal(err)
+			}
+			discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+			at := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+			direct, err := analyzeProviderSessions(provider, discovery, root, at, at.Add(time.Hour), "", ownershipCatalog{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			stats, err := store.refresh(t.Context(), provider.Name(), discovery, root, provider, ownershipCatalog{}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, root, at, at.Add(time.Hour), "", ownershipCatalog{}, stats)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, report := range []codexSessionInsightsReport{direct, indexed} {
+				got := report.Summary.SkillLoads["planning"].UsageAfterLoad
+				wantLoads, wantTokens, wantUnconfirmed := 0, int64(0), 0
+				if completion == "poll completed" || completion == "notification completed" {
+					wantLoads, wantTokens = 1, 80
+				} else if completion == "still running" {
+					wantUnconfirmed = 1
+				}
+				if got.SuccessfulLoads != wantLoads || got.Tokens.TotalTokens != wantTokens || got.UnconfirmedLoadAttempts != wantUnconfirmed || got.CompletedTurns != wantLoads {
+					t.Fatalf("terminal skill usage=%#v want loads=%d tokens=%d unconfirmed=%d", got, wantLoads, wantTokens, wantUnconfirmed)
+				}
+			}
+		})
+	}
+}
+
 func TestClaudeSkillSeparatesInstalledLoadingEstimateFromMeasuredUsage(t *testing.T) {
 	root, sources, config := t.TempDir(), t.TempDir(), t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
@@ -97,7 +273,7 @@ func TestSkillUsageStartsAfterSuccessAndDoesNotMultiplyReloads(t *testing.T) {
 	state := newSkillUsageState()
 	call := func(round int, id string) { state.observe(skillUsageCall(round, id), normalizedTokenUsage{}) }
 	result := func(round int) {
-		state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: round}, normalizedTokenUsage{})
+		state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: round, GuidanceReadSucceeded: true}, normalizedTokenUsage{})
 	}
 	tokens := func(usage normalizedTokenUsage) {
 		state.observe(normalizedSessionEvent{Kind: sessionEventToken}, usage)
@@ -151,7 +327,7 @@ func TestSkillUsageRejectsUnsuccessfulLoadsAndStopsAtCompaction(t *testing.T) {
 		t.Fatalf("unsuccessful load activated a skill: %#v", state.metrics)
 	}
 	state.observe(skillUsageCall(2, "alpha"), normalizedTokenUsage{})
-	state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 2}, normalizedTokenUsage{})
+	state.observe(normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 2, GuidanceReadSucceeded: true}, normalizedTokenUsage{})
 	state.observe(normalizedSessionEvent{Kind: sessionEventToken}, normalizedTokenUsage{TotalTokens: 20})
 	state.observe(normalizedSessionEvent{Kind: sessionEventCompaction}, normalizedTokenUsage{})
 	state.observe(normalizedSessionEvent{Kind: sessionEventToken}, normalizedTokenUsage{TotalTokens: 300})
@@ -166,10 +342,10 @@ func TestSkillUsageInSessionIsLimitedToAnalysisWindow(t *testing.T) {
 	at := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
 	events := []normalizedSessionEvent{
 		skillUsageCall(1, "outside"),
-		{Kind: sessionEventToolOutput, ToolRound: 1},
+		{Kind: sessionEventToolOutput, ToolRound: 1, GuidanceReadSucceeded: true},
 		{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 100, UncachedInputTokens: 100, TotalTokens: 100}},
 		skillUsageCall(2, "inside"),
-		{Kind: sessionEventToolOutput, ToolRound: 2},
+		{Kind: sessionEventToolOutput, ToolRound: 2, GuidanceReadSucceeded: true},
 		{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 120, UncachedInputTokens: 120, OutputTokens: 5, TotalTokens: 125}},
 		{Kind: sessionEventComplete},
 	}
@@ -194,7 +370,7 @@ func TestSkillUsageCountsReviewEditCyclesAcrossTurns(t *testing.T) {
 	state := newSkillUsageState()
 	for _, event := range []normalizedSessionEvent{
 		skillUsageCall(1, "workflow"),
-		{Kind: sessionEventToolOutput, ToolRound: 1},
+		{Kind: sessionEventToolOutput, ToolRound: 1, GuidanceReadSucceeded: true},
 		{Kind: sessionEventToolCall, ToolRound: 2, OwnedOperations: []string{"workflow/review"}},
 		{Kind: sessionEventComplete},
 		{Kind: sessionEventToolCall, ToolRound: 3, ToolName: "apply_patch"},
@@ -264,7 +440,7 @@ func TestClaudeSkillUsageMatchesIndexedAnalysis(t *testing.T) {
 
 func TestSkillUsageDoesNotReintroduceExcludedTokenTelemetry(t *testing.T) {
 	at := time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
-	events := []normalizedSessionEvent{skillUsageCall(1, "workflow"), {Kind: sessionEventToolOutput, ToolRound: 1}}
+	events := []normalizedSessionEvent{skillUsageCall(1, "workflow"), {Kind: sessionEventToolOutput, ToolRound: 1, GuidanceReadSucceeded: true}}
 	for i := 1; i <= 2_001; i++ {
 		input := int64(i) * 1_000_000_000
 		events = append(events, normalizedSessionEvent{Kind: sessionEventToken,
@@ -299,15 +475,15 @@ func TestSkillUsageLifecycleMatchesIndexedAnalysis(t *testing.T) {
 					normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1, OperationContinues: true},
 					normalizedSessionEvent{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 100, UncachedInputTokens: 100, TotalTokens: 100}},
 					normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "wait", ToolRound: 1},
-					normalizedSessionEvent{Kind: sessionEventToolOutput, ToolName: "wait", ToolRound: 1},
+					normalizedSessionEvent{Kind: sessionEventToolOutput, ToolName: "wait", ToolRound: 1, GuidanceReadSucceeded: true},
 				)
 			} else if name == "duplicate snapshot after completion" {
 				wantTokens = 140
-				events = append(events, normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1})
+				events = append(events, normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1, GuidanceReadSucceeded: true})
 			} else {
 				wantTokens, wantCompleted, wantIncomplete = 100, 0, 1
 				events = append(events,
-					normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1},
+					normalizedSessionEvent{Kind: sessionEventToolOutput, ToolRound: 1, GuidanceReadSucceeded: true},
 					normalizedSessionEvent{Kind: sessionEventToken, Tokens: normalizedTokenUsage{InputTokens: 100, UncachedInputTokens: 100, TotalTokens: 100}},
 					normalizedSessionEvent{Kind: sessionEventToolCall, ToolName: "exec_command", WorkingDirectories: []string{outside}},
 					normalizedSessionEvent{Kind: sessionEventCompaction},

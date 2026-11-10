@@ -169,6 +169,17 @@ Use `muninn analyze --provider claude --repo . --since 7d --details` and inspect
   failed tool calls, review calls, review-to-edit cycles, and completed or
   incomplete turn counts after a successful load.
 
+`unconfirmedLoadAttempts` counts candidate reads whose success cannot be
+established from the outer result. Nested shell wrappers and compound commands
+do not activate observation windows, even when the wrapper itself succeeds.
+Native skill/file reads and standalone foreground shell readers can activate
+them after positive terminal-success evidence. Missing, null or unknown status
+and reads still pending at the observation boundary remain unconfirmed.
+Successful background completion is matched to the originating load.
+This conservative coverage avoids treating failed
+nested reads as loaded instructions; zero observed usage is not proof of zero
+cost when attempts are unconfirmed.
+
 Usage starts at the successful load result and stops at compaction or session
 end. `tokenBasis: telemetry-after-load-result` describes source event order,
 not request-level attribution. Invocation telemetry emitted before the result
