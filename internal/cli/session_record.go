@@ -54,15 +54,11 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	downstreamTrackers := map[string]*downstreamQualityTracker{}
 	var activeDiagnostic *diagnosticFailureEpisode
 	pendingContinuations := map[string]int{}
-	inRepositoryScope := inside
+	contextInRepositoryScope := inside
 	lastEventKind := ""
 	for _, event := range session.Events {
+		inRepositoryScope := repositoryScopeForEvent(event, session.CWD, workspaceRoot, &contextInRepositoryScope)
 		event = withoutContinuationCallAttribution(event)
-		if event.RepositoryScopeKnown {
-			inRepositoryScope = event.InRepositoryScope
-		} else if inside, explicit := eventRepositoryScope(event, session.CWD, workspaceRoot); explicit {
-			inRepositoryScope = inside
-		}
 		if event.Kind == sessionEventProviderCost {
 			// Cost is handled before turn and episode accounting so a
 			// provider's bookkeeping record never looks like task activity.
