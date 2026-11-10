@@ -6,6 +6,30 @@ report selection. See [Signal interpretation](signals.md) for the evidence
 model, [Comparing periods](comparison.md) for longitudinal analysis, and
 [Decretion experiments](decretion.md) for reversible subtraction tests.
 
+## Retained Workbench reviews
+
+When the repository has `.workbench/tasks`, compact and detailed analysis also
+include `workbenchReviews`. Muninn reads the latest retained result per task
+and reviewer at analysis time, using its recorded date and the analysis time
+window. Linked worktrees use their primary checkout's Workbench directory.
+This section is repository-wide: provider and session `--task` filters do not
+attribute these results to particular sessions or skills.
+
+The summary counts passes, failed reviews, runner errors, blocking and
+recommendation findings, escalations, total elapsed milliseconds and maximum
+review duration. `byRole` uses fixed `code`, `qa`, `adr`, `jira` and `other`
+buckets. Review text, identifiers, commands and paths are never reported or
+stored in the session index. Malformed, oversized, symlinked or unreadable
+results contribute to coverage counters rather than being treated as passes.
+
+Receipt match counts compare result trees with each task's retained check
+receipt. A match does not prove the current worktree is unchanged or that a
+task succeeded. Workbench overwrites earlier results, so
+`coverage: latest-per-task-reviewer` cannot show historical review rounds,
+total review cost or tokens. A previous-period comparison includes this
+snapshot only under `current`; it does not infer a historical baseline or
+change the quality verdict. Session-observed review/edit loops remain separate.
+
 ## Select a cohort
 
 Choose a horizon that matches the work being evaluated:
