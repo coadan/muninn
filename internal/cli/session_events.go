@@ -10,6 +10,7 @@ import (
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var successfulReadExitCodePattern = regexp.MustCompile(`(?im)^(?:process exited with code|exit code:)\s*0[ \t]*$`)
+var readOutputBodyPattern = regexp.MustCompile(`(?im)^(?:final )?output:[ \t]*\r?$`)
 
 func codexGuidanceReadSucceeded(raw json.RawMessage, toolName string) bool {
 	if toolName != "exec_command" && toolName != "write_stdin" && toolName != "wait" {
@@ -27,7 +28,10 @@ func codexGuidanceReadSucceeded(raw json.RawMessage, toolName string) bool {
 	if json.Unmarshal(raw, &statusText) != nil {
 		return false
 	}
-	header, _, _ := strings.Cut(strings.TrimSpace(statusText), "\nOutput:")
+	header := strings.TrimSpace(statusText)
+	if boundary := readOutputBodyPattern.FindStringIndex(header); boundary != nil {
+		header = header[:boundary[0]]
+	}
 	if json.Unmarshal([]byte(header), &result) == nil {
 		return result.ExitCode != nil && *result.ExitCode == 0
 	}

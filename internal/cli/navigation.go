@@ -72,12 +72,17 @@ func guidanceReadStatusUnconfirmed(toolName, arguments, input string) bool {
 	if len(commands) != 1 {
 		return true
 	}
+	// Reject these even when quoted: reduced coverage is cheaper and safer
+	// than interpreting escapes, expansions and shell comments here.
+	if strings.ContainsAny(commands[0], "\\\n\r#$`{}*?[]~") {
+		return true
+	}
 	tokens := standaloneForegroundCommandTokens(commands[0])
 	if len(tokens) < 2 || filepath.Base(tokens[0]) != "cat" {
 		return true
 	}
 	for _, operand := range tokens[1:] {
-		if strings.HasPrefix(operand, "-") || strings.Contains(operand, "$") {
+		if strings.HasPrefix(operand, "-") {
 			return true
 		}
 	}

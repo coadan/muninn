@@ -92,6 +92,13 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 		{name: "cat help does not read", commandOverride: "cat --help .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
 		{name: "expanded arguments unproven", commandOverride: "cat $ARGS .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
 		{name: "reader options unproven", commandOverride: "head -n 0 .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
+		{name: "continued comment", commandOverride: "cat /dev/null \\\n# .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
+		{name: "Claude continued comment", commandOverride: "cat /dev/null \\\n# .codex/skills/browser-qa/SKILL.md", claude: true, unconfirmed: 1},
+		{name: "brace options unproven", commandOverride: "cat {--help,} .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
+		{name: "glob operands unproven", commandOverride: "cat * .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
+		{name: "tilde operands unproven", commandOverride: "cat ~/extra .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
+		{name: "stdout without status header", outputMode: "stdout only", unconfirmed: 1},
+		{name: "final stdout without status header", outputMode: "final stdout only", unconfirmed: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, sources := t.TempDir(), t.TempDir()
@@ -141,6 +148,10 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 				result["output"] = `{"exit_code":null,"output":"exit code: 0"}`
 			case "structured success":
 				result["output"] = map[string]any{"exit_code": 0, "output": "skill instructions"}
+			case "stdout only":
+				result["output"] = "Output:\nexit code: 0"
+			case "final stdout only":
+				result["output"] = "Final output:\nexit code: 0"
 			}
 			path := writeCodexSessionFixture(t, sources, "read-status", []any{
 				row(0, "session_meta", map[string]any{"cwd": root}), row(1, "response_item", call),

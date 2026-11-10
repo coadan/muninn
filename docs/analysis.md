@@ -176,6 +176,8 @@ Native skill/file reads and standalone `cat` calls with literal, non-option
 operands can activate
 them after positive terminal-success evidence. Missing, null or unknown status
 and reads still pending at the observation boundary remain unconfirmed.
+Shell escapes, comments and expansion characters remain unconfirmed even when
+quoted; recovering those reads would require more shell interpretation.
 Successful background completion is matched to the originating load.
 This conservative coverage avoids treating failed
 nested reads as loaded instructions; zero observed usage is not proof of zero
