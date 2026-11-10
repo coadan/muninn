@@ -163,6 +163,74 @@ func TestClaudeReplayedLaunchDoesNotReopenOrDuplicateBackgroundTasks(t *testing.
 	}
 }
 
+func TestClaudeBackgroundCompletionDoesNotMoveFollowingActivityAcrossRepositories(t *testing.T) {
+	for _, surface := range []string{"notification", "TaskOutput", "TaskStop"} {
+		t.Run(surface, func(t *testing.T) {
+			root, other, sources := t.TempDir(), t.TempDir(), t.TempDir()
+			records := []any{
+				claudeFixtureAssistant(1, "m1", "tool_use", nil, claudeFixtureToolUse("b1", "Bash", map[string]any{"command": "go test ./...", "run_in_background": true})),
+				claudeFixtureBackgroundResult(2, "b1", "bgtask018", true),
+				claudeFixtureAssistant(3, "m2", "tool_use", nil, claudeFixtureToolUse("c1", "Bash", map[string]any{"command": "printf ready"})),
+				claudeFixtureToolResult(4, "c1", false, "ready"),
+			}
+			if surface == "notification" {
+				records = append(records, claudeFixtureNotification(5, "bgtask018", "completed"))
+			} else {
+				records = append(records, claudeFixtureAssistant(5, "m-poll", "tool_use", nil, claudeFixtureToolUse("p1", surface, map[string]any{"task_id": "bgtask018"})), claudeFixtureToolResult(6, "p1", false, "<retrieval_status>success</retrieval_status>\n<status>completed</status>\n<output>done</output>"))
+			}
+			records = append(records,
+				claudeFixtureAssistant(7, "m3", "tool_use", nil, claudeFixtureToolUse("s1", "Skill", map[string]any{"skill": "planning"})),
+				claudeFixtureToolResult(8, "s1", false, "loaded"),
+				claudeFixtureAssistant(9, "m4", "tool_use", nil, claudeFixtureToolUse("r1", "Read", map[string]any{"file_path": filepath.Join(other, "README.md")})),
+				claudeFixtureToolResult(10, "r1", false, "read"),
+				claudeFixtureAssistant(11, "m5", "end_turn", map[string]any{"input_tokens": 80}))
+			for i, raw := range records {
+				cwd := other
+				if i < 2 {
+					cwd = root
+				}
+				raw.(map[string]any)["cwd"] = cwd
+			}
+			path := writeClaudeSessionFixture(t, sources, "completion-scope", records)
+			provider, err := resolveSessionSource("claude")
+			if err != nil {
+				t.Fatal(err)
+			}
+			discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+			store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			at := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+			for _, repository := range []string{root, other} {
+				direct, err := analyzeProviderSessions(provider, discovery, repository, at, at.Add(time.Hour), "", ownershipCatalog{}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stats, err := store.refresh(t.Context(), provider.Name(), discovery, repository, provider, ownershipCatalog{}, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, repository, at, at.Add(time.Hour), "", ownershipCatalog{}, stats)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantLoads, wantTokens := 0, int64(0)
+				if repository == other {
+					wantLoads = 1
+					wantTokens = 80
+				}
+				for _, report := range []codexSessionInsightsReport{direct, indexed} {
+					if report.Summary.SkillLoads["planning"].Loads != wantLoads || report.Summary.ToolMetricsByName["Read"].Calls != wantLoads || report.Summary.Tokens.TotalTokens != wantTokens {
+						t.Fatalf("loads=%#v reads=%#v tokens=%#v want loads/reads=%d tokens=%d", report.Summary.SkillLoads, report.Summary.ToolMetricsByName["Read"], report.Summary.Tokens, wantLoads, wantTokens)
+					}
+				}
+			}
+		})
+	}
+}
+
 func claudeBackgroundRecord(t *testing.T, records []any) codexSessionRecord {
 	t.Helper()
 	path := writeClaudeSessionFixture(t, t.TempDir(), "outcomes", records)
