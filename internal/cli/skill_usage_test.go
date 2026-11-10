@@ -13,6 +13,36 @@ func skillUsageCall(round int, id string) normalizedSessionEvent {
 		GuidanceArtifacts: []normalizedGuidanceArtifact{{Kind: "skill", ID: id}}}
 }
 
+func TestClaudeSkillSeparatesInstalledLoadingEstimateFromMeasuredUsage(t *testing.T) {
+	root, sources, config := t.TempDir(), t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	writeClaudeSkill(t, filepath.Join(config, "skills", "planning"), 6_000)
+	records := []any{
+		claudeFixtureAssistant(1, "m1", "tool_use", map[string]any{"input_tokens": 1, "output_tokens": 1}, claudeFixtureToolUse("s1", "Skill", map[string]any{"skill": "planning"})),
+		claudeFixtureToolResult(2, "s1", false, "loaded"),
+		claudeFixtureAssistant(3, "m2", "end_turn", map[string]any{"input_tokens": 200, "output_tokens": 10}),
+	}
+	for _, raw := range records {
+		raw.(map[string]any)["cwd"] = root
+	}
+	path := writeClaudeSessionFixture(t, sources, "skill-cost", records)
+	provider, err := resolveSessionSource("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC)
+	report, err := analyzeProviderSessions(provider, sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}, root, at.Add(-time.Hour), at, "", ownershipCatalog{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshReportGuidanceSizes(&report, provider, root)
+	got := report.Summary.SkillLoads["planning"]
+	// 6000 bytes / 4 is the file estimate; 200 input + 10 output is recorded work.
+	if got.EstimatedTokens != 1500 || got.EstimatedLoadedTokens != 1500 || got.UsageAfterLoad.Tokens.TotalTokens != 210 || got.UsageAfterLoad.SuccessfulLoads != 1 || got.UsageAfterLoad.CompletedTurns != 1 {
+		t.Fatalf("loading estimate and measured work=%#v", got)
+	}
+}
+
 func TestSkillUsageStartsAfterSuccessAndDoesNotMultiplyReloads(t *testing.T) {
 	state := newSkillUsageState()
 	call := func(round int, id string) { state.observe(skillUsageCall(round, id), normalizedTokenUsage{}) }

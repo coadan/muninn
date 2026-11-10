@@ -1,0 +1,141 @@
+package cli
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestClaudeLatePhysicalResultKeepsItsRepositoryInDirectAndIndexedAnalysis(t *testing.T) {
+	root, other, sources := t.TempDir(), t.TempDir(), t.TempDir()
+	usage := map[string]any{"input_tokens": 1, "output_tokens": 1}
+	records := []any{
+		claudeFixtureAssistant(1, "m1", "tool_use", usage, claudeFixtureToolUse("b1", "Bash", map[string]any{"command": "go test ./...", "run_in_background": true})),
+		claudeFixtureBackgroundResult(2, "b1", "bgtask015", true),
+		claudeFixtureAssistant(3, "m2", "tool_use", usage, claudeFixtureToolUse("p1", "TaskOutput", map[string]any{"task_id": "bgtask015"})),
+		claudeFixtureNotification(4, "bgtask015", "completed"),
+		claudeFixtureAssistant(5, "m3", "tool_use", usage, claudeFixtureToolUse("a1", "Bash", map[string]any{"command": "printf ready"})),
+		claudeFixtureToolResult(6, "a1", false, "ready"),
+		claudeFixtureToolResult(7, "p1", true, "unexpected output"),
+	}
+	for i, raw := range records {
+		cwd := root
+		if i >= 4 {
+			cwd = other
+		}
+		raw.(map[string]any)["cwd"] = cwd
+	}
+	path := writeClaudeSessionFixture(t, sources, "late-scope", records)
+	provider, err := resolveSessionSource("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, repository := range []string{root, other} {
+		at := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+		direct, err := analyzeProviderSessions(provider, discovery, repository, at, at.Add(time.Hour), "", ownershipCatalog{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stats, err := store.refresh(t.Context(), provider.Name(), discovery, repository, provider, ownershipCatalog{}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, repository, at, at.Add(time.Hour), "", ownershipCatalog{}, stats)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 0
+		if repository == root {
+			want = 1
+		}
+		for _, report := range []codexSessionInsightsReport{direct, indexed} {
+			if report.Summary.FailedToolCalls != want {
+				t.Fatalf("repository=%s failures=%d want=%d", repository, report.Summary.FailedToolCalls, want)
+			}
+		}
+	}
+}
+
+func claudeBackgroundRecord(t *testing.T, records []any) codexSessionRecord {
+	t.Helper()
+	path := writeClaudeSessionFixture(t, t.TempDir(), "outcomes", records)
+	session, err := parseClaudeNormalizedSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+	record, err := sessionRecordFromNormalized(session, "/workspace/app", at, at.Add(time.Hour), ownershipCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func TestClaudeStoppedBackgroundCommandIsNeverSuccessfulDeliveryOrVerification(t *testing.T) {
+	usage := map[string]any{"input_tokens": 1, "output_tokens": 1}
+	for _, command := range []string{"go test ./...", "git push"} {
+		for _, surface := range []string{"TaskStop", "TaskOutput", "notification"} {
+			t.Run(command+"/"+surface, func(t *testing.T) {
+				records := []any{
+					claudeFixtureAssistant(1, "m1", "tool_use", usage, claudeFixtureToolUse("e1", "Edit", map[string]any{"file_path": "/workspace/app/main.go"})),
+					claudeFixtureToolResult(2, "e1", false, "ok"),
+					claudeFixtureAssistant(3, "m2", "tool_use", usage, claudeFixtureToolUse("b1", "Bash", map[string]any{"command": command, "run_in_background": true})),
+					claudeFixtureBackgroundResult(4, "b1", "bgtask011", true),
+				}
+				if surface == "notification" {
+					records = append(records, claudeFixtureNotification(6, "bgtask011", "stopped"))
+				} else {
+					output := "stopped"
+					if surface == "TaskOutput" {
+						output = "<retrieval_status>success</retrieval_status>\n<status>stopped</status>\n<output>SECRET</output>"
+					}
+					records = append(records, claudeFixtureAssistant(5, "m3", "tool_use", usage, claudeFixtureToolUse("s1", surface, map[string]any{"task_id": "bgtask011"})), claudeFixtureToolResult(6, "s1", false, output))
+					if surface == "TaskStop" {
+						records = append(records, claudeFixtureToolResult(6, "s1", false, output))
+					}
+				}
+				if command == "go test ./..." {
+					records = append(records, claudeFixtureAssistant(7, "m4", "tool_use", usage, claudeFixtureToolUse("p1", "Bash", map[string]any{"command": "gh pr create --fill"})), claudeFixtureToolResult(8, "p1", false, claudeFixturePRURL), claudeFixturePRLink(8, claudeFixturePRURL))
+				}
+				records = append(records, claudeFixtureAssistant(9, "m5", "end_turn", usage))
+				record := claudeBackgroundRecord(t, records)
+				wantDeliveries := 0
+				if command == "go test ./..." {
+					wantDeliveries = 1
+				}
+				if record.DeliveryRework.Deliveries != wantDeliveries || record.DeliveryRework.DeliveriesWithPreTests != 0 || record.FailureReasons["interrupted process"] != 1 {
+					t.Fatalf("stopped command outcomes: deliveries=%#v failures=%#v", record.DeliveryRework, record.FailureReasons)
+				}
+			})
+		}
+	}
+}
+
+func TestClaudeOutstandingResultsDoNotResolveAnotherBackgroundTask(t *testing.T) {
+	usage := map[string]any{"input_tokens": 1, "output_tokens": 1}
+	for _, surface := range []string{"TaskOutput", "TaskStop"} {
+		t.Run(surface, func(t *testing.T) {
+			records := []any{
+				claudeFixtureAssistant(1, "m1", "tool_use", usage, claudeFixtureToolUse("b1", "Bash", map[string]any{"command": "go test ./...", "run_in_background": true})),
+				claudeFixtureBackgroundResult(2, "b1", "bgtask012", true),
+				claudeFixtureAssistant(3, "m2", "tool_use", usage, claudeFixtureToolUse("b2", "Bash", map[string]any{"command": "go test ./other", "run_in_background": true})),
+				claudeFixtureBackgroundResult(4, "b2", "bgtask013", true),
+				claudeFixtureAssistant(5, "m3", "tool_use", usage, claudeFixtureToolUse("p1", surface, map[string]any{"task_id": "bgtask012"}), claudeFixtureToolUse("p2", surface, map[string]any{"task_id": "bgtask012"})),
+			}
+			if surface == "TaskOutput" {
+				records = append(records, claudeFixtureNotification(6, "bgtask012", "completed"))
+			}
+			records = append(records, claudeFixtureToolResult(7, "p1", false, "<retrieval_status>success</retrieval_status>\n<status>completed</status>\n<output>ok</output>"), claudeFixtureToolResult(8, "p2", false, "stopped"), claudeFixtureAssistant(9, "m4", "end_turn", usage))
+			record := claudeBackgroundRecord(t, records)
+			if record.AbandonedContinuations["tests"] != 1 {
+				t.Fatalf("unresolved second task lost: %#v", record.AbandonedContinuations)
+			}
+		})
+	}
+}

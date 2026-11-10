@@ -41,7 +41,9 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
   `internal/cli/<provider>_metadata.go`, and
   `internal/cli/<provider>_normalizer.go`: provider-owned discovery, optional
   enrichment, wire types, and normalization; compact formats may keep these
-  together.
+  together. Other `internal/cli/<provider>_*.go` files hold that provider's
+  mapping of a concept onto shared vocabulary, such as Claude background tasks,
+  pull-request delivery, and skill sizes.
 - `internal/cli/ownership_config.go`, `internal/cli/ownership.go`,
   `internal/cli/operation_matching.go`, and
   `internal/cli/command_invocations.go`: owned-tool policy, catalog
