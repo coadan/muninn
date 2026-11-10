@@ -172,7 +172,8 @@ Use `muninn analyze --provider claude --repo . --since 7d --details` and inspect
 `unconfirmedLoadAttempts` counts candidate reads whose success cannot be
 established from the outer result. Nested shell wrappers and compound commands
 do not activate observation windows, even when the wrapper itself succeeds.
-Native skill/file reads and standalone foreground shell readers can activate
+Native skill/file reads and standalone `cat` calls with literal, non-option
+operands can activate
 them after positive terminal-success evidence. Missing, null or unknown status
 and reads still pending at the observation boundary remain unconfirmed.
 Successful background completion is matched to the originating load.

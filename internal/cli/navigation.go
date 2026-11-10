@@ -58,8 +58,8 @@ func codexGuidanceArtifacts(candidates []string, workingDirectories ...string) [
 	return artifacts
 }
 
-// ponytail: nested or compound shell reads stay unconfirmed until adapters can
-// provide per-operation results. Outer success cannot prove an inner read.
+// ponytail: only literal cat operands can be confirmed from shell success.
+// Other readers/options need per-read evidence, not a larger shell interpreter.
 func guidanceReadStatusUnconfirmed(toolName, arguments, input string) bool {
 	name := strings.ToLower(strings.TrimSpace(toolName))
 	if name != "exec" && name != "exec_command" {
@@ -73,15 +73,15 @@ func guidanceReadStatusUnconfirmed(toolName, arguments, input string) bool {
 		return true
 	}
 	tokens := standaloneForegroundCommandTokens(commands[0])
-	if len(tokens) == 0 {
+	if len(tokens) < 2 || filepath.Base(tokens[0]) != "cat" {
 		return true
 	}
-	switch filepath.Base(tokens[0]) {
-	case "cat", "sed", "head", "tail", "bat", "less", "more":
-		return false
-	default:
-		return true
+	for _, operand := range tokens[1:] {
+		if strings.HasPrefix(operand, "-") || strings.Contains(operand, "$") {
+			return true
+		}
 	}
+	return false
 }
 
 func guidanceArtifactEstimatedTokens(candidate string, workingDirectories []string) int64 {

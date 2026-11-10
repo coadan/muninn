@@ -67,7 +67,9 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 	for _, tc := range []struct {
 		name                              string
 		wrapped, compound, failed, claude bool
+		commented                         bool
 		outputMode                        string
+		commandOverride                   string
 		loads, unconfirmed                int
 	}{
 		{name: "wrapped failure", wrapped: true, failed: true, unconfirmed: 1},
@@ -81,11 +83,26 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 		{name: "empty output", outputMode: "empty", unconfirmed: 1},
 		{name: "unknown status", outputMode: "unknown", unconfirmed: 1},
 		{name: "Claude missing content", claude: true, outputMode: "missing", unconfirmed: 1},
+		{name: "structured missing exit", outputMode: "structured missing", unconfirmed: 1},
+		{name: "structured null exit", outputMode: "structured null", unconfirmed: 1},
+		{name: "encoded structured null exit", outputMode: "encoded structured null", unconfirmed: 1},
+		{name: "structured success", outputMode: "structured success", loads: 1},
+		{name: "commented skill", commented: true, unconfirmed: 1},
+		{name: "Claude commented skill", commented: true, claude: true, unconfirmed: 1},
+		{name: "cat help does not read", commandOverride: "cat --help .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
+		{name: "expanded arguments unproven", commandOverride: "cat $ARGS .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
+		{name: "reader options unproven", commandOverride: "head -n 0 .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, sources := t.TempDir(), t.TempDir()
 			at := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
 			command := "cat .codex/skills/browser-qa/SKILL.md"
+			if tc.commandOverride != "" {
+				command = tc.commandOverride
+			}
+			if tc.commented {
+				command = "cat /dev/null # .codex/skills/browser-qa/SKILL.md"
+			}
 			if tc.compound {
 				command += " || true"
 			}
@@ -116,6 +133,14 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 				result["output"] = ""
 			case "unknown":
 				result["output"] = "No terminal process status available"
+			case "structured missing":
+				result["output"] = map[string]any{"output": "exit code: 0"}
+			case "structured null":
+				result["output"] = map[string]any{"exit_code": nil, "output": "exit code: 0"}
+			case "encoded structured null":
+				result["output"] = `{"exit_code":null,"output":"exit code: 0"}`
+			case "structured success":
+				result["output"] = map[string]any{"exit_code": 0, "output": "skill instructions"}
 			}
 			path := writeCodexSessionFixture(t, sources, "read-status", []any{
 				row(0, "session_meta", map[string]any{"cwd": root}), row(1, "response_item", call),

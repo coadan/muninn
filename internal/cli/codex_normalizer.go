@@ -276,7 +276,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					ToolRound:                     descriptor.ToolRound,
 					CallOccurredAt:                descriptor.OccurredAt,
 					Failed:                        failed,
-					GuidanceReadSucceeded:         !failed && codexGuidanceReadSucceeded(payload.Output, statusText, descriptor.Name),
+					GuidanceReadSucceeded:         !failed && codexGuidanceReadSucceeded(payload.Output, descriptor.Name),
 					Truncated:                     codexToolOutputTruncated(text),
 					OutputBytes:                   byteCount,
 					FailureReason:                 reason,

@@ -11,19 +11,25 @@ import (
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
 var successfulReadExitCodePattern = regexp.MustCompile(`(?im)^(?:process exited with code|exit code:)\s*0[ \t]*$`)
 
-func codexGuidanceReadSucceeded(raw json.RawMessage, statusText, toolName string) bool {
+func codexGuidanceReadSucceeded(raw json.RawMessage, toolName string) bool {
 	if toolName != "exec_command" && toolName != "write_stdin" && toolName != "wait" {
 		return false
 	}
 	var result struct {
 		ExitCode *int `json:"exit_code"`
 	}
-	if json.Unmarshal(raw, &result) == nil && result.ExitCode != nil {
-		return *result.ExitCode == 0
+	if json.Unmarshal(raw, &result) == nil {
+		return result.ExitCode != nil && *result.ExitCode == 0
+	}
+	// Only a textual provider envelope has a status header. A structured
+	// result's stdout cannot supply a missing exit_code.
+	var statusText string
+	if json.Unmarshal(raw, &statusText) != nil {
+		return false
 	}
 	header, _, _ := strings.Cut(strings.TrimSpace(statusText), "\nOutput:")
-	if json.Unmarshal([]byte(header), &result) == nil && result.ExitCode != nil {
-		return *result.ExitCode == 0
+	if json.Unmarshal([]byte(header), &result) == nil {
+		return result.ExitCode != nil && *result.ExitCode == 0
 	}
 	return successfulReadExitCodePattern.MatchString(header)
 }

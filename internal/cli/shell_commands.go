@@ -324,6 +324,9 @@ func standaloneForegroundCommandTokens(command string) []string {
 		if strings.ContainsRune(";&|\n\r<>()", rune(current)) {
 			return nil
 		}
+		if current == '#' && (i == 0 || command[i-1] == ' ' || command[i-1] == '\t') {
+			return nil
+		}
 		if current == '\'' || current == '"' {
 			quote = current
 		}
