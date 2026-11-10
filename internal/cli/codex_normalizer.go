@@ -34,7 +34,11 @@ type codexRolloutPayload struct {
 	Arguments      string `json:"arguments"`
 	Input          string `json:"input"`
 	Info           struct {
-		TotalTokenUsage struct {
+		LastTokenUsage *struct {
+			InputTokens int64 `json:"input_tokens"`
+		} `json:"last_token_usage"`
+		ModelContextWindow int64 `json:"model_context_window"`
+		TotalTokenUsage    struct {
 			InputTokens       int64 `json:"input_tokens"`
 			CachedInputTokens int64 `json:"cached_input_tokens"`
 			OutputTokens      int64 `json:"output_tokens"`
@@ -87,6 +91,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 	toolRound := 0
 	sequence := 0
 	var lastCompaction time.Time
+	var lastContextInputTotal int64
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	for scanner.Scan() {
@@ -135,11 +140,21 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					usage.UncachedInputTokens = 0
 				}
 				sequence++
+				contextTokens, contextWindow := int64(0), int64(0)
+				if last := payload.Info.LastTokenUsage; last != nil && last.InputTokens > 0 &&
+					usage.InputTokens > 0 && usage.InputTokens != lastContextInputTotal {
+					// Token-count notifications can repeat unchanged usage. Only
+					// advancing request input contributes a context observation.
+					contextTokens = last.InputTokens
+					contextWindow = max(int64(0), payload.Info.ModelContextWindow)
+					lastContextInputTotal = usage.InputTokens
+				}
 				session.Events = append(session.Events, normalizedSessionEvent{
-					Sequence:   sequence,
-					OccurredAt: timestamp,
-					Kind:       sessionEventToken,
-					Tokens:     usage,
+					Sequence:      sequence,
+					OccurredAt:    timestamp,
+					Kind:          sessionEventToken,
+					Tokens:        usage,
+					ContextTokens: contextTokens, ContextWindowTokens: contextWindow,
 				})
 			}
 		case "response_item":

@@ -108,6 +108,10 @@ The default output is a compact JSON report. Add `--details` for the full
 analytical maps. `muninn failures <tool-or-operation>` provides a bounded,
 separately attributed timeline when a configured operation needs diagnosis.
 
+Reports also include a [context profile](docs/analysis.md#context-profile):
+first-observed input size, growth between compactions, and observed work after
+compaction, with coverage counts wherever session data is incomplete.
+
 ## Use evidence to improve the harness
 
 Muninn is most useful as a loop, not a dashboard:

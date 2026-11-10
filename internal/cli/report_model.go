@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 117
+const codexSessionInsightsSchemaVersion = 118
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -223,6 +223,7 @@ type codexSessionInsightsReport struct {
 	Profiles         modelEffortAnalysis            `json:"profiles"`
 	Delegation       delegationAnalysis             `json:"delegation"`
 	Diagnostics      diagnosticFailureAnalysis      `json:"diagnostics"`
+	ContextProfile   contextProfileAnalysis         `json:"contextProfile"`
 	taskEpisodes     []codexTaskEpisode
 	sessionRecords   []codexSessionRecord
 	operationTasks   map[string]map[string]codexOwnedOperationMetrics
@@ -253,6 +254,7 @@ type sessionAnalysisScope struct {
 }
 
 type codexSessionRecord struct {
+	ContextProfile               sessionContextProfile
 	SourcePath                   string
 	CWD                          string
 	Task                         string

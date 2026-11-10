@@ -32,15 +32,19 @@ var claudeToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,12
 var claudePreToolHookPattern = regexp.MustCompile(`^PreToolUse:[A-Za-z0-9_.:-]+ hook error`)
 
 type claudeRecord struct {
-	Type          string `json:"type"`
-	Subtype       string `json:"subtype"`
-	Timestamp     string `json:"timestamp"`
-	SessionID     string `json:"sessionId"`
-	AgentID       string `json:"agentId"`
-	CWD           string `json:"cwd"`
-	Effort        string `json:"effort"`
-	PerTurnEffort string `json:"perTurnEffort"`
-	Message       struct {
+	Type            string `json:"type"`
+	Subtype         string `json:"subtype"`
+	Timestamp       string `json:"timestamp"`
+	SessionID       string `json:"sessionId"`
+	AgentID         string `json:"agentId"`
+	CWD             string `json:"cwd"`
+	Effort          string `json:"effort"`
+	PerTurnEffort   string `json:"perTurnEffort"`
+	CompactMetadata struct {
+		Trigger   string `json:"trigger"`
+		PreTokens int64  `json:"preTokens"`
+	} `json:"compactMetadata"`
+	Message struct {
 		ID         string          `json:"id"`
 		Model      string          `json:"model"`
 		StopReason string          `json:"stop_reason"`
@@ -157,6 +161,7 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 	session := normalizedSession{Provider: "claude", SourcePath: path}
 	calls := map[string]claudeCall{}
 	usageByMessage := map[string]claudeUsage{}
+	contextByMessage := map[string]int{}
 	completed := map[string]bool{}
 	seenMessages := map[string]bool{}
 	models := map[string]int{}
@@ -213,6 +218,8 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 			sequence++
 			session.Events = append(session.Events, normalizedSessionEvent{
 				Sequence: sequence, OccurredAt: timestamp, Kind: sessionEventCompaction,
+				ContextTokens:     max(int64(0), record.CompactMetadata.PreTokens),
+				CompactionTrigger: normalizedCompactionTrigger(record.CompactMetadata.Trigger),
 			})
 		case record.Type == "assistant":
 			messageID := record.Message.ID
@@ -253,9 +260,21 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 					total.CacheReadTokens += usage.CacheReadTokens - previous.CacheReadTokens
 					total.OutputTokens += usage.OutputTokens - previous.OutputTokens
 					sequence++
+					contextTokens := int64(0)
+					input := usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
+					if input > 0 && record.Message.Model != "<synthetic>" {
+						if index, ok := contextByMessage[messageID]; ok {
+							// Streaming corrections update the original observation;
+							// output-only updates must not create more requests.
+							session.Events[index].ContextTokens = input
+						} else {
+							contextByMessage[messageID] = len(session.Events)
+							contextTokens = input
+						}
+					}
 					session.Events = append(session.Events, normalizedSessionEvent{
 						Sequence: sequence, OccurredAt: timestamp, Kind: sessionEventToken,
-						Tokens: claudeTokenUsage(total),
+						Tokens: claudeTokenUsage(total), ContextTokens: contextTokens,
 					})
 				}
 			}

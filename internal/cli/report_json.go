@@ -62,6 +62,7 @@ type compactSessionInsightsReport struct {
 	Profiles           modelEffortAnalysis            `json:"profiles"`
 	Delegation         delegationAnalysis             `json:"delegation"`
 	Diagnostics        compactDiagnosticSummary       `json:"diagnostics"`
+	ContextProfile     contextProfileAnalysis         `json:"contextProfile"`
 	TotalInterventions int                            `json:"totalInterventions"`
 	Interventions      []sessionIntervention          `json:"interventions"`
 	FocusEvidence      *discoveryFocusEvidence        `json:"focusEvidence,omitempty"`
@@ -195,8 +196,9 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 			Compactions:              outcomes.Compactions,
 			TopDecileFreshTokenShare: outcomes.TopDecileFreshTokenShare,
 		},
-		Profiles:   report.Profiles,
-		Delegation: report.Delegation,
+		Profiles:       report.Profiles,
+		ContextProfile: report.ContextProfile,
+		Delegation:     report.Delegation,
 		Diagnostics: compactDiagnosticSummary{
 			Available:           report.Diagnostics.Available,
 			FailureFingerprints: len(report.Diagnostics.Failures),

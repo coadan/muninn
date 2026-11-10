@@ -28,6 +28,49 @@ func TestCodexRolloutLineNeededSkipsConversationContent(t *testing.T) {
 	}
 }
 
+func TestCodexContextUsesDistinctLastUsageWithoutCumulativeFallback(t *testing.T) {
+	count := func(second int, total int64, last any) any {
+		return map[string]any{"type": "event_msg", "timestamp": claudeFixtureTime(second),
+			"payload": map[string]any{"type": "token_count", "info": map[string]any{
+				"total_token_usage": map[string]any{"input_tokens": total, "total_tokens": total},
+				"last_token_usage":  last, "model_context_window": 2000,
+			}}}
+	}
+	last := func(input int64) any { return map[string]any{"input_tokens": input, "cached_input_tokens": 50} }
+	path := writeCodexSessionFixture(t, t.TempDir(), "context", []any{
+		count(0, 1000, last(100)),
+		count(1, 1000, last(100)),
+		count(2, 1250, last(250)),
+		count(3, 1300, nil), // Legacy cumulative telemetry is not context.
+		count(4, 1400, last(100)),
+		map[string]any{"timestamp": claudeFixtureTime(5), "type": "compacted"},
+		count(6, 1400, last(100)), // A replay after compaction is not a new request.
+		count(7, 1600, last(200)),
+	})
+	session, err := parseCodexNormalizedSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var samples []int64
+	for _, event := range session.Events {
+		if event.Kind == sessionEventToken && event.ContextTokens > 0 {
+			samples = append(samples, event.ContextTokens)
+			if event.ContextWindowTokens != 2000 {
+				t.Fatalf("missing reported window: %+v", event)
+			}
+		}
+	}
+	want := []int64{100, 250, 100, 200}
+	if len(samples) != len(want) {
+		t.Fatalf("samples=%v want=%v", samples, want)
+	}
+	for i := range want {
+		if samples[i] != want[i] {
+			t.Fatalf("samples=%v want=%v", samples, want)
+		}
+	}
+}
+
 func TestParseCodexSessionRetainsOnlyValidatedSkillIdentity(t *testing.T) {
 	skillPath := filepath.Join(t.TempDir(), "evidence-first-planning", "SKILL.md")
 	writeInstructionFixture(t, skillPath, strings.Repeat("x", largeGuidanceArtifactBytes))

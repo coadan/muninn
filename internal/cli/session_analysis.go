@@ -103,6 +103,7 @@ func finishSessionInsightsReport(report *codexSessionInsightsReport, taskMap map
 	report.Profiles = analyzeModelEffortProfiles(report.sessionRecords)
 	report.Delegation = analyzeDelegation(report.sessionRecords)
 	report.Diagnostics = analyzeDiagnosticFailures(report.sessionRecords)
+	report.ContextProfile = analyzeContextProfiles(report.sessionRecords)
 }
 
 func finishGuidanceLoadMetrics(metricsByID map[string]guidanceLoadMetrics) {

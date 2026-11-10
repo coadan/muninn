@@ -131,6 +131,14 @@ shows up as a number. Session-level fields (model, effort, agent kind, lineage
 keys, spawn status, and the drift counts) are stored with the session in the
 SQLite index.
 Completion and compaction events are explicit when the source exposes them.
+Token events may also carry `ContextTokens`: one observed request's input,
+including cached input, separately from cumulative usage. Adapters deduplicate
+request observations before normalization; repeated/streamed usage must not
+create additional samples. `ContextWindowTokens` is an optional reported model
+window, not a configured compaction threshold. A compaction event may carry a
+provider-reported pre-compaction count in `ContextTokens` and a fixed
+`CompactionTrigger` (`auto` or `manual`); absent or unsupported metadata remains
+unknown. Shared context profiling owns growth, recovery, and coverage policy.
 Tool names pass through `normalizedToolName`, which replaces MCP names with a
 digest. A tool output that never ran carries a fixed `Refusal` label
 (`declined-by-user`, `denied-by-permission`, or `blocked-by-hook`) instead of

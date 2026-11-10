@@ -76,6 +76,13 @@ type normalizedSessionEvent struct {
 	WorkingDirectories            []string
 	InRepositoryScope             bool
 	RepositoryScopeKnown          bool
+
+	// ContextTokens is one request's input (including cached input) on a
+	// token event, or the provider's pre-compaction count on a compaction.
+	// Zero means unavailable; cumulative usage is never used as a fallback.
+	ContextTokens       int64
+	ContextWindowTokens int64 // reported model window, not a compaction setting
+	CompactionTrigger   string
 }
 
 // normalizedGuidanceArtifact is a privacy-safe identity for context loaded by

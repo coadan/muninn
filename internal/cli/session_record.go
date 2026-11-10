@@ -34,6 +34,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	}
 	record.Task = codexTaskName(workspaceRoot, record.CWD)
 	record.TokenTelemetryExcluded = hasImplausibleTokenTelemetry(session.Events, since, generatedAt)
+	record.ContextProfile = profileSessionContext(session, workspaceRoot, since, generatedAt)
 
 	previousCommandRound := 0
 	previousCommand := normalizedSessionEvent{}

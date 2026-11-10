@@ -28,7 +28,8 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.output_bytes, events.failure_reason, events.failure_context,
 		events.input_tokens, events.cached_input_tokens,
 		events.uncached_input_tokens, events.output_tokens,
-		events.reasoning_tokens, events.total_tokens, events.provider_cost_usd,
+		events.reasoning_tokens, events.total_tokens,
+		events.context_tokens, events.context_window_tokens, events.compaction_trigger, events.provider_cost_usd,
 		events.provider_api_duration_ms, events.provider_tool_duration_ms,
 		events.selector_digests,
 		events.owned_operations, events.bypassed_operations,
@@ -121,6 +122,9 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&event.Tokens.OutputTokens,
 			&event.Tokens.ReasoningTokens,
 			&event.Tokens.TotalTokens,
+			&event.ContextTokens,
+			&event.ContextWindowTokens,
+			&event.CompactionTrigger,
 			&event.Cost.CostUSD,
 			&event.Cost.APIDurationMs,
 			&event.Cost.ToolDurationMs,
@@ -218,39 +222,38 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 
 func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int64, since time.Time) ([]normalizedSessionEvent, error) {
 	bySequence := map[int]normalizedSessionEvent{}
+	selection := `SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
+		uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
+		context_tokens, context_window_tokens, compaction_trigger,
+		provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
+		working_directories, in_repository_scope FROM events `
 	queries := []string{
-		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
-			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
-			provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
-			working_directories, in_repository_scope
-		 FROM events
+		selection + `
 		 WHERE session_id = ? AND kind = 'token' AND occurred_at_ns < ?
 		 ORDER BY sequence DESC LIMIT 1`,
-		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
-			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
-			provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
-			working_directories, in_repository_scope
-		 FROM events
+		selection + `
 		 WHERE session_id = ? AND kind = 'provider_cost' AND occurred_at_ns < ?
 		 ORDER BY sequence DESC LIMIT 1`,
-		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
-			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
-			provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
-			working_directories, in_repository_scope
-		 FROM events
+		selection + `
 		 WHERE session_id = ? AND occurred_at_ns < ?
 		   AND kind <> 'provider_cost'
 		 ORDER BY sequence DESC LIMIT 1`,
-		`SELECT sequence, occurred_at_ns, kind, tool_name, input_tokens, cached_input_tokens,
-			uncached_input_tokens, output_tokens, reasoning_tokens, total_tokens,
-			provider_cost_usd, provider_api_duration_ms, provider_tool_duration_ms,
-			working_directories, in_repository_scope
-		 FROM events
+		selection + `
 		 WHERE session_id = ? AND occurred_at_ns < ?
 		   AND (
 		     working_directories <> '[]'
 		     OR (kind = 'tool_call' AND tool_name IN ('exec', 'exec_command'))
 		   )
+		 ORDER BY sequence DESC LIMIT 1`,
+		selection + `WHERE session_id = ? AND kind = 'token' AND context_tokens > 0 AND occurred_at_ns < ?
+		 ORDER BY sequence ASC LIMIT 1`,
+		selection + `WHERE session_id = ? AND kind = 'token' AND context_tokens > 0 AND occurred_at_ns < ?
+		 ORDER BY sequence DESC LIMIT 1`,
+		selection + `WHERE session_id = ? AND kind = 'compaction' AND occurred_at_ns < ?
+		 ORDER BY sequence DESC LIMIT 1`,
+		// A later re-entry alone cannot establish context continuity. Retain
+		// the last outside event so an older sample cannot bridge a scope gap.
+		selection + `WHERE session_id = ? AND in_repository_scope = 0 AND occurred_at_ns < ?
 		 ORDER BY sequence DESC LIMIT 1`,
 	}
 	for _, query := range queries {
@@ -269,6 +272,9 @@ func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int
 			&event.Tokens.OutputTokens,
 			&event.Tokens.ReasoningTokens,
 			&event.Tokens.TotalTokens,
+			&event.ContextTokens,
+			&event.ContextWindowTokens,
+			&event.CompactionTrigger,
 			&event.Cost.CostUSD,
 			&event.Cost.APIDurationMs,
 			&event.Cost.ToolDurationMs,

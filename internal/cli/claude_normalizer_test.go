@@ -137,6 +137,45 @@ func TestParseClaudeSessionNormalizesEventsAndCountsUsageOncePerMessage(t *testi
 	}
 }
 
+func TestClaudeContextSamplesDeduplicateStreamingAndIncludeCachedInput(t *testing.T) {
+	usage := func(input, write, read, output int64) map[string]any {
+		return map[string]any{"input_tokens": input, "cache_creation_input_tokens": write,
+			"cache_read_input_tokens": read, "output_tokens": output}
+	}
+	path := writeClaudeSessionFixture(t, t.TempDir(), "context", []any{
+		claudeFixtureAssistant(0, "a", "", usage(2, 8, 90, 1)),
+		claudeFixtureAssistant(1, "a", "", usage(3, 7, 110, 10)),
+		claudeFixtureAssistant(2, "a", "", usage(3, 7, 110, 10)),
+		claudeFixtureAssistant(3, "b", "end_turn", usage(5, 5, 140, 2)),
+		claudeFixtureRecord("system", 4, map[string]any{"subtype": "compact_boundary", "compactMetadata": map[string]any{"trigger": "auto", "preTokens": 190}}),
+		claudeFixtureRecord("system", 5, map[string]any{"subtype": "compact_boundary", "compactMetadata": map[string]any{"trigger": "SECRET-TRIGGER", "preTokens": -1}}),
+	})
+	session, err := parseClaudeNormalizedSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var samples []int64
+	var boundaries []normalizedSessionEvent
+	var total normalizedTokenUsage
+	for _, event := range session.Events {
+		if event.Kind == sessionEventToken {
+			total = event.Tokens
+			if event.ContextTokens > 0 {
+				samples = append(samples, event.ContextTokens)
+			}
+		} else if event.Kind == sessionEventCompaction {
+			boundaries = append(boundaries, event)
+		}
+	}
+	if len(samples) != 2 || samples[0] != 120 || samples[1] != 150 || total.InputTokens != 270 || total.OutputTokens != 12 {
+		t.Fatalf("samples=%v cumulative=%+v", samples, total)
+	}
+	if len(boundaries) != 2 || boundaries[0].ContextTokens != 190 || boundaries[0].CompactionTrigger != "auto" ||
+		boundaries[1].ContextTokens != 0 || boundaries[1].CompactionTrigger != "" {
+		t.Fatalf("invalid compaction metadata retained: %+v", boundaries)
+	}
+}
+
 func TestParseClaudeSessionMapsToolsAndFailures(t *testing.T) {
 	path := writeClaudeSessionFixture(t, t.TempDir(), "tools", claudeFixtureConversation("/workspace/app"))
 	session, err := parseClaudeNormalizedSession(path)

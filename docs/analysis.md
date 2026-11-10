@@ -90,6 +90,63 @@ owned calls, matched associations, and unmatched calls separately. The
 `(unmatched)` row retains failure, truncation, and output totals so incomplete
 operation configuration cannot hide the evidence behind a tool-level finding.
 
+## Context profile
+
+Both compact and detailed reports include `contextProfile`. It describes the
+input carried into model requests separately from cumulative token usage:
+
+- `observedInputTokens`: the distribution of observed request input, including
+  cached input.
+- `firstObservedInputTokens`: one first observed request per session, only
+  when that observation is inside the selected time window and repository
+  scope. This is a starting-context proxy: it may already contain a task,
+  inherited history, and injected guidance.
+- `peakInputTokens`: one maximum observed input per sampled session.
+- `segmentGrowthTokens`: peak input minus first input in each observed segment
+  with at least two samples. Compaction, leaving repository scope, and the
+  selected window bound segments; a completion alone does not reset context.
+- `reportedWindowTokens`: model-window values attached to sampled requests
+  where the provider reports them. These are not auto-compaction settings.
+
+Each distribution has `count`, `p50`, `p75`, `p90`, and `max`. A `count` of zero
+means no observations; its zero-valued percentiles are unavailable measurements.
+`sessionsWithSamples` and `sessionsWithoutSamples` expose coverage. A session
+already in progress at the lookback boundary can contribute request and growth
+samples without contributing a first-observed sample.
+
+`compactionRecovery` counts explicit compaction boundaries, fixed trigger labels
+(`auto`, `manual`, or `unknown`), and coverage for before/after measurements.
+The before value is the provider's pre-compaction count when available,
+otherwise the latest observed input in the same repository context. The after
+value is the first observed request following the boundary, not the exact size
+of the compaction summary. `inputReductionTokens` uses paired before/after
+values and keeps negative reductions when input grew. The source counts
+`withReportedBeforeTokens` and `withBeforeSample` distinguish the before-value
+bases; `pairedSamples` and `withAfterSample` expose missing follow-up data.
+
+Recovery windows run from a boundary through the next completion marker after
+observed request or tool activity. A new compaction, leaving repository scope,
+or the report ending censors an unfinished window. Only completed windows
+contribute distributions of request samples, tool-call attempts, read/search
+attempts, failed calls, and elapsed seconds to completion. Failures of calls
+started before the boundary and tool refusals do not count as recovery
+failures. Elapsed time includes idle time. A completion marker is an analytical
+proxy, not independent proof of successful delivery, and post-compaction work
+does not establish that compaction caused rework or information loss.
+
+Claude samples sum fresh input, cache creation, and cache reads once per
+response message; streaming corrections update that observation. Codex samples
+use `last_token_usage.input_tokens` only when cumulative input changes, avoiding
+repeated telemetry notifications. Older Codex records without last-request
+usage contribute no context sample; cumulative totals are never substituted.
+Neither provider's context profile estimates missing startup components or
+recommends a compaction threshold.
+
+```bash
+muninn analyze --provider claude --repo . --since 7d
+muninn analyze --provider codex --repo . --since 7d
+```
+
 ## Provider cost and format drift
 
 When a provider reports its own cost, the summary and each task carry
