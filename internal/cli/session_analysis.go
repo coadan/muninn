@@ -67,6 +67,7 @@ func newCodexAggregateMetrics() codexAggregateMetrics {
 		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
 		FailureReasons:               map[string]int{},
 		FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
+		ToolRefusals:                 map[string]map[string]codexOccurrenceMetrics{},
 		ProgressStalls:               map[string]codexWaitMetrics{},
 		ExpectedWaits:                map[string]codexWaitMetrics{},
 		RapidPolls:                   map[string]codexWaitMetrics{},
@@ -215,6 +216,7 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 		target.FailureReasons[reason] += count
 	}
 	addCodexFailureContexts(target.FailureContexts, record.FailureContexts)
+	addCodexFailureContexts(target.ToolRefusals, record.ToolRefusals)
 	addCodexWaitMetrics(target.ProgressStalls, record.ProgressStalls)
 	addCodexWaitMetrics(target.ExpectedWaits, record.ExpectedWaits)
 	addCodexWaitMetrics(target.RapidPolls, record.RapidPolls)

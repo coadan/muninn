@@ -65,12 +65,18 @@ for format-specific edge cases.
   are `apply_patch`; `Agent` (and the older `Task`) is `spawn_agent`; and
   `SendMessage` is `send_message`. `Read`, `Grep`, and `Glob` keep their names
   and carry the `file reads` or `search` transition family, which shared
-  analysis counts as discovery. Other tool names are kept only when they match
-  a conservative identifier pattern.
+  analysis counts as discovery. MCP tools (`mcp__<server>__<tool>`) become
+  `mcp:<digest>`, which drops the server and tool names (see
+  `normalizedToolName`). Other tool names are kept only when they match a
+  conservative identifier pattern.
 - A turn ends at an assistant `end_turn`; `compact_boundary` records are
-  compactions. A tool result the user or a permission rule declined is not
-  counted as a tool failure. Output saved to a tool-results file counts as
-  truncated.
+  compactions. Output saved to a tool-results file counts as truncated.
+- An error result for a call that never ran is a tool refusal, not a tool
+  failure. The adapter maps Claude Code's fixed result prefixes onto the
+  shared labels: "The user doesn't want to ..." is `declined-by-user`;
+  "Permission for this ..." (auto mode or a safety check) and "Permission to
+  use ... has been denied" (a permission rule) are `denied-by-permission`;
+  "PreToolUse:<Tool> hook error" is `blocked-by-hook`. Only the label is kept.
 - A subagent transcript is a `subagent` session whose parent lineage is the
   digested parent session ID. Session and agent IDs are digested immediately.
 - Claude Code's own task checkouts, `.claude/worktrees/<name>`, are treated as
@@ -88,6 +94,11 @@ Every event has a provider-independent kind and timestamp. Tool calls and
 outputs share a tool round. Token events contain cumulative
 `normalizedTokenUsage` provider totals.
 Completion and compaction events are explicit when the source exposes them.
+Tool names pass through `normalizedToolName`, which replaces MCP names with a
+digest. A tool output that never ran carries a fixed `Refusal` label
+(`declined-by-user`, `denied-by-permission`, or `blocked-by-hook`) instead of
+`Failed`; `internal/cli/tool_refusals.go` owns the labels, accounting, and
+finding. Codex does not yet map its approval rejections onto these labels.
 Candidates for commands and paths exist only during normalization and are
 reduced to privacy-safe ownership and repository-relative attribution before
 storage.

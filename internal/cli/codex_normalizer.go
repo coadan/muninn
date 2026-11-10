@@ -146,17 +146,18 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 			switch payload.Type {
 			case "function_call", "custom_tool_call":
 				toolRound++
-				name := strings.TrimSpace(payload.Name)
-				if name == "" {
-					name = "(unknown)"
+				rawName := strings.TrimSpace(payload.Name)
+				if rawName == "" {
+					rawName = "(unknown)"
 				}
+				name := normalizedToolName(rawName)
 				concurrentBatchSize := codexConcurrentToolBatchSize(name, payload.Input)
 				readTargetCandidates := codexReadTargetCandidates(name, payload.Arguments, payload.Input)
 				descriptor := indexedCodexDescriptor{
 					codexToolCallDescriptor: codexToolCallDescriptor{Name: name},
 					OccurredAt:              timestamp,
 					ToolRound:               toolRound,
-					SelectorDigests:         codexSelectorDigests(name, payload.Arguments, payload.Input),
+					SelectorDigests:         codexSelectorDigests(rawName, payload.Arguments, payload.Input),
 					CommandCandidates:       codexCommandInvocations(name, payload.Arguments, payload.Input),
 					EmitsSessionMarker:      codexEmitsExplicitSessionMarker(name, payload.Input),
 					ConcurrentBatch:         concurrentBatchSize > 0,

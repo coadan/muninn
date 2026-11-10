@@ -180,3 +180,41 @@ func TestParseCodexSessionPreservesNestedContinuationTool(t *testing.T) {
 		t.Fatalf("nested continuation attribution mismatch: %#v", session.Events)
 	}
 }
+
+func TestParseCodexSessionDropsMCPServerNameButKeepsOwnershipSelector(t *testing.T) {
+	const tool = "mcp__SECRET-MCP-SERVER__lookup"
+	sessionPath := writeCodexSessionFixture(t, t.TempDir(), "mcp", []any{
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:00Z",
+			"type":      "response_item",
+			"payload":   map[string]any{"type": "function_call", "call_id": "c1", "name": tool, "arguments": `{}`},
+		},
+		map[string]any{
+			"timestamp": "2026-07-29T08:00:01Z",
+			"type":      "response_item",
+			"payload":   map[string]any{"type": "function_call_output", "call_id": "c1", "output": "Exit code: 1"},
+		},
+	})
+	session, err := parseCodexNormalizedSession(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(session.Events) != 2 {
+		t.Fatalf("events=%#v", session.Events)
+	}
+	// Code Mode exposes tools as identifiers, so a nested MCP name has no hyphen.
+	const nestedTool = "mcp__secret_server__lookup"
+	nested := codexNestedToolContext("exec", `await tools.`+nestedTool+`({}); await tools.web__run({});`)
+	if nested != "nested tools "+normalizedToolName(nestedTool)+" + web__run" {
+		t.Fatalf("nested MCP tool name retained: %q", nested)
+	}
+	for _, event := range session.Events {
+		if event.ToolName != normalizedToolName(tool) ||
+			strings.Contains(event.ToolName+event.FailureContext, "SECRET") {
+			t.Fatalf("MCP server name retained: %#v", event)
+		}
+		if len(event.SelectorDigests) == 0 || event.SelectorDigests[0] != ownershipSelectorDigest("tool", tool) {
+			t.Fatalf("raw-name ownership selector lost: %#v", event.SelectorDigests)
+		}
+	}
+}

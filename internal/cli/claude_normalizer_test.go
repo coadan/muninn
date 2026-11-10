@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,21 @@ const (
 	claudeFixtureSession = "11111111-aaaa-bbbb-cccc-000000000001"
 	claudeFixturePrompt  = "PROMPT-SECRET please refactor the billing module"
 	claudeFixtureCommand = "grep -rn SECRET_TOKEN_VALUE /workspace/app"
+	// An MCP tool name carries the server name; neither part may be stored.
+	claudeFixtureMCPTool = "mcp__SECRET-MCP-SERVER__SECRET_MCP_TOOL"
 )
+
+// claudeFixtureMCPCalls adds a failing MCP call and an MCP call a pre-tool hook
+// blocks, after the base conversation.
+func claudeFixtureMCPCalls() []any {
+	return []any{
+		claudeFixtureAssistant(6, "msg_mcp", "tool_use", nil,
+			claudeFixtureToolUse("m1", claudeFixtureMCPTool, map[string]any{"query": "SECRET_QUERY"}),
+			claudeFixtureToolUse("m2", claudeFixtureMCPTool, map[string]any{"query": "SECRET_QUERY"})),
+		claudeFixtureToolResult(7, "m1", true, "SECRET-MCP-SERVER returned an error"),
+		claudeFixtureToolResult(7, "m2", true, "PreToolUse:"+claudeFixtureMCPTool+" hook error: SECRET_HOOK_OUTPUT"),
+	}
+}
 
 func claudeFixtureTime(second int) string {
 	return time.Date(2026, 7, 29, 8, 0, second, 0, time.UTC).Format(time.RFC3339Nano)
@@ -176,8 +191,8 @@ func TestParseClaudeSessionDeclinedAndPersistedResults(t *testing.T) {
 			t.Fatalf("unvalidated tool name retained: %q", event.ToolName)
 		}
 	}
-	if len(outputs) != 2 || outputs[0].Failed {
-		t.Fatalf("a declined call must not count as a tool failure: %#v", outputs)
+	if len(outputs) != 2 || outputs[0].Failed || outputs[0].Refusal != toolRefusalDeclinedByUser {
+		t.Fatalf("a declined call must be a refusal, not a tool failure: %#v", outputs)
 	}
 	if !outputs[1].Truncated {
 		t.Fatalf("persisted output must count as truncated: %#v", outputs[1])
@@ -213,7 +228,7 @@ func TestParseClaudeSubagentUsesDigestedLineage(t *testing.T) {
 func TestClaudeSessionAnalysisReportOmitsSessionContent(t *testing.T) {
 	root := t.TempDir()
 	sessionsDir := t.TempDir()
-	conversation := claudeFixtureConversation(root)
+	conversation := append(claudeFixtureConversation(root), claudeFixtureMCPCalls()...)
 	for _, record := range conversation {
 		record.(map[string]any)["cwd"] = root
 	}
@@ -233,9 +248,16 @@ func TestClaudeSessionAnalysisReportOmitsSessionContent(t *testing.T) {
 	}
 	summary := report.Summary
 	if report.Provider != "claude" || summary.Sessions != 1 || summary.CompletedSessions != 1 ||
-		summary.ToolCalls != 2 || summary.FailedToolCalls != 1 || summary.Compactions != 1 ||
+		summary.ToolCalls != 4 || summary.FailedToolCalls != 2 || summary.Compactions != 1 ||
 		summary.Tokens.TotalTokens != 2325 {
 		t.Fatalf("summary mismatch: %#v", summary)
+	}
+	mcpTool := normalizedToolName(claudeFixtureMCPTool)
+	if summary.ToolMetricsByName[mcpTool].Calls != 2 ||
+		summary.ToolRefusals[toolRefusalBlockedByHook][mcpTool].Count != 1 ||
+		summary.FailureContexts["tool error"]["tool "+mcpTool].Count != 1 {
+		t.Fatalf("MCP calls not accounted under %q: tools=%#v refusals=%#v failures=%#v",
+			mcpTool, summary.ToolMetricsByName, summary.ToolRefusals, summary.FailureContexts)
 	}
 	raw, err := json.Marshal(report)
 	if err != nil {
@@ -244,6 +266,7 @@ func TestClaudeSessionAnalysisReportOmitsSessionContent(t *testing.T) {
 	for _, forbidden := range []string{
 		"PROMPT-SECRET", "ASSISTANT-SECRET", "SECRET_TOKEN_VALUE", "SECRET_OLD", "SECRET_NEW",
 		claudeFixtureSession, root, "nosuchtool", sessionsDir,
+		"SECRET-MCP-SERVER", "SECRET_MCP_TOOL", "SECRET_QUERY", "SECRET_HOOK_OUTPUT",
 	} {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("report exposes %q: %s", forbidden, raw)
@@ -317,13 +340,13 @@ func TestParseClaudeSessionToleratesMalformedRecords(t *testing.T) {
 func TestClaudeSessionIndexOmitsSessionContent(t *testing.T) {
 	root := t.TempDir()
 	sessionsDir := t.TempDir()
-	conversation := claudeFixtureConversation(root)
+	conversation := append(claudeFixtureConversation(root), claudeFixtureMCPCalls()...)
 	for _, record := range conversation {
 		record.(map[string]any)["cwd"] = root
 	}
 	// A subagent transcript exercises the digested lineage keys.
 	subagent := claudeFixtureAssistant(1, "msg_sub", "end_turn", map[string]any{"input_tokens": 1, "output_tokens": 1},
-		claudeFixtureToolUse("s1", "mcp__internal-server__lookup", map[string]any{"query": "SECRET_QUERY"}))
+		claudeFixtureToolUse("s1", claudeFixtureMCPTool, map[string]any{"query": "SECRET_QUERY"}))
 	subagent["agentId"], subagent["cwd"] = "agent-secret-id", root
 	writeClaudeSessionFixture(t, sessionsDir, "main", conversation)
 	writeClaudeSessionFixture(t, sessionsDir, "agent-sub", []any{subagent})
@@ -345,6 +368,17 @@ func TestClaudeSessionIndexOmitsSessionContent(t *testing.T) {
 	if err != nil || stats.FilesIndexed != 2 {
 		t.Fatalf("stats=%#v err=%v", stats, err)
 	}
+	// The refusal label survives the index round trip; the refused call is not
+	// a failure.
+	generatedAt := time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC)
+	report, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, root, generatedAt.Add(-24*time.Hour), generatedAt, "", ownershipCatalog{}, stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.ToolRefusals[toolRefusalBlockedByHook][normalizedToolName(claudeFixtureMCPTool)].Count != 1 ||
+		report.Summary.FailedToolCalls != 2 {
+		t.Fatalf("indexed refusals=%#v failed=%d", report.Summary.ToolRefusals, report.Summary.FailedToolCalls)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -361,6 +395,7 @@ func TestClaudeSessionIndexOmitsSessionContent(t *testing.T) {
 		for _, forbidden := range []string{
 			"PROMPT-SECRET", "ASSISTANT-SECRET", "SECRET_TOKEN_VALUE", "SECRET_OLD", "SECRET_NEW",
 			"SECRET_QUERY", claudeFixtureSession, "agent-secret-id", "nosuchtool",
+			"SECRET-MCP-SERVER", "SECRET_MCP_TOOL", "SECRET_HOOK_OUTPUT",
 		} {
 			if strings.Contains(string(raw), forbidden) {
 				t.Fatalf("index%s stores %q", name, forbidden)
@@ -485,18 +520,52 @@ func TestClaudeToolCallMappingTable(t *testing.T) {
 	}
 }
 
-func TestClaudeUserDeclinedPrefixes(t *testing.T) {
-	for _, text := range []string{
-		"The user doesn't want to proceed with this tool use. The tool use was rejected.",
-		"Permission for this command was denied by a rule.",
-		"Permission for this action was not granted.",
+func TestClaudeToolRefusalLabels(t *testing.T) {
+	for text, want := range map[string]string{
+		"The user doesn't want to proceed with this tool use. The tool use was rejected.": toolRefusalDeclinedByUser,
+		"The user doesn't want to take this action right now. STOP what you are doing.":   toolRefusalDeclinedByUser,
+		"Permission for this action was denied by the auto mode classifier.":              toolRefusalDeniedByPermission,
+		"Permission for this command was denied by a safety check.":                       toolRefusalDeniedByPermission,
+		"Permission to use Bash with command make deploy has been denied.":                toolRefusalDeniedByPermission,
+		"PreToolUse:Bash hook error: blocked by policy":                                   toolRefusalBlockedByHook,
+		"PreToolUse:" + claudeFixtureMCPTool + " hook error: no":                          toolRefusalBlockedByHook,
+		// Not refusals: a real failure, a quoted prefix, and other hook phases.
+		"Exit code 1\nPermission for this is not a prefix here": "",
+		"Permission to use the cache was granted":               "",
+		"PostToolUse:Bash hook error: lint failed":              "",
+		"error: PreToolUse:Bash hook error":                     "",
 	} {
-		if !claudeUserDeclined(text) {
-			t.Fatalf("%q should be treated as declined", text)
+		if got := claudeToolRefusal(text); got != want {
+			t.Fatalf("claudeToolRefusal(%q) = %q, want %q", text, got, want)
 		}
 	}
-	if claudeUserDeclined("Exit code 1\nPermission for this is not a prefix here") {
-		t.Fatal("a failing command must not be treated as declined")
+	// The same text in a successful result is not a refusal.
+	event := claudeToolOutputEvent(claudeContentBlock{Content: mustJSON(t, "PreToolUse:Bash hook error: x")}, claudeCall{}, time.Time{}, 1)
+	if event.Refusal != "" || event.Failed {
+		t.Fatalf("non-error result classified: %#v", event)
+	}
+}
+
+func TestClaudeMCPToolNamesDropServerButKeepOwnershipSelector(t *testing.T) {
+	call, event := claudeToolCallEvent(claudeContentBlock{Type: "tool_use", ID: "x", Name: claudeFixtureMCPTool}, "/workspace/app", time.Time{}, 1)
+	if !regexp.MustCompile(`^mcp:[0-9a-f]{8}$`).MatchString(event.ToolName) || call.Name != event.ToolName {
+		t.Fatalf("MCP tool name not normalized: call=%q event=%q", call.Name, event.ToolName)
+	}
+	if strings.Contains(strings.ToLower(event.ToolName), "secret") {
+		t.Fatalf("MCP server or tool name retained: %q", event.ToolName)
+	}
+	// A configured toolCalls selector names the raw MCP tool and must still match.
+	if len(event.SelectorDigests) != 1 || event.SelectorDigests[0] != ownershipSelectorDigest("tool", claudeFixtureMCPTool) {
+		t.Fatalf("selector digests=%#v", event.SelectorDigests)
+	}
+	other := normalizedToolName("mcp__SECRET-MCP-SERVER__other_tool")
+	if other == event.ToolName || normalizedToolName(claudeFixtureMCPTool) != event.ToolName {
+		t.Fatalf("MCP names must be stable and distinct per tool: %q %q", event.ToolName, other)
+	}
+	for _, name := range []string{"Bash", "WebFetch", "exec_command", "mcp_like_but_not"} {
+		if normalizedToolName(name) != name {
+			t.Fatalf("non-MCP name %q changed to %q", name, normalizedToolName(name))
+		}
 	}
 }
 

@@ -20,9 +20,12 @@ import (
 // Tool names are mapped onto the provider-neutral vocabulary the shared
 // analysis already understands: shell commands are "exec_command", file edits
 // are "apply_patch", and subagent launch and messaging are "spawn_agent" and
-// "send_message". Other tools keep their (validated) names.
+// "send_message". MCP tools become "mcp:<digest>" (see normalizedToolName).
+// Other tools keep their (validated) names.
 
 var claudeToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
+
+var claudePreToolHookPattern = regexp.MustCompile(`^PreToolUse:[A-Za-z0-9_.:-]+ hook error`)
 
 type claudeRecord struct {
 	Type      string `json:"type"`
@@ -236,10 +239,11 @@ func claudeDominantModel(models map[string]int) string {
 func claudeToolCallEvent(block claudeContentBlock, cwd string, at time.Time, round int) (claudeCall, normalizedSessionEvent) {
 	var input claudeToolInput
 	_ = json.Unmarshal(block.Input, &input)
-	name := block.Name
-	if !claudeToolNamePattern.MatchString(name) {
-		name = "(unknown)"
+	rawName := block.Name
+	if !claudeToolNamePattern.MatchString(rawName) {
+		rawName = "(unknown)"
 	}
+	name := normalizedToolName(rawName)
 	call := claudeCall{OccurredAt: at, ToolRound: round}
 	event := normalizedSessionEvent{OccurredAt: at, Kind: sessionEventToolCall, ToolRound: round}
 	switch name {
@@ -277,7 +281,7 @@ func claudeToolCallEvent(block claudeContentBlock, cwd string, at time.Time, rou
 		}
 	}
 	if call.SelectorDigests == nil {
-		call.SelectorDigests = []string{ownershipSelectorDigest("tool", name)}
+		call.SelectorDigests = []string{ownershipSelectorDigest("tool", rawName)}
 	}
 	call.Name = name
 	event.ToolName = name
@@ -301,7 +305,11 @@ func appendNonEmpty(values []string, candidates ...string) []string {
 
 func claudeToolOutputEvent(block claudeContentBlock, call claudeCall, at time.Time, sequence int) normalizedSessionEvent {
 	text := claudeToolResultText(block.Content)
-	failed := block.IsError && !claudeUserDeclined(text)
+	refusal := ""
+	if block.IsError {
+		refusal = claudeToolRefusal(text)
+	}
+	failed := block.IsError && refusal == ""
 	event := normalizedSessionEvent{
 		Sequence:                      sequence,
 		OccurredAt:                    at,
@@ -312,6 +320,7 @@ func claudeToolOutputEvent(block claudeContentBlock, call claudeCall, at time.Ti
 		ToolRound:                     call.ToolRound,
 		CallOccurredAt:                call.OccurredAt,
 		Failed:                        failed,
+		Refusal:                       refusal,
 		Truncated:                     codexToolOutputTruncated(text) || strings.Contains(text, "<persisted-output>"),
 		OutputBytes:                   int64(len(text)),
 		SelectorDigests:               call.SelectorDigests,
@@ -340,15 +349,27 @@ func claudeShellStatusText(text string) string {
 	return "Exit code: " + rest
 }
 
-// claudeUserDeclined recognizes a tool call the user or a permission rule
-// declined. That is a workflow decision, not a tool failure.
-func claudeUserDeclined(text string) bool {
-	for _, prefix := range []string{"The user doesn't want to proceed", "Permission for this "} {
-		if strings.HasPrefix(text, prefix) {
-			return true
-		}
+// claudeToolRefusal maps the fixed result text Claude Code writes when a tool
+// call never ran onto a provider-neutral refusal label (see tool_refusals.go):
+//   - "The user doesn't want to proceed with this tool use..." and "The user
+//     doesn't want to take this action right now..." when the user declines;
+//   - "Permission for this action|command was denied by ..." (auto mode or a
+//     safety check) and "Permission to use <Tool> ... has been denied" (a
+//     permission rule);
+//   - "PreToolUse:<Tool> hook error: ..." when a pre-tool hook blocks the call.
+//
+// Only the label is kept; the text is never stored.
+func claudeToolRefusal(text string) string {
+	switch {
+	case strings.HasPrefix(text, "The user doesn't want to "):
+		return toolRefusalDeclinedByUser
+	case strings.HasPrefix(text, "Permission for this "),
+		strings.HasPrefix(text, "Permission to use ") && strings.Contains(text, " has been denied"):
+		return toolRefusalDeniedByPermission
+	case claudePreToolHookPattern.MatchString(text):
+		return toolRefusalBlockedByHook
 	}
-	return false
+	return ""
 }
 
 // claudeToolResultText flattens a tool result for transient classification and

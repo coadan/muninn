@@ -213,6 +213,7 @@ func buildSessionFindings(report codexSessionInsightsReport, config repositoryCo
 	findings = append(findings, buildHelpEffectivenessFindings(report)...)
 	findings = append(findings, buildVerificationEscalationFindings(report)...)
 	findings = append(findings, buildSearchEffectivenessFindings(report)...)
+	findings = append(findings, buildToolRefusalFindings(report)...)
 
 	verificationName, verification := dominantVerificationRepairLoop(
 		summary.DeliveryRework.VerificationChecks,
@@ -1576,6 +1577,7 @@ func diversifySessionFindings(findings []sessionFinding) []sessionFinding {
 		"skill-footprint":         4,
 		"skill-reload":            4,
 		"recurring-failure":       4,
+		"tool-refusal":            4,
 		"diagnostic-failure":      6,
 		"owned-tool":              4,
 		"owned-operation":         6,

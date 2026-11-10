@@ -59,6 +59,7 @@ type codexAggregateMetrics struct {
 	InlineOrchestrationByOwner   map[string]codexInlineMetrics                `json:"inlineOrchestrationByOwner"`
 	FailureReasons               map[string]int                               `json:"failureReasons"`
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
+	ToolRefusals                 map[string]map[string]codexOccurrenceMetrics `json:"toolRefusals"`
 	ProgressStalls               map[string]codexWaitMetrics                  `json:"progressStalls"`
 	ExpectedWaits                map[string]codexWaitMetrics                  `json:"expectedWaits"`
 	RapidPolls                   map[string]codexWaitMetrics                  `json:"rapidPolls"`
@@ -278,6 +279,7 @@ type codexSessionRecord struct {
 	InlineOrchestrationByOwner   map[string]codexInlineMetrics
 	FailureReasons               map[string]int
 	FailureContexts              map[string]map[string]int
+	ToolRefusals                 map[string]map[string]int
 	ProgressStalls               map[string]codexWaitMetrics
 	ExpectedWaits                map[string]codexWaitMetrics
 	RapidPolls                   map[string]codexWaitMetrics

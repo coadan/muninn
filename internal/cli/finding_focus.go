@@ -34,6 +34,7 @@ var sessionFocusCategories = map[string]map[string]bool{
 		"tooling-bypass":      true,
 		"help-effectiveness":  true,
 		"search-inefficiency": true,
+		"tool-refusal":        true,
 	},
 	"structure": {
 		"code-structure": true,
@@ -87,6 +88,7 @@ var preferredSessionFindingFocus = map[string]string{
 	"help-effectiveness":      "interface",
 	"verification-escalation": "loops",
 	"search-inefficiency":     "discovery",
+	"tool-refusal":            "interface",
 	"code-structure":          "structure",
 	"discovery":               "discovery",
 	"session-loop":            "loops",

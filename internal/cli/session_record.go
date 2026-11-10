@@ -191,6 +191,16 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			episode.observe(event, episodeTokens, eventOperations)
 		}
+		// A refused call never ran, so its output is no result: record the
+		// refusal but keep it out of every outcome tracker, which would read a
+		// non-failed output as a success (delivery, test run, retry, help use).
+		if event.Kind == sessionEventToolOutput && knownToolRefusal(event.Refusal) != "" {
+			if !event.CallOccurredAt.Before(since) && !event.CallOccurredAt.After(generatedAt) {
+				recordToolRefusal(&record, event)
+				helpEffectiveness.observeRefusal(&record, event, eventOperations, ownership)
+			}
+			continue
+		}
 		eventTask := ownedOperationTask(event, ownership, record.Task)
 		deliveryTracker := deliveryTrackers[eventTask]
 		if deliveryTracker == nil {
@@ -594,6 +604,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
 		FailureReasons:               map[string]int{},
 		FailureContexts:              map[string]map[string]int{},
+		ToolRefusals:                 map[string]map[string]int{},
 		ProgressStalls:               map[string]codexWaitMetrics{},
 		ExpectedWaits:                map[string]codexWaitMetrics{},
 		RapidPolls:                   map[string]codexWaitMetrics{},

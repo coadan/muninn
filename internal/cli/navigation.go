@@ -342,7 +342,7 @@ func codexNestedToolContext(toolName, input string) string {
 	}
 	var names []string
 	for _, match := range codexNestedToolCallPattern.FindAllStringSubmatch(input, -1) {
-		name := strings.ToLower(match[1])
+		name := normalizedToolName(strings.ToLower(match[1]))
 		names = appendUniqueString(names, name)
 	}
 	if len(names) == 0 {

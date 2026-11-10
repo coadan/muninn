@@ -26,7 +26,9 @@ Muninn keeps these activities distinct:
   repeated failures and successful retries;
 - explicitly configured tooling bypasses and the outcome of help lookups;
 - broad-failure-to-focused-diagnosis verification escalation;
-- search bursts split into converged and abandoned search-to-owner outcomes.
+- search bursts split into converged and abandoned search-to-owner outcomes;
+- tool calls refused before they ran, by the user, a permission policy, or a
+  pre-tool hook, kept apart from tool failures.
 
 ## Confidence and recurrence
 
@@ -132,6 +134,19 @@ search effectiveness. Generic shell-search bursts remain under the neutral
 `search` target; Muninn does not assume that any configured backend is
 preferred or exclusive. Queries, results, and raw command text are never
 retained.
+
+Tool-refusal findings count tool calls that never ran, keyed by a fixed label
+and the normalized tool name: `declined-by-user`, `denied-by-permission`, or
+`blocked-by-hook`. A refused call never ran, so its output is no result: it is
+not a tool failure and never counts as a delivery, test run, retry, or help
+outcome. A refused edit call still counts as an edit, because the refusal is
+only known from its output. A finding requires at least
+three refusals of the same tool with the same label across two sessions. A
+recurring hook block targets tooling: the hook's rule belongs where the agent
+decides, and its message should name the allowed alternative. A recurring
+permission denial targets instructions or the permission rules. A recurring
+user decline stays low confidence, because a decline can be a one-off
+judgement. The refusal message is never retained.
 
 Candidate-default findings require a long flag on at least five definitely
 attributed calls, at least two sessions, and 80% of the locally owned

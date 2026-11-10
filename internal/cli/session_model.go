@@ -1,6 +1,9 @@
 package cli
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	sessionEventToolCall   = "tool_call"
@@ -39,6 +42,7 @@ type normalizedSessionEvent struct {
 	ToolRound                     int
 	CallOccurredAt                time.Time
 	Failed                        bool
+	Refusal                       string
 	Truncated                     bool
 	OutputBytes                   int64
 	FailureReason                 string
@@ -71,4 +75,20 @@ type normalizedGuidanceArtifact struct {
 	Kind            string `json:"kind"`
 	ID              string `json:"id"`
 	EstimatedTokens int64  `json:"estimatedTokens,omitempty"`
+}
+
+// normalizedToolName is the privacy-safe tool name every adapter stores. Claude
+// Code names MCP tools "mcp__<server>__<tool>", and any provider using that form
+// gets the same treatment. Server names can reveal internal systems, so an MCP
+// name becomes "mcp:" plus
+// a short digest of the full name: distinct MCP tools stay separable in
+// per-tool metrics, but neither the server nor the tool name is retained.
+// Ownership selectors still digest the raw name, so a configured toolCalls
+// selector keeps matching.
+func normalizedToolName(name string) string {
+	name = strings.TrimSpace(name)
+	if !strings.HasPrefix(strings.ToLower(name), "mcp__") {
+		return name
+	}
+	return "mcp:" + ownershipSelectorDigest("mcp-tool", name)[:8]
 }

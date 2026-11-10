@@ -66,3 +66,62 @@ func TestBuildHelpEffectivenessFindingsRequiresMostlyIneffectiveCrossSessionHelp
 		t.Fatalf("help findings=%#v", findings)
 	}
 }
+
+func TestRefusedHelpCallsAreNotHelpOutcomes(t *testing.T) {
+	root := t.TempDir()
+	start := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	catalog := newOwnershipCatalog([]ownedToolConfig{{
+		ID:          "repo",
+		Executables: []string{"repo"},
+		Operations: []ownedOperationConfig{
+			{ID: "help", Args: []string{"help"}, Kind: "help"},
+			{ID: "test", Args: []string{"test"}},
+		},
+	}})
+	sequence := 0
+	var events []normalizedSessionEvent
+	run := func(round int, operation, refusal string) {
+		sequence += 2
+		events = append(events,
+			normalizedSessionEvent{
+				Sequence: sequence - 1, OccurredAt: start.Add(time.Duration(sequence-1) * time.Second),
+				Kind: sessionEventToolCall, ToolName: "exec_command", ToolRound: round,
+				OwnedOperations: []string{operation},
+			},
+			normalizedSessionEvent{
+				Sequence: sequence, OccurredAt: start.Add(time.Duration(sequence) * time.Second),
+				CallOccurredAt: start.Add(time.Duration(sequence-1) * time.Second),
+				Kind:           sessionEventToolOutput, ToolName: "exec_command", ToolRound: round,
+				OwnedOperations: []string{operation}, Refusal: refusal,
+			})
+	}
+	analyze := func() helpEffectivenessMetrics {
+		t.Helper()
+		record, err := sessionRecordFromNormalized(
+			normalizedSession{Provider: "codex", CWD: root, Events: events},
+			root, start.Add(-time.Hour), start.Add(time.Hour), catalog,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record.HelpEffectiveness["repo/help"]
+	}
+
+	// A refused lookup alone is no lookup at all.
+	run(1, "repo/help", toolRefusalBlockedByHook)
+	if metrics := analyze(); metrics != (helpEffectivenessMetrics{}) {
+		t.Fatalf("refused lookup counted: %#v", metrics)
+	}
+
+	// A lookup that ran, a refused second lookup and a refused use leave the
+	// first lookup pending, so the use that ran counts as its success.
+	events = nil
+	run(1, "repo/help", "")
+	run(2, "repo/help", toolRefusalDeniedByPermission)
+	run(3, "repo/test", toolRefusalDeclinedByUser)
+	run(4, "repo/test", "")
+	if metrics := analyze(); metrics.Lookups != 1 || metrics.SuccessfulUses != 1 ||
+		metrics.RepeatedLookups != 0 || metrics.AbandonedLookups != 0 || metrics.IneffectiveSessions != 0 {
+		t.Fatalf("help effectiveness=%#v", metrics)
+	}
+}
