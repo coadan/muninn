@@ -174,8 +174,11 @@ established from the outer result. Nested shell wrappers and compound commands
 do not activate observation windows, even when the wrapper itself succeeds.
 Native skill/file reads and standalone `cat` calls with literal, non-option
 operands can activate
-them after positive terminal-success evidence. Missing, null or unknown status
-and reads still pending at the observation boundary remain unconfirmed.
+them after positive terminal-success evidence. Unknown or invalid status and
+reads still pending at the observation boundary remain unconfirmed. Codex shell
+status is separated from stdout, including structured results. Claude's optional
+`is_error` follows its protocol: omission is valid success; explicit null is
+unconfirmed.
 Shell escapes, comments and expansion characters remain unconfirmed even when
 quoted; recovering those reads would require more shell interpretation.
 Successful background completion is matched to the originating load.

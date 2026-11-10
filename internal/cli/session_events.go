@@ -12,30 +12,50 @@ var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9
 var successfulReadExitCodePattern = regexp.MustCompile(`(?im)^(?:process exited with code|exit code:)\s*0[ \t]*$`)
 var readOutputBodyPattern = regexp.MustCompile(`(?im)^(?:final )?output:[ \t]*\r?$`)
 
-func codexGuidanceReadSucceeded(raw json.RawMessage, toolName string) bool {
+// Shell status is metadata, never stdout. Keep confirmation and failure
+// classification on this same boundary, including encoded JSON envelopes.
+func codexShellOutputStatusText(raw json.RawMessage, statusText, toolName string) string {
+	if toolName != "exec_command" && toolName != "write_stdin" && toolName != "wait" {
+		return statusText
+	}
+	candidate := raw
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		candidate = json.RawMessage(text)
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(candidate, &object) == nil && object != nil {
+		status := map[string]json.RawMessage{}
+		if code, ok := object["exit_code"]; ok {
+			status["exit_code"] = code
+		} else {
+			for _, key := range []string{"error", "status"} {
+				if value, ok := object[key]; ok {
+					status[key] = value
+				}
+			}
+		}
+		encoded, _ := json.Marshal(status)
+		return string(encoded)
+	}
+	header := strings.TrimSpace(text)
+	if boundary := readOutputBodyPattern.FindStringIndex(header); boundary != nil {
+		header = header[:boundary[0]]
+	}
+	return header
+}
+
+func codexGuidanceReadSucceeded(statusText, toolName string) bool {
 	if toolName != "exec_command" && toolName != "write_stdin" && toolName != "wait" {
 		return false
 	}
 	var result struct {
 		ExitCode *int `json:"exit_code"`
 	}
-	if json.Unmarshal(raw, &result) == nil {
+	if json.Unmarshal([]byte(statusText), &result) == nil {
 		return result.ExitCode != nil && *result.ExitCode == 0
 	}
-	// Only a textual provider envelope has a status header. A structured
-	// result's stdout cannot supply a missing exit_code.
-	var statusText string
-	if json.Unmarshal(raw, &statusText) != nil {
-		return false
-	}
-	header := strings.TrimSpace(statusText)
-	if boundary := readOutputBodyPattern.FindStringIndex(header); boundary != nil {
-		header = header[:boundary[0]]
-	}
-	if json.Unmarshal([]byte(header), &result) == nil {
-		return result.ExitCode != nil && *result.ExitCode == 0
-	}
-	return successfulReadExitCodePattern.MatchString(header)
+	return successfulReadExitCodePattern.MatchString(statusText)
 }
 
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)

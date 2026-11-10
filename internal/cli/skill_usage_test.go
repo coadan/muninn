@@ -68,6 +68,7 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 		name                              string
 		wrapped, compound, failed, claude bool
 		commented                         bool
+		native                            bool
 		outputMode                        string
 		commandOverride                   string
 		loads, unconfirmed                int
@@ -99,6 +100,12 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 		{name: "tilde operands unproven", commandOverride: "cat ~/extra .codex/skills/browser-qa/SKILL.md", unconfirmed: 1},
 		{name: "stdout without status header", outputMode: "stdout only", unconfirmed: 1},
 		{name: "final stdout without status header", outputMode: "final stdout only", unconfirmed: 1},
+		{name: "Claude omitted error flag", claude: true, native: true, outputMode: "omitted error flag", loads: 1},
+		{name: "Claude null error flag", claude: true, native: true, outputMode: "null error flag", unconfirmed: 1},
+		{name: "structured success with failure example", outputMode: "structured success failure example", loads: 1},
+		{name: "encoded success with failure example", outputMode: "encoded success failure example", loads: 1},
+		{name: "textual success with failure example", outputMode: "textual success failure example", loads: 1},
+		{name: "structured failure", outputMode: "structured failure", failed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, sources := t.TempDir(), t.TempDir()
@@ -152,6 +159,14 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 				result["output"] = "Output:\nexit code: 0"
 			case "final stdout only":
 				result["output"] = "Final output:\nexit code: 0"
+			case "structured success failure example":
+				result["output"] = map[string]any{"exit_code": 0, "output": "command timed out"}
+			case "encoded success failure example":
+				result["output"] = `{"exit_code":0,"output":"command timed out"}`
+			case "textual success failure example":
+				result["output"] = "Process exited with code 0\nOutput:\ncommand timed out"
+			case "structured failure":
+				result["output"] = map[string]any{"exit_code": 2, "output": "skill instructions"}
 			}
 			path := writeCodexSessionFixture(t, sources, "read-status", []any{
 				row(0, "session_meta", map[string]any{"cwd": root}), row(1, "response_item", call),
@@ -163,6 +178,15 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 				providerName = "claude"
 				at = time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
 				records := []any{claudeFixtureAssistant(1, "m1", "tool_use", nil, claudeFixtureToolUse("s1", "Bash", map[string]any{"command": command})), claudeFixtureToolResult(2, "s1", false, "ok"), claudeFixtureAssistant(3, "m2", "end_turn", map[string]any{"input_tokens": 80})}
+				if tc.native {
+					records[0] = claudeFixtureAssistant(1, "m1", "tool_use", nil, claudeFixtureToolUse("s1", "Skill", map[string]any{"skill": "browser-qa"}))
+				}
+				block := records[1].(map[string]any)["message"].(map[string]any)["content"].([]any)[0].(map[string]any)
+				if tc.outputMode == "omitted error flag" {
+					delete(block, "is_error")
+				} else if tc.outputMode == "null error flag" {
+					block["is_error"] = nil
+				}
 				if tc.outputMode == "missing" {
 					message := records[1].(map[string]any)["message"].(map[string]any)
 					delete(message["content"].([]any)[0].(map[string]any), "content")
@@ -202,6 +226,12 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 				}
 				if got.SuccessfulLoads != tc.loads || got.UnconfirmedLoadAttempts != tc.unconfirmed || got.Tokens.TotalTokens != wantTokens {
 					t.Fatalf("load confirmation=%#v want loads=%d unconfirmed=%d tokens=%d", got, tc.loads, tc.unconfirmed, wantTokens)
+				}
+				if tc.loads == 1 && report.Summary.FailedToolCalls != 0 {
+					t.Fatalf("successful read reported %d failures", report.Summary.FailedToolCalls)
+				}
+				if tc.outputMode == "structured failure" && report.Summary.FailedToolCalls != 1 {
+					t.Fatalf("failed process reported %d failures", report.Summary.FailedToolCalls)
 				}
 			}
 		})

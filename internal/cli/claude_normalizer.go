@@ -109,7 +109,7 @@ type claudeContentBlock struct {
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
-	IsError   bool            `json:"is_error"`
+	IsError   json.RawMessage `json:"is_error"`
 	Content   json.RawMessage `json:"content"`
 }
 
@@ -475,10 +475,15 @@ func appendNonEmpty(values []string, candidates ...string) []string {
 func claudeToolOutputEvent(block claudeContentBlock, call claudeCall, at time.Time, sequence int) normalizedSessionEvent {
 	text := claudeToolResultText(block.Content)
 	refusal := ""
-	if block.IsError {
+	errorStatus := bytes.TrimSpace(block.IsError)
+	isError := bytes.Equal(errorStatus, []byte("true"))
+	// The protocol's successful example omits optional is_error; explicit
+	// null is not a Boolean status. See Anthropic's handle-tool-calls docs.
+	knownSuccess := len(errorStatus) == 0 || bytes.Equal(errorStatus, []byte("false"))
+	if isError {
 		refusal = claudeToolRefusal(text)
 	}
-	failed := block.IsError && refusal == ""
+	failed := isError && refusal == ""
 	content := bytes.TrimSpace(block.Content)
 	event := normalizedSessionEvent{
 		Sequence:                      sequence,
@@ -490,7 +495,7 @@ func claudeToolOutputEvent(block claudeContentBlock, call claudeCall, at time.Ti
 		ToolRound:                     call.ToolRound,
 		CallOccurredAt:                call.OccurredAt,
 		Failed:                        failed,
-		GuidanceReadSucceeded:         !block.IsError && len(content) > 0 && (content[0] == '"' || content[0] == '['),
+		GuidanceReadSucceeded:         knownSuccess && len(content) > 0 && (content[0] == '"' || content[0] == '['),
 		Refusal:                       refusal,
 		Truncated:                     codexToolOutputTruncated(text) || strings.Contains(text, "<persisted-output>"),
 		OutputBytes:                   int64(len(text)),
