@@ -45,7 +45,9 @@ Each intervention includes a `focus` value that can be passed directly to
   highest-output bundled search/read shapes. Compact JSON includes the top five
   as `focusEvidence`. Targets inside a managed product repository expose
   `repository` and a path relative to that repository; disposable cache and
-  worktree prefixes remain internal.
+  worktree prefixes remain internal. For every provider, a read in a task
+  worktree that has since been removed still counts when the file exists at
+  its canonical repository path.
 - `--operation <tool-or-operation>` drills into one configured locally
   controlled tool or operation.
 

@@ -107,8 +107,11 @@ for format-specific edge cases.
   digested parent session ID. Session and agent IDs are digested immediately.
 - Claude Code's own task checkouts, `.claude/worktrees/<name>`, are treated as
   task worktrees like `.worktrees/<name>`: they name the task and are skipped by
-  the repository instruction scan. This is a directory convention, not a
-  provider branch.
+  the repository instruction scan. Because such a checkout is the repository
+  itself, its file targets map to the in-repository path (`pkg/...`, not
+  `.claude/worktrees/<name>/pkg/...`), so reports never show the prefix and one
+  file is one target across task checkouts. This is a directory convention,
+  not a provider branch.
 - Only structure is decoded: prompts, assistant text, thinking, and
   attachments are never parsed into the normalized model. Skill loads from the
   `Skill` tool carry no size estimate, and Claude Code has no archive or
