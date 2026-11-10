@@ -55,6 +55,7 @@ type compactSessionInsightsReport struct {
 	Since              string                         `json:"since"`
 	AnalysisScope      sessionAnalysisScope           `json:"analysisScope"`
 	Instructions       repositoryInstructionFootprint `json:"instructions"`
+	WorkbenchReviews   *workbenchReviewSummary        `json:"workbenchReviews,omitempty"`
 	Decretion          []decretionCandidate           `json:"decretionCandidates,omitempty"`
 	Summary            compactSessionSummary          `json:"summary"`
 	Outcomes           compactOutcomeSummary          `json:"outcomes"`
@@ -150,14 +151,15 @@ func analysisJSONPayload(report codexSessionInsightsReport, detailed bool) any {
 	summary := report.Summary
 	outcomes := report.Outcomes
 	compact := compactSessionInsightsReport{
-		SchemaVersion: report.SchemaVersion,
-		DetailLevel:   "summary",
-		Provider:      report.Provider,
-		GeneratedAt:   report.GeneratedAt,
-		Since:         report.Since,
-		AnalysisScope: report.AnalysisScope,
-		Instructions:  report.Instructions,
-		Decretion:     report.Decretion,
+		SchemaVersion:    report.SchemaVersion,
+		DetailLevel:      "summary",
+		Provider:         report.Provider,
+		GeneratedAt:      report.GeneratedAt,
+		Since:            report.Since,
+		AnalysisScope:    report.AnalysisScope,
+		Instructions:     report.Instructions,
+		WorkbenchReviews: report.WorkbenchReviews,
+		Decretion:        report.Decretion,
 		Summary: compactSessionSummary{
 			FilesScanned:           summary.FilesScanned,
 			FilesUnreadable:        summary.FilesUnreadable,
