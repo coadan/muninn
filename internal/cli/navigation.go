@@ -204,6 +204,8 @@ func repositoryTaskForTargetCandidates(candidates []string, cwd, repositoryRoot 
 		switch {
 		case len(parts) >= 2 && parts[0] == ".worktrees":
 			candidateTask = parts[1]
+		case len(parts) >= 3 && parts[0] == ".claude" && parts[1] == "worktrees":
+			candidateTask = parts[2]
 		case len(parts) >= 3 && parts[0] == ".workbench" && parts[1] == "worktrees":
 			candidateTask = parts[2]
 		}
@@ -245,23 +247,36 @@ func normalizeRepositoryTargetCandidates(candidates []string, cwd, repositoryRoo
 		if err != nil || !inside {
 			continue
 		}
-		if requireCurrentFile {
-			info, err := os.Stat(absolute)
-			if err != nil || info.IsDir() {
-				continue
-			}
-		}
 		relative, err := filepath.Rel(repositoryRoot, absolute)
 		if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
 			continue
 		}
-		targets = appendUniqueString(targets, canonicalRepositoryTarget(repositoryRoot, relative))
+		target := canonicalRepositoryTarget(repositoryRoot, relative)
+		// A read in a since-removed task worktree still counts when the
+		// canonical repository file exists.
+		if requireCurrentFile && !regularFileExists(absolute) &&
+			!regularFileExists(filepath.Join(repositoryRoot, filepath.FromSlash(target))) {
+			continue
+		}
+		targets = appendUniqueString(targets, target)
 	}
 	return targets
 }
 
+func regularFileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// canonicalRepositoryTarget maps a repository-relative path to the one target
+// every task checkout of that file shares. A Claude Code task worktree
+// (.claude/worktrees/<task>) is a checkout of the repository itself, so its
+// prefix always strips to the in-repository path.
 func canonicalRepositoryTarget(repositoryRoot, relative string) string {
 	parts := strings.Split(filepath.ToSlash(filepath.Clean(relative)), "/")
+	if len(parts) >= 4 && parts[0] == ".claude" && parts[1] == "worktrees" {
+		return strings.Join(parts[3:], "/")
+	}
 	repo := ""
 	remainder := []string(nil)
 	switch {
