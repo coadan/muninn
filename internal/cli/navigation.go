@@ -58,6 +58,37 @@ func codexGuidanceArtifacts(candidates []string, workingDirectories ...string) [
 	return artifacts
 }
 
+// ponytail: only literal cat operands can be confirmed from shell success.
+// Other readers/options need per-read evidence, not a larger shell interpreter.
+func guidanceReadStatusUnconfirmed(toolName, arguments, input string) bool {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	if name != "exec" && name != "exec_command" {
+		return false
+	}
+	if name == "exec" && len(codexNestedCommands(input)) > 0 {
+		return true
+	}
+	commands := codexShellCommands(name, arguments, input)
+	if len(commands) != 1 {
+		return true
+	}
+	// Reject these even when quoted: reduced coverage is cheaper and safer
+	// than interpreting escapes, expansions and shell comments here.
+	if strings.ContainsAny(commands[0], "\\\n\r#$`{}*?[]~") {
+		return true
+	}
+	tokens := standaloneForegroundCommandTokens(commands[0])
+	if len(tokens) < 2 || filepath.Base(tokens[0]) != "cat" {
+		return true
+	}
+	for _, operand := range tokens[1:] {
+		if strings.HasPrefix(operand, "-") {
+			return true
+		}
+	}
+	return false
+}
+
 func guidanceArtifactEstimatedTokens(candidate string, workingDirectories []string) int64 {
 	paths := []string{candidate}
 	if !filepath.IsAbs(candidate) {

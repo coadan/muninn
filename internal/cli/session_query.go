@@ -39,7 +39,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.operation_continues, events.targets, events.guidance_artifacts, events.inline_bytes,
 		events.concurrent_batch, events.concurrent_batch_size,
 		events.diagnostic_json,
-		events.working_directories, events.in_repository_scope
+		events.working_directories, events.in_repository_scope, events.guidance_read_succeeded
 		FROM sessions
 		JOIN sources ON sources.id = sessions.source_id
 		JOIN events ON events.session_id = sessions.id
@@ -82,6 +82,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			concurrentBatch               int
 			concurrentBatchSize           int
 			inRepositoryScope             int
+			guidanceReadSucceeded         int
 			targets                       string
 			guidanceArtifacts             string
 			diagnosticJSON                string
@@ -144,6 +145,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&diagnosticJSON,
 			&workingDirectories,
 			&inRepositoryScope,
+			&guidanceReadSucceeded,
 		)
 		if err != nil {
 			return report, fmt.Errorf("read indexed session event: %w", err)
@@ -163,6 +165,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			event.CallOccurredAt = time.Unix(0, callOccurredAtNS).UTC()
 		}
 		event.Failed = failed != 0
+		event.GuidanceReadSucceeded = guidanceReadSucceeded != 0
 		event.Truncated = truncated != 0
 		event.OperationAttributionAmbiguous = operationAttributionAmbiguous != 0
 		event.OperationContinues = operationContinues != 0

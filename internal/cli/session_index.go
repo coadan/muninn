@@ -258,8 +258,8 @@ func (store *sessionStore) replaceSession(
 		operation_attribution_ambiguous,
 		operation_continues, targets, guidance_artifacts, inline_bytes, concurrent_batch,
 		concurrent_batch_size,
-		diagnostic_json, working_directories, in_repository_scope
-		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		diagnostic_json, working_directories, in_repository_scope, guidance_read_succeeded
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare indexed session events: %w", err)
 	}
@@ -357,6 +357,7 @@ func (store *sessionStore) replaceSession(
 			diagnosticJSON,
 			string(workingDirectories),
 			boolInt(event.InRepositoryScope),
+			boolInt(event.GuidanceReadSucceeded),
 		); err != nil {
 			return fmt.Errorf("insert indexed session event: %w", err)
 		}

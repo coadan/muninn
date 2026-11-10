@@ -251,6 +251,7 @@ func addGuidanceLoadMetrics(
 		metrics.Reloads += record.SkillReloads[id]
 		metrics.ReloadTasks += record.SkillReloadTasks[id]
 		metrics.EstimatedTokens = max(metrics.EstimatedTokens, record.SkillInstructionTokens[id])
+		addSkillUsageMetrics(&metrics.UsageAfterLoad, record.SkillUsageAfterLoad[id])
 		target[id] = metrics
 	}
 }

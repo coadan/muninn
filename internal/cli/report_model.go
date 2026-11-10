@@ -135,14 +135,15 @@ type codexOccurrenceMetrics struct {
 }
 
 type guidanceLoadMetrics struct {
-	Loads                    int   `json:"loads"`
-	Tasks                    int   `json:"tasks"`
-	Reloads                  int   `json:"reloads"`
-	ReloadTasks              int   `json:"reloadTasks"`
-	EstimatedTokens          int64 `json:"estimatedTokens,omitempty"`
-	EstimatedLoadedTokens    int64 `json:"estimatedLoadedTokens,omitempty"`
-	EstimatedRedundantTokens int64 `json:"estimatedRedundantTokens,omitempty"`
-	RedundantLoadPercent     int   `json:"redundantLoadPercent,omitempty"`
+	Loads                    int               `json:"loads"`
+	Tasks                    int               `json:"tasks"`
+	Reloads                  int               `json:"reloads"`
+	ReloadTasks              int               `json:"reloadTasks"`
+	EstimatedTokens          int64             `json:"estimatedTokens,omitempty"`
+	EstimatedLoadedTokens    int64             `json:"estimatedLoadedTokens,omitempty"`
+	EstimatedRedundantTokens int64             `json:"estimatedRedundantTokens,omitempty"`
+	RedundantLoadPercent     int               `json:"redundantLoadPercent,omitempty"`
+	UsageAfterLoad           skillUsageMetrics `json:"usageAfterLoad,omitzero"`
 }
 
 type ownedOperationRetryMetrics struct {
@@ -304,6 +305,7 @@ type codexSessionRecord struct {
 	SkillReloads                 map[string]int
 	SkillReloadTasks             map[string]int
 	SkillInstructionTokens       map[string]int64
+	SkillUsageAfterLoad          map[string]skillUsageMetrics
 	InlineOrchestrationCalls     int
 	InlineOrchestrationBytes     int64
 	InlineOrchestrationMaxBytes  int64

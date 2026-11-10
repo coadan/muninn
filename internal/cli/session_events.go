@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"path/filepath"
 	"regexp"
@@ -9,6 +10,71 @@ import (
 )
 
 var nonZeroExitCodePattern = regexp.MustCompile(`(?i)"exit_code"\s*:\s*[1-9][0-9]*`)
+var successfulReadExitCodePattern = regexp.MustCompile(`(?im)^(?:process exited with code|exit code:)\s*0[ \t]*$`)
+var readOutputBodyPattern = regexp.MustCompile(`(?im)^(?:final )?output:[ \t]*\r?$`)
+
+// Shell status is metadata, never stdout. Keep confirmation and failure
+// classification on this same boundary, including encoded JSON envelopes.
+func codexShellOutputStatusText(raw json.RawMessage, statusText, toolName string) string {
+	if toolName != "exec_command" && toolName != "write_stdin" && toolName != "wait" {
+		return statusText
+	}
+	candidate := raw
+	text := statusText
+	if json.Unmarshal(raw, &text) == nil {
+		candidate = json.RawMessage(text)
+	}
+	if trimmed := bytes.TrimSpace(candidate); len(trimmed) > 0 && trimmed[0] == '[' {
+		_, designatedStatus, _ := codexToolOutputText(candidate)
+		encoded, _ := json.Marshal(designatedStatus)
+		return codexShellOutputStatusText(encoded, designatedStatus, toolName)
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(candidate, &object) == nil && object != nil {
+		var blockType string
+		_ = json.Unmarshal(object["type"], &blockType)
+		_, hasCode := object["exit_code"]
+		if !hasCode && (blockType == "input_text" || blockType == "text") {
+			var blockText *string
+			if json.Unmarshal(object["text"], &blockText) != nil || blockText == nil {
+				return ""
+			}
+			return codexShellOutputStatusText(object["text"], *blockText, toolName)
+		} else {
+			status := map[string]json.RawMessage{}
+			if code, ok := object["exit_code"]; ok {
+				status["exit_code"] = code
+			} else {
+				for _, key := range []string{"error", "status"} {
+					if value, ok := object[key]; ok {
+						status[key] = value
+					}
+				}
+			}
+			encoded, _ := json.Marshal(status)
+			return string(encoded)
+		}
+	}
+	header := strings.TrimSpace(text)
+	if boundary := readOutputBodyPattern.FindStringIndex(header); boundary != nil {
+		header = header[:boundary[0]]
+	}
+	return header
+}
+
+func codexGuidanceReadSucceeded(statusText, toolName string) bool {
+	if toolName != "exec_command" && toolName != "write_stdin" && toolName != "wait" {
+		return false
+	}
+	var result struct {
+		ExitCode *int `json:"exit_code"`
+	}
+	if json.Unmarshal([]byte(statusText), &result) == nil {
+		return result.ExitCode != nil && *result.ExitCode == 0
+	}
+	return successfulReadExitCodePattern.MatchString(statusText)
+}
+
 var nonZeroDisplayExitCodePattern = regexp.MustCompile(`(?im)^exit code:\s*[1-9][0-9]*`)
 var nonZeroProcessExitCodePattern = regexp.MustCompile(`(?i)process exited with code\s+[1-9][0-9]*`)
 var searchMissExitCodePattern = regexp.MustCompile(`(?im)(?:"exit_code"\s*:\s*1(?:[^0-9]|$)|^exit code:\s*1(?:[^0-9]|$)|process exited with code\s+1(?:[^0-9]|$))`)

@@ -957,7 +957,7 @@ func reviewOperation(event normalizedSessionEvent, operations []string) bool {
 		}
 	}
 	for _, operation := range operations {
-		if strings.HasSuffix(operation, "/comments") || strings.HasSuffix(operation, "/comments-wait") {
+		if strings.HasSuffix(operation, "/review") || strings.HasSuffix(operation, "/comments") || strings.HasSuffix(operation, "/comments-wait") {
 			return true
 		}
 	}

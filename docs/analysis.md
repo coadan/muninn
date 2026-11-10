@@ -214,6 +214,63 @@ roots. Editing an installed `SKILL.md` therefore updates footprint and
 decretion evidence without `--refresh`. When no current installed artifact can
 be resolved, Muninn retains the ingestion-time estimate rather than guessing.
 
+## Skill cost and workflow loops
+
+Use `muninn analyze --provider claude --repo . --since 7d --details` and inspect
+`summary.skillLoads` (also present per task). Each skill separates:
+
+- `estimatedTokens`, `estimatedLoadedTokens`, and `estimatedRedundantTokens`:
+  loading overhead estimated from the current skill file, not historical
+  tokenizer measurements or a billing amount.
+- `usageAfterLoad`: recorded token increments, fresh tokens, tool calls,
+  failed tool calls, review calls, review-to-edit cycles, and completed or
+  incomplete turn counts after a successful load.
+
+`unconfirmedLoadAttempts` counts candidate reads whose success cannot be
+established from the outer result. Nested shell wrappers and compound commands
+do not activate observation windows, even when the wrapper itself succeeds.
+Native skill/file reads and standalone `cat` calls with literal, non-option
+operands can activate
+them after positive terminal-success evidence. Unknown or invalid status and
+reads still pending at the observation boundary remain unconfirmed. Codex shell
+status is separated from stdout, including structured results. Claude's optional
+`is_error` follows its protocol: omission is valid success; explicit null is
+unconfirmed.
+Shell escapes, comments and expansion characters remain unconfirmed even when
+quoted; recovering those reads would require more shell interpretation.
+Successful background completion is matched to the originating load.
+This conservative coverage avoids treating failed
+nested reads as loaded instructions; zero observed usage is not proof of zero
+cost when attempts are unconfirmed.
+
+Usage starts at the successful load result and stops at compaction or session
+end. `tokenBasis: telemetry-after-load-result` describes source event order,
+not request-level attribution. Invocation telemetry emitted before the result
+is excluded; if it arrives afterward, it is included. Loading estimates and
+these observed tokens can therefore overlap and must not be added together.
+Skills stay active across turn-end
+markers, including user feedback and retakes in a multi-turn workflow.
+Reloading an active skill does not
+multiply its usage. Only loads observed in the selected repository and time
+window qualify. Implausible token streams contribute no measured tokens.
+Child sessions are not charged to their parent's skill.
+
+Several active skills can observe the same subsequent work, so their counters
+overlap and must not be added together. Later unrelated work in the same
+context can also contribute: metadata cannot identify the semantic end of a
+workflow. A completed turn is the provider's turn-end marker; it does not prove
+the task met its acceptance criteria. A review-to-edit
+cycle records sequence, not whether a review finding justified the edit.
+Review calls use the existing command-family and configured-operation rules.
+The standard `node <path>/workbench.mjs review` command is recognized directly;
+configured operations ending in `/review` also count.
+
+These are investigation leads: costly repeated review/edit cycles can identify
+a process worth shortening without retaining review comments. Compare the same
+skill before and after one small change, alongside repository checks and the
+existing delivery-quality comparison. A lower token count alone is not proof
+that the process improved.
+
 ## Error contract
 
 Successful analysis and failure timelines emit JSON to stdout. Command errors

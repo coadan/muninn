@@ -266,6 +266,24 @@ func TestCodexShellCommandFamilyUsesFixedPrivacySafeLabels(t *testing.T) {
 			want:      "review",
 		},
 		{
+			name:      "workbench review",
+			tool:      "exec_command",
+			arguments: `{"cmd":"node /tools/workbench.mjs review"}`,
+			want:      "review",
+		},
+		{
+			name:      "other script with review argument",
+			tool:      "exec_command",
+			arguments: `{"cmd":"node /tools/other.mjs review"}`,
+			want:      "other shell",
+		},
+		{
+			name:      "workbench check",
+			tool:      "exec_command",
+			arguments: `{"cmd":"node /tools/workbench.mjs check"}`,
+			want:      "other shell",
+		},
+		{
 			name:      "non-shell tool",
 			tool:      "apply_patch",
 			arguments: `{}`,

@@ -113,7 +113,7 @@ type claudeContentBlock struct {
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input"`
 	ToolUseID string          `json:"tool_use_id"`
-	IsError   bool            `json:"is_error"`
+	IsError   json.RawMessage `json:"is_error"`
 	Content   json.RawMessage `json:"content"`
 }
 
@@ -331,6 +331,9 @@ func parseClaudeNormalizedSession(path string) (normalizedSession, error) {
 				call := calls[block.ToolUseID]
 				event := claudeToolOutputEvent(block, call, timestamp, sequence)
 				background.observeOutput(block, record.ToolUseResult, call, &event)
+				if event.Failed || event.Refusal != "" || event.OperationContinues {
+					event.GuidanceReadSucceeded = false
+				}
 				session.Events = append(session.Events, event)
 				if deliveryEvent, ok := delivery.observeOutput(block, call, event); ok {
 					emit(deliveryEvent)
@@ -439,6 +442,11 @@ func claudeToolCallEvent(block claudeContentBlock, cwd string, at time.Time, rou
 		}
 		event.TargetCandidates = codexReadTargetCandidates(name, argumentText, "")
 		event.GuidanceArtifacts = codexGuidanceArtifacts(event.TargetCandidates, call.WorkingDirectories...)
+		if len(event.GuidanceArtifacts) > 0 && guidanceReadStatusUnconfirmed(name, argumentText, "") {
+			for i := range event.GuidanceArtifacts {
+				event.GuidanceArtifacts[i].OutcomeUnconfirmed = true
+			}
+		}
 		event.InlineBytes = codexInlineOrchestrationBytes(name, argumentText, "")
 	case "Edit", "MultiEdit", "Write", "NotebookEdit":
 		name = "apply_patch"
@@ -486,10 +494,16 @@ func appendNonEmpty(values []string, candidates ...string) []string {
 func claudeToolOutputEvent(block claudeContentBlock, call claudeCall, at time.Time, sequence int) normalizedSessionEvent {
 	text := claudeToolResultText(block.Content)
 	refusal := ""
-	if block.IsError {
+	errorStatus := bytes.TrimSpace(block.IsError)
+	isError := bytes.Equal(errorStatus, []byte("true"))
+	// The protocol's successful example omits optional is_error; explicit
+	// null is not a Boolean status. See Anthropic's handle-tool-calls docs.
+	knownSuccess := len(errorStatus) == 0 || bytes.Equal(errorStatus, []byte("false"))
+	if isError {
 		refusal = claudeToolRefusal(text)
 	}
-	failed := block.IsError && refusal == ""
+	failed := isError && refusal == ""
+	content := bytes.TrimSpace(block.Content)
 	event := normalizedSessionEvent{
 		Sequence:                      sequence,
 		OccurredAt:                    at,
@@ -500,6 +514,7 @@ func claudeToolOutputEvent(block claudeContentBlock, call claudeCall, at time.Ti
 		ToolRound:                     call.ToolRound,
 		CallOccurredAt:                call.OccurredAt,
 		Failed:                        failed,
+		GuidanceReadSucceeded:         knownSuccess && len(content) > 0 && (content[0] == '"' || content[0] == '['),
 		Refusal:                       refusal,
 		Truncated:                     codexToolOutputTruncated(text) || strings.Contains(text, "<persisted-output>"),
 		OutputBytes:                   int64(len(text)),

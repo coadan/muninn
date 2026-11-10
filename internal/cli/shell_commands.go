@@ -406,6 +406,9 @@ func codexShellSegmentFamily(tokens []string) string {
 				return "inline runtime"
 			}
 		}
+		if len(lowerTokens) >= 3 && filepath.Base(lowerTokens[1]) == "workbench.mjs" && lowerTokens[2] == "review" {
+			return "review"
+		}
 	case "python", "python3", "ruby":
 		for _, token := range lowerTokens[1:] {
 			if token == "-c" || token == "-e" {
