@@ -11,6 +11,15 @@ type verificationEscalationState struct {
 	broadCalls  map[int]string
 	failedBroad string
 	failedRound int
+	// focusedCalls holds escalations by tool round until the focused call's
+	// output shows that it ran; a refused focused call never counts.
+	focusedCalls map[int]pendingVerificationEscalation
+}
+
+type pendingVerificationEscalation struct {
+	pair        string
+	failedBroad string
+	failedRound int
 }
 
 func (state *verificationEscalationState) reset() {
@@ -46,18 +55,41 @@ func (state *verificationEscalationState) observeCall(
 		if state.failedBroad == "" || !sameOwnedTool(state.failedBroad, operation) {
 			return
 		}
-		pair := state.failedBroad + verificationEscalationSeparator + operation
-		record.VerificationEscalations[pair]++
-		touchSessionActivity(record.Activity, "verification-escalation", pair, event.OccurredAt)
+		if state.focusedCalls == nil {
+			state.focusedCalls = map[int]pendingVerificationEscalation{}
+		}
+		state.focusedCalls[event.ToolRound] = pendingVerificationEscalation{
+			pair:        state.failedBroad + verificationEscalationSeparator + operation,
+			failedBroad: state.failedBroad,
+			failedRound: state.failedRound,
+		}
 		state.failedBroad = ""
 		state.failedRound = 0
 	}
 }
 
+// observeRefusal restores the failed broad check a refused focused call would
+// have escalated, so the next focused call that runs can still count.
+func (state *verificationEscalationState) observeRefusal(event normalizedSessionEvent) {
+	pending, exists := state.focusedCalls[event.ToolRound]
+	if !exists {
+		return
+	}
+	delete(state.focusedCalls, event.ToolRound)
+	state.failedBroad = pending.failedBroad
+	state.failedRound = pending.failedRound
+}
+
 func (state *verificationEscalationState) observeOutput(
+	record *codexSessionRecord,
 	event normalizedSessionEvent,
 	operations []string,
 ) {
+	if pending, exists := state.focusedCalls[event.ToolRound]; exists {
+		delete(state.focusedCalls, event.ToolRound)
+		record.VerificationEscalations[pending.pair]++
+		touchSessionActivity(record.Activity, "verification-escalation", pending.pair, event.OccurredAt)
+	}
 	broad, exists := state.broadCalls[event.ToolRound]
 	if !exists {
 		return

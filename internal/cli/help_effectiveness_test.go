@@ -124,4 +124,39 @@ func TestRefusedHelpCallsAreNotHelpOutcomes(t *testing.T) {
 		metrics.RepeatedLookups != 0 || metrics.AbandonedLookups != 0 || metrics.IneffectiveSessions != 0 {
 		t.Fatalf("help effectiveness=%#v", metrics)
 	}
+
+	// Two lookups issued together, the first refused: one lookup, not repeated.
+	events = nil
+	run(1, "repo/help", "")
+	run(2, "repo/help", "")
+	events[1], events[2] = events[2], events[1] // both calls before both outputs
+	events[1].Refusal, events[2].Refusal = "", toolRefusalBlockedByHook
+	events[3].Refusal = ""
+	run(3, "repo/test", "")
+	if metrics := analyze(); metrics.Lookups != 1 || metrics.RepeatedLookups != 0 || metrics.SuccessfulUses != 1 {
+		t.Fatalf("parallel refused lookup: %#v", metrics)
+	}
+
+	// A refused use restores the lookup with its original round, so the
+	// abandonment window is not extended by a call that never ran.
+	events = nil
+	run(1, "repo/help", "")
+	run(2, "repo/test", toolRefusalDeniedByPermission)
+	run(5, "repo/test", "")
+	if metrics := analyze(); metrics.Lookups != 1 || metrics.AbandonedLookups != 1 || metrics.SuccessfulUses != 0 {
+		t.Fatalf("refused use extended the lookup window: %#v", metrics)
+	}
+
+	// A use and a newer lookup issued together, the use refused: the newer
+	// lookup stays pending and repeats the restored one.
+	events = nil
+	run(1, "repo/help", "")
+	run(2, "repo/test", toolRefusalBlockedByHook)
+	run(3, "repo/help", "")
+	events[3], events[4] = events[4], events[3] // both calls before both outputs
+	run(4, "repo/test", "")
+	if metrics := analyze(); metrics.Lookups != 2 || metrics.RepeatedLookups != 1 ||
+		metrics.SuccessfulUses != 1 || metrics.AbandonedLookups != 0 {
+		t.Fatalf("refused use overwrote a newer lookup: %#v", metrics)
+	}
 }

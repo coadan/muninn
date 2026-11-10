@@ -15,17 +15,16 @@ normalized long flag name such as `json`, but never its value or surrounding
 arguments. Code Mode calls retain only validated nested tool names and, for
 concurrent batches, the nested call count—not code, tool arguments, or result
 content. MCP tool names (`mcp__<server>__<tool>`) are stored as `mcp:` plus a
-short digest of the full name, so neither the server nor the tool name is
-stored in the index or a report. The digest is unsalted: it keeps distinct MCP
-tools apart and comparable across machines, but someone who guesses a name can
-confirm the guess by hashing it. A configured `toolCalls` selector still
-matches the raw name through its digest. A tool call that never ran because the user declined
+short digest of the full name, so neither the server nor the tool name is stored
+in the index or a report. The digest is unsalted: it keeps distinct MCP tools
+apart and comparable across machines, but someone who guesses a name can confirm
+the guess by hashing it. A configured `toolCalls` selector still matches the raw
+name through its digest. A tool call that never ran because the user declined
 it, a permission policy denied it, or a hook blocked it retains only a fixed
 refusal label, never the refusal message. External diagnostic fingerprints are
-rehashed. Structured diagnostics
-may retain validated repository-relative test-file paths, but never raw
-reports, grep text, test titles, database names, servers, absolute paths, or
-failure messages.
+rehashed. Structured diagnostics may retain validated repository-relative
+test-file paths, but never raw reports, grep text, test titles, database names,
+servers, absolute paths, or failure messages.
 
 Guidance attribution retains only a validated artifact kind and logical name.
 Repository instructions and documentation use repository-relative paths;

@@ -99,5 +99,6 @@ func normalizedToolName(name string) string {
 	if !strings.HasPrefix(strings.ToLower(name), "mcp__") {
 		return name
 	}
+	// The digest lower-cases its input, so the label ignores case.
 	return "mcp:" + ownershipSelectorDigest("mcp-tool", name)[:8]
 }

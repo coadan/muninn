@@ -17,6 +17,9 @@ type pendingHelpUse struct {
 	helpOperation string
 	operation     string
 	round         int
+	// lookup is the pending lookup this use consumed, restored if the use is
+	// refused.
+	lookup pendingHelpLookup
 }
 
 type helpEffectivenessState struct {
@@ -58,7 +61,6 @@ func (state *helpEffectivenessState) observeCall(
 		lookup := pendingHelpLookup{operation: operation, round: event.ToolRound}
 		if pending, exists := state.lookups[tool]; exists {
 			recordHelpOutcome(record, pending.operation, "repeated")
-			pending.superseded = nil
 			lookup.superseded = &pending
 		}
 		metrics := record.HelpEffectiveness[operation]
@@ -73,6 +75,7 @@ func (state *helpEffectivenessState) observeCall(
 			helpOperation: pending.operation,
 			operation:     operation,
 			round:         event.ToolRound,
+			lookup:        pending,
 		}
 		delete(state.lookups, tool)
 	}
@@ -109,8 +112,8 @@ func (state *helpEffectivenessState) observeOutput(
 }
 
 // observeRefusal undoes the call-side bookkeeping of a call that never ran (see
-// tool_refusals.go): a refused lookup is no lookup, and a refused use leaves
-// its lookup pending for the next use.
+// tool_refusals.go): a refused lookup is no lookup and un-repeats the lookup it
+// superseded, and a refused use puts its lookup back as it was.
 func (state *helpEffectivenessState) observeRefusal(
 	record *codexSessionRecord,
 	event normalizedSessionEvent,
@@ -125,30 +128,75 @@ func (state *helpEffectivenessState) observeRefusal(
 	if !ok {
 		return
 	}
-	if ownership.operationKind(operation) == "help" {
-		lookup, exists := state.lookups[tool]
-		if !exists || lookup.round != event.ToolRound {
+	if ownership.operationKind(operation) != "help" {
+		use, exists := state.uses[event.ToolRound]
+		if !exists || use.operation != operation {
 			return
 		}
-		delete(state.lookups, tool)
-		metrics := record.HelpEffectiveness[operation]
-		metrics.Lookups--
-		record.HelpEffectiveness[operation] = metrics
-		if metrics == (helpEffectivenessMetrics{}) {
-			delete(record.HelpEffectiveness, operation)
+		delete(state.uses, event.ToolRound)
+		restored := use.lookup
+		current, newer := state.lookups[tool]
+		if !newer {
+			state.lookups[tool] = restored
+			return
 		}
-		if previous := lookup.superseded; previous != nil {
-			metrics := record.HelpEffectiveness[previous.operation]
-			metrics.RepeatedLookups--
-			record.HelpEffectiveness[previous.operation] = metrics
+		// A newer lookup was issued before this refusal came back: it repeats
+		// the restored one, which becomes the oldest in its chain.
+		recordHelpOutcome(record, restored.operation, "repeated")
+		node := &current
+		for node.superseded != nil {
+			node = node.superseded
+		}
+		node.superseded = &restored
+		state.lookups[tool] = current
+		return
+	}
+	head, exists := state.lookups[tool]
+	if !exists {
+		return
+	}
+	if head.round == event.ToolRound {
+		uncountHelpLookup(record, head.operation, false)
+		delete(state.lookups, tool)
+		if previous := head.superseded; previous != nil {
+			adjustHelpMetrics(record, previous.operation, func(metrics *helpEffectivenessMetrics) { metrics.RepeatedLookups-- })
 			state.lookups[tool] = *previous
 		}
 		return
 	}
-	if use, exists := state.uses[event.ToolRound]; exists && use.operation == operation {
-		delete(state.uses, event.ToolRound)
-		state.lookups[tool] = pendingHelpLookup{operation: use.helpOperation, round: event.ToolRound}
+	// Lookups issued together: the refused one was superseded by a later one,
+	// which still repeats whatever the refused one superseded.
+	for node := &head; node.superseded != nil; node = node.superseded {
+		refused := node.superseded
+		if refused.round != event.ToolRound {
+			continue
+		}
+		uncountHelpLookup(record, refused.operation, true)
+		node.superseded = refused.superseded
+		state.lookups[tool] = head
+		return
 	}
+}
+
+// uncountHelpLookup removes a lookup that never ran, and its own "repeated"
+// outcome when a later lookup superseded it.
+func uncountHelpLookup(record *codexSessionRecord, operation string, repeated bool) {
+	adjustHelpMetrics(record, operation, func(metrics *helpEffectivenessMetrics) {
+		metrics.Lookups--
+		if repeated {
+			metrics.RepeatedLookups--
+		}
+	})
+}
+
+func adjustHelpMetrics(record *codexSessionRecord, operation string, adjust func(*helpEffectivenessMetrics)) {
+	metrics := record.HelpEffectiveness[operation]
+	adjust(&metrics)
+	if metrics == (helpEffectivenessMetrics{}) {
+		delete(record.HelpEffectiveness, operation)
+		return
+	}
+	record.HelpEffectiveness[operation] = metrics
 }
 
 func (state *helpEffectivenessState) finish(record *codexSessionRecord, terminal bool) {

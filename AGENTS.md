@@ -68,6 +68,8 @@ Muninn is a standalone CLI for privacy-safe coding-agent session analysis.
   effectiveness signals.
 - `internal/cli/search_effectiveness.go`: privacy-safe search-burst convergence
   and abandonment accounting.
+- `internal/cli/tool_refusals.go`: fixed refusal labels for tool calls that
+  never ran, their accounting, and tool-refusal findings.
 - `internal/cli/store.go`, `internal/cli/session_index.go`,
   `internal/cli/session_query.go`, and `internal/cli/failure_store.go`: SQLite
   lifecycle, derived indexing, analysis reads, and failure timelines.

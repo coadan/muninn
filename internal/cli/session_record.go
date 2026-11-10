@@ -221,6 +221,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			if !event.CallOccurredAt.Before(since) && !event.CallOccurredAt.After(generatedAt) {
 				recordToolRefusal(&record, event)
 				helpEffectiveness.observeRefusal(&record, event, eventOperations, ownership)
+				verificationEscalation.observeRefusal(event)
 			}
 			continue
 		}
@@ -396,7 +397,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			}
 			operationRetry.observeOutput(&record, event, eventOperations)
 			helpEffectiveness.observeOutput(&record, event, eventOperations, ownership)
-			verificationEscalation.observeOutput(event, eventOperations)
+			verificationEscalation.observeOutput(&record, event, eventOperations)
 			episode.observe(event, normalizedTokenUsage{}, eventOperations)
 			record.ToolOutputBytes += event.OutputBytes
 			if event.Truncated {

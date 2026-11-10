@@ -558,6 +558,9 @@ func TestClaudeMCPToolNamesDropServerButKeepOwnershipSelector(t *testing.T) {
 	if len(event.SelectorDigests) != 1 || event.SelectorDigests[0] != ownershipSelectorDigest("tool", claudeFixtureMCPTool) {
 		t.Fatalf("selector digests=%#v", event.SelectorDigests)
 	}
+	if normalizedToolName(strings.ToLower(claudeFixtureMCPTool)) != event.ToolName {
+		t.Fatal("the MCP label must not depend on case: Code Mode lower-cases nested names")
+	}
 	other := normalizedToolName("mcp__SECRET-MCP-SERVER__other_tool")
 	if other == event.ToolName || normalizedToolName(claudeFixtureMCPTool) != event.ToolName {
 		t.Fatalf("MCP names must be stable and distinct per tool: %q %q", event.ToolName, other)
