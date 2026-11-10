@@ -112,6 +112,57 @@ func TestClaudeContinuationDoesNotRepeatIndexedFlagsOrBypasses(t *testing.T) {
 	}
 }
 
+func TestClaudeReplayedLaunchDoesNotReopenOrDuplicateBackgroundTasks(t *testing.T) {
+	for _, settled := range []bool{false, true} {
+		root, sources := t.TempDir(), t.TempDir()
+		usage := map[string]any{"input_tokens": 1, "output_tokens": 1}
+		records := []any{
+			claudeFixtureAssistant(1, "m1", "tool_use", usage, claudeFixtureToolUse("b1", "Bash", map[string]any{"command": "go test ./...", "run_in_background": true})),
+			claudeFixtureBackgroundResult(2, "b1", "bgtask017", true),
+		}
+		if settled {
+			records = append(records, claudeFixtureNotification(3, "bgtask017", "completed"))
+		}
+		records = append(records, claudeFixtureBackgroundResult(4, "b1", "bgtask017", true))
+		if !settled {
+			records = append(records, claudeFixtureNotification(5, "bgtask017", "completed"))
+		}
+		records = append(records, claudeFixtureAssistant(7, "m2", "end_turn", usage))
+		for _, raw := range records {
+			raw.(map[string]any)["cwd"] = root
+		}
+		path := writeClaudeSessionFixture(t, sources, "replayed-launch", records)
+		provider, err := resolveSessionSource("claude")
+		if err != nil {
+			t.Fatal(err)
+		}
+		discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+		at := time.Date(2026, 7, 29, 8, 0, 0, 0, time.UTC)
+		direct, err := analyzeProviderSessions(provider, discovery, root, at, at.Add(time.Hour), "", ownershipCatalog{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { store.Close() })
+		stats, err := store.refresh(t.Context(), provider.Name(), discovery, root, provider, ownershipCatalog{}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, root, at, at.Add(time.Hour), "", ownershipCatalog{}, stats)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, report := range []codexSessionInsightsReport{direct, indexed} {
+			if report.Summary.AbandonedContinuations["tests"].Count != 0 || report.Summary.ShellCommandsByFamily["tests"].Calls != 1 {
+				t.Fatalf("settled=%v abandoned=%#v commands=%#v", settled, report.Summary.AbandonedContinuations, report.Summary.ShellCommandsByFamily)
+			}
+		}
+	}
+}
+
 func claudeBackgroundRecord(t *testing.T, records []any) codexSessionRecord {
 	t.Helper()
 	path := writeClaudeSessionFixture(t, t.TempDir(), "outcomes", records)
