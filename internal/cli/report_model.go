@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 115
+const codexSessionInsightsSchemaVersion = 117
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -204,27 +204,28 @@ type codexSessionInsightsSummary struct {
 }
 
 type codexSessionInsightsReport struct {
-	SchemaVersion  int                            `json:"schemaVersion"`
-	DetailLevel    string                         `json:"detailLevel"`
-	Provider       string                         `json:"provider"`
-	GeneratedAt    string                         `json:"generatedAt"`
-	Since          string                         `json:"since"`
-	AnalysisScope  sessionAnalysisScope           `json:"analysisScope"`
-	WorkspaceRoot  string                         `json:"-"`
-	SessionDirs    []string                       `json:"-"`
-	Instructions   repositoryInstructionFootprint `json:"instructions"`
-	Decretion      []decretionCandidate           `json:"decretionCandidates,omitempty"`
-	Summary        codexSessionInsightsSummary    `json:"summary"`
-	Tasks          []codexTaskInsights            `json:"tasks"`
-	Interventions  []sessionIntervention          `json:"interventions"`
-	Findings       []sessionFinding               `json:"findings"`
-	Outcomes       completionEpisodeAnalysis      `json:"outcomes"`
-	Profiles       modelEffortAnalysis            `json:"profiles"`
-	Delegation     delegationAnalysis             `json:"delegation"`
-	Diagnostics    diagnosticFailureAnalysis      `json:"diagnostics"`
-	taskEpisodes   []codexTaskEpisode
-	sessionRecords []codexSessionRecord
-	operationTasks map[string]map[string]codexOwnedOperationMetrics
+	SchemaVersion    int                            `json:"schemaVersion"`
+	DetailLevel      string                         `json:"detailLevel"`
+	Provider         string                         `json:"provider"`
+	GeneratedAt      string                         `json:"generatedAt"`
+	Since            string                         `json:"since"`
+	AnalysisScope    sessionAnalysisScope           `json:"analysisScope"`
+	WorkspaceRoot    string                         `json:"-"`
+	SessionDirs      []string                       `json:"-"`
+	Instructions     repositoryInstructionFootprint `json:"instructions"`
+	WorkbenchReviews *workbenchReviewSummary        `json:"workbenchReviews,omitempty"`
+	Decretion        []decretionCandidate           `json:"decretionCandidates,omitempty"`
+	Summary          codexSessionInsightsSummary    `json:"summary"`
+	Tasks            []codexTaskInsights            `json:"tasks"`
+	Interventions    []sessionIntervention          `json:"interventions"`
+	Findings         []sessionFinding               `json:"findings"`
+	Outcomes         completionEpisodeAnalysis      `json:"outcomes"`
+	Profiles         modelEffortAnalysis            `json:"profiles"`
+	Delegation       delegationAnalysis             `json:"delegation"`
+	Diagnostics      diagnosticFailureAnalysis      `json:"diagnostics"`
+	taskEpisodes     []codexTaskEpisode
+	sessionRecords   []codexSessionRecord
+	operationTasks   map[string]map[string]codexOwnedOperationMetrics
 }
 
 type decretionCandidate struct {
