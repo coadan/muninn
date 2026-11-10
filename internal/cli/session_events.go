@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"path/filepath"
 	"regexp"
@@ -19,24 +20,40 @@ func codexShellOutputStatusText(raw json.RawMessage, statusText, toolName string
 		return statusText
 	}
 	candidate := raw
-	var text string
+	text := statusText
 	if json.Unmarshal(raw, &text) == nil {
 		candidate = json.RawMessage(text)
 	}
+	if trimmed := bytes.TrimSpace(candidate); len(trimmed) > 0 && trimmed[0] == '[' {
+		_, designatedStatus, _ := codexToolOutputText(candidate)
+		encoded, _ := json.Marshal(designatedStatus)
+		return codexShellOutputStatusText(encoded, designatedStatus, toolName)
+	}
 	var object map[string]json.RawMessage
 	if json.Unmarshal(candidate, &object) == nil && object != nil {
-		status := map[string]json.RawMessage{}
-		if code, ok := object["exit_code"]; ok {
-			status["exit_code"] = code
+		var blockType string
+		_ = json.Unmarshal(object["type"], &blockType)
+		_, hasCode := object["exit_code"]
+		if !hasCode && (blockType == "input_text" || blockType == "text") {
+			var blockText *string
+			if json.Unmarshal(object["text"], &blockText) != nil || blockText == nil {
+				return ""
+			}
+			return codexShellOutputStatusText(object["text"], *blockText, toolName)
 		} else {
-			for _, key := range []string{"error", "status"} {
-				if value, ok := object[key]; ok {
-					status[key] = value
+			status := map[string]json.RawMessage{}
+			if code, ok := object["exit_code"]; ok {
+				status["exit_code"] = code
+			} else {
+				for _, key := range []string{"error", "status"} {
+					if value, ok := object[key]; ok {
+						status[key] = value
+					}
 				}
 			}
+			encoded, _ := json.Marshal(status)
+			return string(encoded)
 		}
-		encoded, _ := json.Marshal(status)
-		return string(encoded)
 	}
 	header := strings.TrimSpace(text)
 	if boundary := readOutputBodyPattern.FindStringIndex(header); boundary != nil {

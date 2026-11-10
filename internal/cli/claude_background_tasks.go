@@ -243,8 +243,11 @@ func claudePhysicalOutputEvent(block claudeContentBlock, call claudeCall, event 
 		name = call.Name
 	}
 	physical := claudeCall{codexToolCallDescriptor: codexToolCallDescriptor{Name: name},
-		OccurredAt: call.OccurredAt, ToolRound: call.ToolRound, WorkingDirectories: call.WorkingDirectories}
-	return claudeToolOutputEvent(block, physical, event.OccurredAt, event.Sequence)
+		OccurredAt: call.OccurredAt, WorkingDirectories: call.WorkingDirectories}
+	// Leave ToolRound unset so physical evidence cannot settle the original operation.
+	result := claudeToolOutputEvent(block, physical, event.OccurredAt, event.Sequence)
+	result.GuidanceReadSucceeded = false
+	return result
 }
 
 // notificationEvent resolves the shell task a <task-notification> reports as

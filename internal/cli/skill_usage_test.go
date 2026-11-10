@@ -106,6 +106,12 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 		{name: "encoded success with failure example", outputMode: "encoded success failure example", loads: 1},
 		{name: "textual success with failure example", outputMode: "textual success failure example", loads: 1},
 		{name: "structured failure", outputMode: "structured failure", failed: true},
+		{name: "array success", outputMode: "array success", loads: 1},
+		{name: "array failure", outputMode: "array failure", failed: true},
+		{name: "text block success", outputMode: "text block success", loads: 1},
+		{name: "text block failure", outputMode: "text block failure", failed: true},
+		{name: "array structured success", outputMode: "array structured success", loads: 1},
+		{name: "text block null", outputMode: "text block null", unconfirmed: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, sources := t.TempDir(), t.TempDir()
@@ -167,6 +173,18 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 				result["output"] = "Process exited with code 0\nOutput:\ncommand timed out"
 			case "structured failure":
 				result["output"] = map[string]any{"exit_code": 2, "output": "skill instructions"}
+			case "array success":
+				result["output"] = []any{map[string]any{"type": "input_text", "text": "Process exited with code 0"}, map[string]any{"type": "input_text", "text": "command timed out"}}
+			case "array failure":
+				result["output"] = []any{map[string]any{"type": "input_text", "text": "Process exited with code 2"}, map[string]any{"type": "input_text", "text": "skill instructions"}}
+			case "text block success":
+				result["output"] = map[string]any{"type": "input_text", "text": "Process exited with code 0\nOutput:\ncommand timed out"}
+			case "text block failure":
+				result["output"] = map[string]any{"type": "input_text", "text": "Process exited with code 2\nOutput:\nskill instructions"}
+			case "array structured success":
+				result["output"] = []any{map[string]any{"type": "input_text", "text": `{"exit_code":0,"output":"command timed out"}`}}
+			case "text block null":
+				result["output"] = map[string]any{"type": "input_text", "text": nil}
 			}
 			path := writeCodexSessionFixture(t, sources, "read-status", []any{
 				row(0, "session_meta", map[string]any{"cwd": root}), row(1, "response_item", call),
@@ -230,7 +248,7 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 				if tc.loads == 1 && report.Summary.FailedToolCalls != 0 {
 					t.Fatalf("successful read reported %d failures", report.Summary.FailedToolCalls)
 				}
-				if tc.outputMode == "structured failure" && report.Summary.FailedToolCalls != 1 {
+				if (tc.outputMode == "structured failure" || tc.outputMode == "array failure" || tc.outputMode == "text block failure") && report.Summary.FailedToolCalls != 1 {
 					t.Fatalf("failed process reported %d failures", report.Summary.FailedToolCalls)
 				}
 			}
@@ -239,14 +257,22 @@ func TestSkillUsageDoesNotAssumeNestedOrCompoundReadSuccess(t *testing.T) {
 }
 
 func TestClaudeYieldedSkillReadRequiresSuccessfulTerminalResult(t *testing.T) {
-	for _, completion := range []string{"poll completed", "notification completed", "poll failed", "cancelled", "still running"} {
+	for _, completion := range []string{"poll completed", "notification completed", "poll failed", "cancelled", "still running", "replay failed", "replay completed", "replay pending"} {
 		t.Run(completion, func(t *testing.T) {
 			root, sources := t.TempDir(), t.TempDir()
 			records := []any{
 				claudeFixtureAssistant(1, "m1", "tool_use", nil, claudeFixtureToolUse("s1", "Bash", map[string]any{"command": "cat .claude/skills/planning/SKILL.md", "run_in_background": true})),
 				claudeFixtureBackgroundResult(2, "s1", "bgtask019", true),
 			}
-			if completion == "notification completed" {
+			if completion == "replay failed" || completion == "replay completed" || completion == "replay pending" {
+				records = append(records, claudeFixtureBackgroundResult(3, "s1", "bgtask019", true),
+					claudeFixtureAssistant(4, "m-before-completion", "end_turn", map[string]any{"input_tokens": 40}))
+				if completion == "replay completed" {
+					records = append(records, claudeFixtureNotification(5, "bgtask019", "completed"))
+				} else if completion == "replay failed" {
+					records = append(records, claudeFixtureNotification(5, "bgtask019", "failed"))
+				}
+			} else if completion == "notification completed" {
 				records = append(records, claudeFixtureNotification(4, "bgtask019", "completed"))
 			} else {
 				tool, status := "TaskOutput", "completed"
@@ -261,7 +287,7 @@ func TestClaudeYieldedSkillReadRequiresSuccessfulTerminalResult(t *testing.T) {
 					claudeFixtureAssistant(3, "m2", "tool_use", nil, claudeFixtureToolUse("p1", tool, map[string]any{"task_id": "bgtask019"})),
 					claudeFixtureToolResult(4, "p1", false, "<retrieval_status>success</retrieval_status>\n<status>"+status+"</status>\n<output>skill instructions</output>"))
 			}
-			records = append(records, claudeFixtureAssistant(5, "m3", "end_turn", map[string]any{"input_tokens": 80}))
+			records = append(records, claudeFixtureAssistant(6, "m3", "end_turn", map[string]any{"input_tokens": 80}))
 			for _, raw := range records {
 				raw.(map[string]any)["cwd"] = root
 			}
@@ -292,9 +318,9 @@ func TestClaudeYieldedSkillReadRequiresSuccessfulTerminalResult(t *testing.T) {
 			for _, report := range []codexSessionInsightsReport{direct, indexed} {
 				got := report.Summary.SkillLoads["planning"].UsageAfterLoad
 				wantLoads, wantTokens, wantUnconfirmed := 0, int64(0), 0
-				if completion == "poll completed" || completion == "notification completed" {
+				if completion == "poll completed" || completion == "notification completed" || completion == "replay completed" {
 					wantLoads, wantTokens = 1, 80
-				} else if completion == "still running" {
+				} else if completion == "still running" || completion == "replay pending" {
 					wantUnconfirmed = 1
 				}
 				if got.SuccessfulLoads != wantLoads || got.Tokens.TotalTokens != wantTokens || got.UnconfirmedLoadAttempts != wantUnconfirmed || got.CompletedTurns != wantLoads {
