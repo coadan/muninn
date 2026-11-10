@@ -169,8 +169,12 @@ Use `muninn analyze --provider claude --repo . --since 7d --details` and inspect
   failed tool calls, review calls, review-to-edit cycles, and completed or
   incomplete turn counts after a successful load.
 
-Usage starts at the successful load result, excluding the request that invoked
-it, and stops at compaction or session end. Skills stay active across turn-end
+Usage starts at the successful load result and stops at compaction or session
+end. `tokenBasis: telemetry-after-load-result` describes source event order,
+not request-level attribution. Invocation telemetry emitted before the result
+is excluded; if it arrives afterward, it is included. Loading estimates and
+these observed tokens can therefore overlap and must not be added together.
+Skills stay active across turn-end
 markers, including user feedback and retakes in a multi-turn workflow.
 Reloading an active skill does not
 multiply its usage. Only loads observed in the selected repository and time

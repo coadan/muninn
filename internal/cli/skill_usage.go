@@ -4,7 +4,9 @@ package cli
 // until compaction or the end of the session. Active skills overlap: these counters must
 // not be summed across skills or interpreted as causal costs. Child sessions
 // are not attributed to a parent's skills.
+// Tokens follow telemetry order; delayed invocation telemetry can be included.
 type skillUsageMetrics struct {
+	TokenBasis       string               `json:"tokenBasis"`
 	SuccessfulLoads  int                  `json:"successfulLoads"`
 	Tokens           normalizedTokenUsage `json:"tokens"`
 	FreshTokens      int64                `json:"freshTokens"`
@@ -112,6 +114,9 @@ func (state *skillUsageState) finish(completed bool) {
 }
 
 func addSkillUsageMetrics(total *skillUsageMetrics, addition skillUsageMetrics) {
+	if addition.SuccessfulLoads > 0 {
+		total.TokenBasis = "telemetry-after-load-result"
+	}
 	total.SuccessfulLoads += addition.SuccessfulLoads
 	addNormalizedTokenUsage(&total.Tokens, addition.Tokens)
 	total.FreshTokens = total.Tokens.UncachedInputTokens + total.Tokens.OutputTokens

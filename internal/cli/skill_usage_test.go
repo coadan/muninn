@@ -13,6 +13,56 @@ func skillUsageCall(round int, id string) normalizedSessionEvent {
 		GuidanceArtifacts: []normalizedGuidanceArtifact{{Kind: "skill", ID: id}}}
 }
 
+func TestCodexSkillUsageReportsTelemetryOrderIncludingDelayedInvocation(t *testing.T) {
+	root, sources := t.TempDir(), t.TempDir()
+	at := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	row := func(second int, kind string, payload map[string]any) any {
+		return map[string]any{"timestamp": at.Add(time.Duration(second) * time.Second).Format(time.RFC3339), "type": kind, "payload": payload}
+	}
+	tokens := func(n int) map[string]any {
+		return map[string]any{"type": "token_count", "info": map[string]any{"total_token_usage": map[string]any{"input_tokens": n, "output_tokens": 0, "total_tokens": n}}}
+	}
+	path := writeCodexSessionFixture(t, sources, "delayed-skill-tokens", []any{
+		row(0, "session_meta", map[string]any{"cwd": root}),
+		row(1, "response_item", map[string]any{"type": "function_call", "call_id": "s1", "name": "exec_command", "arguments": `{"cmd":"cat .codex/skills/browser-qa/SKILL.md"}`}),
+		row(2, "response_item", map[string]any{"type": "function_call_output", "call_id": "s1", "output": "exit code: 0"}),
+		row(3, "event_msg", tokens(90)),
+		row(4, "response_item", map[string]any{"type": "function_call", "call_id": "g1", "name": "exec_command", "arguments": `{"cmd":"git status --short"}`}),
+		row(5, "response_item", map[string]any{"type": "function_call_output", "call_id": "g1", "output": "exit code: 0"}),
+		row(6, "event_msg", tokens(140)),
+		row(7, "event_msg", map[string]any{"type": "task_complete"}),
+	})
+	provider, err := resolveSessionSource("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery := sessionDiscovery{Dirs: []string{sources}, Files: []string{path}}
+	direct, err := analyzeProviderSessions(provider, discovery, root, at, at.Add(time.Hour), "", ownershipCatalog{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := openSessionStore(filepath.Join(t.TempDir(), "index.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	stats, err := store.refresh(t.Context(), provider.Name(), discovery, root, provider, ownershipCatalog{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := store.analyze(t.Context(), provider.Name(), discovery.Dirs, root, at, at.Add(time.Hour), "", ownershipCatalog{}, stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, report := range []codexSessionInsightsReport{direct, indexed} {
+		got := report.Summary.SkillLoads["browser-qa"].UsageAfterLoad
+		// Both snapshots follow the load: 90 invocation + 50 later tokens.
+		if got.TokenBasis != "telemetry-after-load-result" || got.Tokens.TotalTokens != 140 || got.ToolCalls != 1 || got.CompletedTurns != 1 {
+			t.Fatalf("observed telemetry order=%#v", got)
+		}
+	}
+}
+
 func TestClaudeSkillSeparatesInstalledLoadingEstimateFromMeasuredUsage(t *testing.T) {
 	root, sources, config := t.TempDir(), t.TempDir(), t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
