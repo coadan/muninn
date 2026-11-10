@@ -4,17 +4,15 @@
 
 # Muninn
 
-**Turn coding-agent session metadata into a privacy-safe improvement queue.**
+**Find the next improvement in your coding-agent workflow.**
 
 Muninn is a local CLI for finding avoidable cost and friction in coding-agent
 work. It examines normalized session metadata across completed tasks, identifies
 recurring patterns in tooling, instructions, discovery, verification, and
 delivery, then returns a bounded list of the changes most worth investigating.
 
-It is not a transcript reader or a surveillance tool. Muninn is designed to
-show where the workflow is losing time, context, or money without retaining the
-prompts, messages, raw commands, raw output, paths, secrets, or provider session
-identifiers that produced it.
+Analysis runs on your machine, using local session files and a local SQLite
+index.
 
 > **Status:** Codex and Claude Code are supported session providers
 > (`--provider codex`, the default, and `--provider claude`). The analysis,
@@ -50,7 +48,7 @@ focused verification step, or leave a healthy pattern alone.
 ```mermaid
 flowchart LR
     S["Coding-agent sessions"] --> A["Provider adapter"]
-    A --> N["Normalized private metadata"]
+    A --> N["Normalized session metadata"]
     N --> I["Local SQLite index"]
     I --> F["Recurring signals"]
     F --> Q["Ranked intervention queue"]
@@ -75,23 +73,6 @@ at the part of the system that can actually change.
 Related evidence consolidates into one intervention for the same configured
 operation or current code owner. A frequently edited file with no quality or
 cost evidence remains healthy demand, not a finding.
-
-## Privacy is a product boundary
-
-Muninn stores only the normalized metadata needed to improve cost per completed
-task. Reports never contain:
-
-- prompts or conversation messages;
-- raw command arguments or tool output;
-- absolute paths, provider session identifiers, or arbitrary user prose; or
-- secret values.
-
-For locally configured tools, a report may retain a fixed operation name or a
-normalized flag name such as `json`, but never the flag value or surrounding
-arguments. Provider-specific IDs and paths are used only while an adapter
-ingests a session; shared analysis operates on the normalized model.
-
-Read the [privacy and data model](docs/privacy.md) for the exact boundary.
 
 ## Start locally
 
@@ -145,16 +126,14 @@ than claiming that a tool caused an outcome. The
 [decretion experiments](docs/decretion.md) explain how to run reversible,
 evidence-backed changes.
 
-## What Muninn does—and does not—do
+## How Muninn fits into your workflow
 
 - It builds a disposable local SQLite index per repository and keeps provider
   ingestion behind an explicit adapter boundary.
-- It reports bounded evidence and fixed classifications rather than copying raw
-  session content into a report.
 - It distinguishes owned operations from generic shell activity so a finding
   targets the tool or workflow that can actually be improved.
-- It does **not** read or retain agent prose, turn into a hosted analytics
-  service, or automatically modify repositories, prompts, tools, or workflows.
+- It provides findings for you to act on; it does not automatically modify
+  repositories, prompts, tools, or workflows.
 
 Muninn helps you decide what to change next; the owning repository and its
 maintainers remain responsible for the change and its verification.
@@ -170,6 +149,8 @@ maintainers remain responsible for the change and its verification.
 - [Repository configuration](docs/repository-configuration.md) — locally owned
   tools, operations, and false-positive controls
 - [Session providers](docs/session-providers.md) — adding another harness format
+- [Privacy and data model](docs/privacy.md) — what the local index stores and
+  reports include
 
 Run `muninn --help`, `muninn analyze --help`, or `muninn failures --help` for
 the complete command reference.
