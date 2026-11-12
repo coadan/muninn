@@ -355,6 +355,115 @@ func codexInlineOrchestrationBytes(toolName, arguments, input string) int64 {
 	return int64(size)
 }
 
+var (
+	inlineScriptFileWritePattern  = regexp.MustCompile(`\.write_(?:text|bytes)\(|\bopen\((?:[^()\n]|\([^()\n]*\))*(?:,\s*|\bmode\s*=\s*)['"][wax]b?\+?['"]|\.open\(\s*['"][wax]b?\+?['"]|\bwriteFileSync\(|\bfs\.(?:promises\.)?writeFile\(|\bsed\s+-i\b|\bperl\s+-[a-z]*i`)
+	shellRedirectTargetPattern    = regexp.MustCompile(`(?:^|[^>&0-9])(?:1|&)?>{1,2}\s*([^\s&>;|)]+)`)
+	teeOperandsPattern            = regexp.MustCompile(`\btee\b((?:\s+[^\s|;&<>]+)*)`)
+	inlineQuotedTextPattern       = regexp.MustCompile(`'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"`)
+	inlineCommentPattern          = regexp.MustCompile(`(?m)(?:^|\s)(?:#|//).*$`)
+	inlineFileModePattern         = regexp.MustCompile(`^['"][wax]b?\+?['"]$`)
+	inlineInterpreterPattern      = regexp.MustCompile(`\b(?:python[0-9.]*|node|ruby|perl|bun|deno|php)\b`)
+	inlineInterpreterNamePattern  = regexp.MustCompile(`^(?:python[0-9.]*|node|ruby|perl|bun|deno|php)$`)
+	inlineTripleQuotedTextPattern = regexp.MustCompile(`(?s)""".*?"""|'''.*?'''`)
+	heredocMarkerPattern          = regexp.MustCompile(`<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)['"]?`)
+)
+
+// inlineExecutableText blanks quoted text, except bare file-mode literals that
+// open() needs, and comments, so write syntax that is only mentioned in a
+// string or comment is not mistaken for a write.
+func inlineExecutableText(command string) string {
+	command = inlineTripleQuotedTextPattern.ReplaceAllStringFunc(command, func(quoted string) string {
+		return quoted[:3] + quoted[len(quoted)-3:]
+	})
+	command = inlineQuotedTextPattern.ReplaceAllStringFunc(command, func(quoted string) string {
+		if inlineFileModePattern.MatchString(quoted) {
+			return quoted
+		}
+		return quoted[:1] + quoted[len(quoted)-1:]
+	})
+	return inlineCommentPattern.ReplaceAllString(command, "")
+}
+
+// inlineScriptArguments returns each unquoted -c or -e program argument given
+// to an interpreter on an executable shell line, so a script passed as one
+// shell-quoted argument is examined as code rather than blanked as quoted text.
+func inlineScriptArguments(shellLines []string) []string {
+	var texts []string
+	for _, line := range shellLines {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		for _, segment := range codexShellCommandSegments(line) {
+			interpreter := false
+			for index := 0; index+1 < len(segment); index++ {
+				if inlineInterpreterNamePattern.MatchString(filepath.Base(segment[index])) {
+					interpreter = true
+				} else if interpreter && (segment[index] == "-c" || segment[index] == "-e") {
+					texts = append(texts, segment[index+1])
+				}
+			}
+		}
+	}
+	return texts
+}
+
+// codexInlineFileEdit reports whether an inline-sized shell call writes files:
+// a heredoc redirected or teed into a file, or an embedded script or in-place
+// editor that writes files. Writing files through the shell is routine harness
+// behaviour, not orchestration: such calls are counted apart from inline
+// orchestration and never raise a finding of their own.
+func codexInlineFileEdit(toolName, arguments, input string) bool {
+	for _, command := range codexShellCommands(toolName, arguments, input) {
+		command = strings.ReplaceAll(command, "\\\n", " ")
+		// Code is the shell's own lines, the bodies of heredocs fed to an
+		// interpreter, and -c/-e program arguments. Other heredoc bodies are
+		// data, and quoted text and comments are mentions, not operations.
+		var code, shellLines []string
+		terminator, interpreted := "", false
+		for _, line := range strings.Split(command, "\n") {
+			if terminator != "" {
+				if strings.TrimSpace(line) == terminator {
+					terminator = ""
+				} else if interpreted {
+					code = append(code, line)
+				}
+				continue
+			}
+			code = append(code, line)
+			shellLines = append(shellLines, line)
+			executable := inlineExecutableText(line)
+			if !strings.Contains(executable, "<<") {
+				continue
+			}
+			if marker := heredocMarkerPattern.FindStringSubmatch(line); marker != nil {
+				terminator = marker[2]
+				interpreted = inlineInterpreterPattern.MatchString(executable)
+			}
+			for _, match := range teeOperandsPattern.FindAllStringSubmatch(executable, -1) {
+				for _, operand := range strings.Fields(match[1]) {
+					if !strings.HasPrefix(operand, "-") && !strings.HasPrefix(operand, "/dev/") {
+						return true
+					}
+				}
+			}
+			if !strings.Contains(executable, "cat") {
+				continue
+			}
+			for _, match := range shellRedirectTargetPattern.FindAllStringSubmatch(executable, -1) {
+				if !strings.HasPrefix(match[1], "/dev/") {
+					return true
+				}
+			}
+		}
+		for _, script := range append(inlineScriptArguments(shellLines), strings.Join(code, "\n")) {
+			if inlineScriptFileWritePattern.MatchString(inlineExecutableText(script)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func codexRoutineCodeModeWrapper(input string) bool {
 	matches := codexNestedToolCallPattern.FindAllStringSubmatch(input, -1)
 	if len(matches) == 1 && matches[0][1] == "apply_patch" {

@@ -65,6 +65,7 @@ func newCodexAggregateMetrics() codexAggregateMetrics {
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
 		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
+		ShellFileEdits:               map[string]codexInlineMetrics{},
 		FailureReasons:               map[string]int{},
 		FailureContexts:              map[string]map[string]codexOccurrenceMetrics{},
 		ToolRefusals:                 map[string]map[string]codexOccurrenceMetrics{},
@@ -219,6 +220,10 @@ func addCodexRecordMetrics(target *codexAggregateMetrics, record codexSessionRec
 	addCodexInlineMetrics(target.InlineOrchestrationByTool, record.InlineOrchestrationByTool)
 	addCodexInlineMetrics(target.InlineOrchestrationByFamily, record.InlineOrchestrationByFamily)
 	addCodexInlineMetrics(target.InlineOrchestrationByOwner, record.InlineOrchestrationByOwner)
+	addCodexInlineMetrics(target.ShellFileEdits, record.ShellFileEdits)
+	if len(record.ShellFileEdits) > 0 {
+		target.ShellFileEditSessions++
+	}
 	if record.InlineOrchestrationCalls > 0 {
 		target.InlineOrchestrationSessions++
 	}

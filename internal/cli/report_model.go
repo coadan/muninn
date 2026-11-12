@@ -2,7 +2,7 @@ package cli
 
 import "time"
 
-const codexSessionInsightsSchemaVersion = 119
+const codexSessionInsightsSchemaVersion = 120
 
 type normalizedTokenUsage struct {
 	InputTokens         int64 `json:"inputTokens"`
@@ -83,6 +83,8 @@ type codexAggregateMetrics struct {
 	InlineOrchestrationByTool    map[string]codexInlineMetrics                `json:"inlineOrchestrationByTool"`
 	InlineOrchestrationByFamily  map[string]codexInlineMetrics                `json:"inlineOrchestrationByFamily"`
 	InlineOrchestrationByOwner   map[string]codexInlineMetrics                `json:"inlineOrchestrationByOwner"`
+	ShellFileEdits               map[string]codexInlineMetrics                `json:"shellFileEdits"`
+	ShellFileEditSessions        int                                          `json:"shellFileEditSessions"`
 	FailureReasons               map[string]int                               `json:"failureReasons"`
 	FailureContexts              map[string]map[string]codexOccurrenceMetrics `json:"failureContexts"`
 	ToolRefusals                 map[string]map[string]codexOccurrenceMetrics `json:"toolRefusals"`
@@ -312,6 +314,7 @@ type codexSessionRecord struct {
 	InlineOrchestrationByTool    map[string]codexInlineMetrics
 	InlineOrchestrationByFamily  map[string]codexInlineMetrics
 	InlineOrchestrationByOwner   map[string]codexInlineMetrics
+	ShellFileEdits               map[string]codexInlineMetrics
 	FailureReasons               map[string]int
 	FailureContexts              map[string]map[string]int
 	ToolRefusals                 map[string]map[string]int

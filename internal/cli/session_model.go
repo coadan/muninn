@@ -77,6 +77,7 @@ type normalizedSessionEvent struct {
 	Targets                       []string
 	GuidanceArtifacts             []normalizedGuidanceArtifact
 	InlineBytes                   int64
+	InlineFileEdit                bool
 	Diagnostic                    *normalizedDiagnosticObservation
 	WorkingDirectories            []string
 	InRepositoryScope             bool

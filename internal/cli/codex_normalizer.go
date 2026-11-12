@@ -258,6 +258,7 @@ func parseCodexNormalizedSession(path string) (normalizedSession, error) {
 					InlineBytes:        codexInlineOrchestrationBytes(name, payload.Arguments, payload.Input),
 					WorkingDirectories: descriptor.WorkingDirectories,
 				}
+				event.InlineFileEdit = event.InlineBytes > 0 && codexInlineFileEdit(name, payload.Arguments, payload.Input)
 				if continuation {
 					event.FirstFamily = ""
 					event.LastFamily = ""

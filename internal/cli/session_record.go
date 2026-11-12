@@ -335,7 +335,9 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			if delegationOperation(event) {
 				touchSessionActivity(record.Activity, "delegation", event.ToolName, event.OccurredAt)
 			}
-			if event.InlineBytes > 0 {
+			if event.InlineBytes > 0 && event.InlineFileEdit {
+				recordInlineMetric(record.ShellFileEdits, event.ToolName, event.InlineBytes)
+			} else if event.InlineBytes > 0 {
 				record.InlineOrchestrationCalls++
 				record.InlineOrchestrationBytes += event.InlineBytes
 				record.InlineOrchestrationMaxBytes = max(record.InlineOrchestrationMaxBytes, event.InlineBytes)
@@ -720,6 +722,7 @@ func newCodexSessionRecord() codexSessionRecord {
 		InlineOrchestrationByTool:    map[string]codexInlineMetrics{},
 		InlineOrchestrationByFamily:  map[string]codexInlineMetrics{},
 		InlineOrchestrationByOwner:   map[string]codexInlineMetrics{},
+		ShellFileEdits:               map[string]codexInlineMetrics{},
 		FailureReasons:               map[string]int{},
 		FailureContexts:              map[string]map[string]int{},
 		ToolRefusals:                 map[string]map[string]int{},

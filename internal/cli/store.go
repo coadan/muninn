@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionStoreSchemaVersion = 45
+const sessionStoreSchemaVersion = 46
 
 // The stored key binds the version to the table definitions, so an index built
 // from different DDL is rebuilt even when a change forgets the version bump.
@@ -92,6 +92,7 @@ var sessionStoreTableStatements = []string{
 		targets TEXT NOT NULL DEFAULT '[]',
 		guidance_artifacts TEXT NOT NULL DEFAULT '[]',
 		inline_bytes INTEGER NOT NULL DEFAULT 0,
+		inline_file_edit INTEGER NOT NULL DEFAULT 0,
 		concurrent_batch INTEGER NOT NULL DEFAULT 0,
 		concurrent_batch_size INTEGER NOT NULL DEFAULT 0,
 		diagnostic_json TEXT NOT NULL DEFAULT '',

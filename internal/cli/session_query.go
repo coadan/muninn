@@ -36,7 +36,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		events.owned_flags, events.owned_flag_tools,
 		events.operation_task,
 		events.operation_attribution_ambiguous,
-		events.operation_continues, events.targets, events.guidance_artifacts, events.inline_bytes,
+		events.operation_continues, events.targets, events.guidance_artifacts, events.inline_bytes, events.inline_file_edit,
 		events.concurrent_batch, events.concurrent_batch_size,
 		events.diagnostic_json,
 		events.working_directories, events.in_repository_scope, events.guidance_read_succeeded
@@ -80,6 +80,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			operationTask                 string
 			operationAttributionAmbiguous int
 			operationContinues            int
+			inlineFileEdit                int
 			concurrentBatch               int
 			concurrentBatchSize           int
 			inRepositoryScope             int
@@ -142,6 +143,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 			&targets,
 			&guidanceArtifacts,
 			&event.InlineBytes,
+			&inlineFileEdit,
 			&concurrentBatch,
 			&concurrentBatchSize,
 			&diagnosticJSON,
@@ -172,6 +174,7 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		event.Truncated = truncated != 0
 		event.OperationAttributionAmbiguous = operationAttributionAmbiguous != 0
 		event.OperationContinues = operationContinues != 0
+		event.InlineFileEdit = inlineFileEdit != 0
 		event.ConcurrentBatch = concurrentBatch != 0
 		event.ConcurrentBatchSize = concurrentBatchSize
 		event.InRepositoryScope = inRepositoryScope != 0

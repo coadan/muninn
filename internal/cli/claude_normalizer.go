@@ -448,6 +448,7 @@ func claudeToolCallEvent(block claudeContentBlock, cwd string, at time.Time, rou
 			}
 		}
 		event.InlineBytes = codexInlineOrchestrationBytes(name, argumentText, "")
+		event.InlineFileEdit = event.InlineBytes > 0 && codexInlineFileEdit(name, argumentText, "")
 	case "Edit", "MultiEdit", "Write", "NotebookEdit":
 		name = "apply_patch"
 		event.TargetCandidates = appendNonEmpty(nil, input.FilePath, input.NotebookPath)
