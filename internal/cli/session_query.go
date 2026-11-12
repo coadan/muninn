@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 )
@@ -45,13 +46,28 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 		JOIN events ON events.session_id = sessions.id
 		WHERE sources.provider = ?
 		  AND sources.scope_key = ?
-		  AND events.occurred_at_ns >= ?
-		  AND events.occurred_at_ns <= ?
+		  AND events.rowid IN (
+		    SELECT rowid FROM events
+		    WHERE occurred_at_ns >= ? AND occurred_at_ns <= ?
+		    UNION ALL
+		    -- History a resumed transcript replays after the window began
+		    -- stays in the stream, as in direct analysis; analysisBoundaries
+		    -- summarizes only the prefix before the first in-window event.
+		    SELECT replayed.rowid FROM (
+		      SELECT session_id, MIN(sequence) AS first_sequence FROM events
+		      WHERE occurred_at_ns >= ? GROUP BY session_id
+		    ) AS starts
+		    JOIN events AS replayed
+		      ON replayed.session_id = starts.session_id AND replayed.sequence > starts.first_sequence
+		    WHERE replayed.occurred_at_ns < ?
+		  )
 		ORDER BY sessions.id, events.sequence`,
 		provider,
 		repositoryStoreScopeKey(workspaceRoot, ownership),
 		since.UnixNano(),
 		generatedAt.UnixNano(),
+		since.UnixNano(),
+		since.UnixNano(),
 	)
 	if err != nil {
 		return report, fmt.Errorf("query indexed sessions: %w", err)
@@ -231,6 +247,19 @@ func (store *sessionStore) analyze(ctx context.Context, provider string, session
 
 func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int64, since time.Time) ([]normalizedSessionEvent, error) {
 	bySequence := map[int]normalizedSessionEvent{}
+	// Boundaries summarize only the prefix before the first in-window event;
+	// later replayed history is part of the analyzed stream (analyze).
+	var windowStart sql.NullInt64
+	if err := store.db.QueryRowContext(ctx,
+		`SELECT MIN(sequence) FROM events WHERE session_id = ? AND occurred_at_ns >= ?`,
+		sessionID, since.UnixNano(),
+	).Scan(&windowStart); err != nil {
+		return nil, fmt.Errorf("read indexed window start: %w", err)
+	}
+	prefixEnd := int64(math.MaxInt64)
+	if windowStart.Valid {
+		prefixEnd = windowStart.Int64
+	}
 	// Family fields let a restored call be recognized as a continuation
 	// (isContinuationToolCall), which never moves the foreground scope.
 	selection := `SELECT sequence, occurred_at_ns, kind, tool_name, family, first_family, last_family,
@@ -241,38 +270,38 @@ func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int
 		working_directories, in_repository_scope FROM events `
 	queries := []string{
 		selection + `
-		 WHERE session_id = ? AND kind = 'token' AND occurred_at_ns < ?
+		 WHERE session_id = ? AND kind = 'token' AND occurred_at_ns < ? AND sequence < ?
 		 ORDER BY sequence DESC LIMIT 1`,
 		selection + `
-		 WHERE session_id = ? AND kind = 'provider_cost' AND occurred_at_ns < ?
+		 WHERE session_id = ? AND kind = 'provider_cost' AND occurred_at_ns < ? AND sequence < ?
 		 ORDER BY sequence DESC LIMIT 1`,
 		selection + `
-		 WHERE session_id = ? AND occurred_at_ns < ?
+		 WHERE session_id = ? AND occurred_at_ns < ? AND sequence < ?
 		   AND kind <> 'provider_cost'
 		 ORDER BY sequence DESC LIMIT 1`,
 		selection + `
-		 WHERE session_id = ? AND occurred_at_ns < ?
+		 WHERE session_id = ? AND occurred_at_ns < ? AND sequence < ?
 		   AND (
 		     working_directories <> '[]'
 		     OR (kind = 'tool_call' AND tool_name IN ('exec', 'exec_command'))
 		   )
 		 ORDER BY sequence DESC LIMIT 1`,
-		selection + `WHERE session_id = ? AND kind = 'token' AND context_tokens > 0 AND occurred_at_ns < ?
+		selection + `WHERE session_id = ? AND kind = 'token' AND context_tokens > 0 AND occurred_at_ns < ? AND sequence < ?
 		 ORDER BY sequence ASC LIMIT 1`,
-		selection + `WHERE session_id = ? AND kind = 'token' AND context_tokens > 0 AND occurred_at_ns < ?
+		selection + `WHERE session_id = ? AND kind = 'token' AND context_tokens > 0 AND occurred_at_ns < ? AND sequence < ?
 		 ORDER BY sequence DESC LIMIT 1`,
-		selection + `WHERE session_id = ? AND kind = 'compaction' AND occurred_at_ns < ?
+		selection + `WHERE session_id = ? AND kind = 'compaction' AND occurred_at_ns < ? AND sequence < ?
 		 ORDER BY sequence DESC LIMIT 1`,
 		// Episode censoring reads the last in-repository event before the
 		// window: a completion there means the first window task starts fresh.
-		selection + `WHERE session_id = ? AND in_repository_scope = 1 AND occurred_at_ns < ?
+		selection + `WHERE session_id = ? AND in_repository_scope = 1 AND occurred_at_ns < ? AND sequence < ?
 		   AND kind <> 'provider_cost'
 		 ORDER BY sequence DESC LIMIT 1`,
 		// A later re-entry alone cannot establish context continuity. Retain
 		// the last foreground exit so an older sample cannot bridge a scope
 		// gap. Results, deliveries and continuation calls never move the
 		// foreground (repositoryScopeForEvent), so they are no exit.
-		selection + `WHERE session_id = ? AND in_repository_scope = 0 AND occurred_at_ns < ?
+		selection + `WHERE session_id = ? AND in_repository_scope = 0 AND occurred_at_ns < ? AND sequence < ?
 		   AND kind NOT IN ('tool_output', 'delivery')
 		   AND NOT (kind = 'tool_call' AND family <> '' AND first_family = '' AND last_family = ''
 		     AND tool_name IN ('write_stdin', 'wait', 'exec'))
@@ -283,7 +312,7 @@ func (store *sessionStore) analysisBoundaries(ctx context.Context, sessionID int
 		var occurredAtNS int64
 		var workingDirectories string
 		var inRepositoryScope int
-		err := store.db.QueryRowContext(ctx, query, sessionID, since.UnixNano()).Scan(
+		err := store.db.QueryRowContext(ctx, query, sessionID, since.UnixNano(), prefixEnd).Scan(
 			&event.Sequence,
 			&occurredAtNS,
 			&event.Kind,

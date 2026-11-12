@@ -59,6 +59,13 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 	refusedEdits := refusedEditCalls(session.Events, generatedAt)
 	contextInRepositoryScope := inside
 	lastEventKind := ""
+	// A resumed transcript can replay history dated before the window after
+	// in-window activity. Replayed events still advance the cumulative token
+	// and cost counters, but censoring is decided only by pre-window events
+	// before the first event episode accounting accepts. That point is always
+	// at or after the first in-window event, from which the index streams
+	// every event, so both analysis paths apply the same rule.
+	episodeActivitySeen := false
 	for _, event := range session.Events {
 		inRepositoryScope := repositoryScopeForEvent(event, session.CWD, workspaceRoot, &contextInRepositoryScope)
 		event = withoutContinuationCallAttribution(event)
@@ -84,7 +91,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				previousTokens = event.Tokens
 				hasPreviousTokens = true
 			}
-			if inRepositoryScope {
+			if inRepositoryScope && !episodeActivitySeen {
 				episode.LeftCensored = event.Kind != sessionEventComplete
 			}
 			continue
@@ -233,6 +240,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 				episodeTokens = normalizedTokenUsage{}
 			}
 			episode.observe(event, episodeTokens, eventOperations)
+			episodeActivitySeen = true
 		}
 		skillTokens := tokenIncrement
 		if record.TokenTelemetryExcluded {
@@ -433,6 +441,7 @@ func sessionRecordFromNormalized(session normalizedSession, workspaceRoot string
 			helpEffectiveness.observeOutput(&record, event, eventOperations, ownership)
 			verificationEscalation.observeOutput(&record, event, eventOperations)
 			episode.observe(event, normalizedTokenUsage{}, eventOperations)
+			episodeActivitySeen = true
 			record.ToolOutputBytes += event.OutputBytes
 			if event.Truncated {
 				record.TruncatedToolCalls++
